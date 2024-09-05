@@ -1,0 +1,8 @@
+library(data.table)
+library(ggplot2)
+library(magrittr)
+library(rprojroot)
+library(sf)
+library(targets)
+library(terra)
+library(vegan)
