@@ -94,4 +94,19 @@ list(
                   in_interm90_dt = interm90_dt,
                   in_sprich = sprich)
   )
+  ,
+  
+  tar_target(
+    alpha_cor,
+    alphadat_merged[, list(meanS_totdur90_cor = cor(mean_S, totdur90, na.rm=T),
+                           meanS_discharge_cor = cor(mean_S, discharge, na.rm=T)
+    ),
+    by=Country]
+  )
+  ,
+
+  tar_target(
+    alpha_cor_plots,
+    plot_alpha_cor(alphadat_merged)
+  )
 )

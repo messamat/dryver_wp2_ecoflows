@@ -48,11 +48,11 @@ calc_sprich <- function(in_biodt, in_metacols) {
 # in_interm90_dt <- tar_read(interm90_dt)
 # in_sprich = tar_read(sprich)
 
-merge_alphadat <- function(in_env_dt, in_interm90_dt) {
+merge_alphadat <- function(in_env_dt, in_interm90_dt, in_sprich) {
 
   interm90_mean <- in_interm90_dt[
     , list(totdur90 = mean(TotDur, na.rm=T),
-           TotLeng90 = mean(TotLeng, na.rm=T)),
+           totleng90 = mean(TotLeng, na.rm=T)),
     by=Sites] %>%
     setnames('Sites', 'site')
 
