@@ -48,11 +48,11 @@ calc_sprich <- function(in_biodt, in_metacols) {
 # in_interm90_dt <- tar_read(interm90_dt)
 # in_sprich = tar_read(sprich)
 
-merge_alphadat <- function(in_env_dt, in_interm90_dt) {
+merge_alphadat <- function(in_env_dt, in_interm90_dt, in_sprich) {
 
   interm90_mean <- in_interm90_dt[
     , list(totdur90 = mean(TotDur, na.rm=T),
-           TotLeng90 = mean(TotLeng, na.rm=T)),
+           totleng90 = mean(TotLeng, na.rm=T)),
     by=Sites] %>%
     setnames('Sites', 'site')
 
@@ -75,3 +75,53 @@ merge_alphadat <- function(in_env_dt, in_interm90_dt) {
   
   return(merged_dat)
 }
+
+#------- plot_alpha_cor --------------------------------------------------------
+# tar_load(alphadat_merged)
+
+plot_alpha_cor_inner <- function(in_alphadat_merged_organism, x_var) {
+  #Compute simple linear regression
+  in_alphadat_merged_organism[
+    , lm_pval_ltype := fifelse(
+      coef(summary(lm(mean_S~get(x_var))))[2,4] < 0.05,
+      'solid', 'dashed'
+    ),
+    by=Country] 
+  
+  alpha_plots <- ggplot(in_alphadat_merged_organism, aes(x=get(x_var), y=mean_S)) + 
+    geom_point(size = 2) + 
+    geom_smooth(aes(linetype=lm_pval_ltype), method='lm', linewidth = 0.5, se = F) +
+    scale_linetype_identity() +
+    labs(x=x_var) +
+    facet_wrap(~Country) +
+    theme_classic()
+  
+  return(alpha_plots)
+}  
+  
+plot_alpha_cor <- function(in_alphadat_merged, out_dir) {
+  if (!dir.exists(out_dir)) {
+    dir.create(out_dir)
+  }
+  
+  #Plot relationship between each organism alpha div and totdur90 for each country
+  lapply(unique(in_alphadat_merged$organism), function(org_sel) {
+    ggsave(
+      filename = file.path(out_dir, paste0(org_sel, '_mean_S_vs_totdur90_lm_sig.png')),
+      plot = plot_alpha_cor_inner(in_alphadat_merged[organism == org_sel,],
+                                  x_var = 'totdur90') + scale_x_log10(),
+      width=10, height=10
+    )
+  })
+  
+  #Plot relationship between each organism alpha div and discharge for each country
+  lapply(unique(in_alphadat_merged$organism), function(org_sel) {
+    ggsave(
+      filename = file.path(out_dir, paste0(org_sel, '_mean_S_vs_discharge_lm_sig.png')),
+      plot = plot_alpha_cor_inner(in_alphadat_merged[organism == org_sel,],
+                                  x_var = 'discharge') + scale_x_log10(),
+      width=10, height=10
+    )
+  })
+}
+

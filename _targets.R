@@ -12,6 +12,8 @@ tar_option_set(format = "qs")
 
 metacols <- c('Campaign', 'Site', 'running_id', 'Country', 'Date',
               'summa_sample', 'Sample.ID', 'Sample_ID', 'organism')
+countries_list <- c('Croatia', 'Czech Republic', 'Finland',
+                    'France', 'Hungary', 'Spain')
 
 #--------------------------  Define targets plan -------------------------------
 list(
@@ -47,11 +49,15 @@ list(
   
   tar_target(
     interm90_data_paths,
-    lapply(c('Croatia', 'Czech Republic', 'Finland', 'France', 'Hungary', 'Spain'),
-           function(country) {
-             file.path(datdir, 'Datasets', 'Intermittence_Data',
-                       paste0(country, '_Local_Interm_90_d.csv'))
-           })
+    {path_list <- sapply(countries_list,
+                         function(country) {
+                           file.path(datdir, 'Datasets', 'Intermittence_Data',
+                                     paste0(country, '_Local_Interm_90_d.csv'))
+                         },
+                         USE.NAMES = TRUE)
+    path_list['France'] <- gsub('90_d', '90_d_corrected', path_list['France'])
+    return(path_list)
+    }
   ),
   
   #------------------------------- Read in data ----------------------------------
@@ -93,5 +99,20 @@ list(
     merge_alphadat(in_env_dt = env_dt,
                   in_interm90_dt = interm90_dt,
                   in_sprich = sprich)
+  )
+  ,
+  
+  tar_target(
+    alpha_cor,
+    alphadat_merged[, list(meanS_totdur90_cor = stats::cor(mean_S, totdur90),
+                           meanS_discharge_cor = stats::cor(mean_S, discharge)
+                           ), by=Country]
+  )
+  ,
+
+  tar_target(
+    alpha_cor_plots,
+    plot_alpha_cor(alphadat_merged,
+                   out_dir = file.path(resdir, 'Null_models'))
   )
 )
