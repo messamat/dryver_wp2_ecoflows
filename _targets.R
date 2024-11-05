@@ -97,8 +97,8 @@ list(
   tar_target(
     alphadat_merged,
     merge_alphadat(in_env_dt = env_dt,
-                  in_interm90_dt = interm90_dt,
-                  in_sprich = sprich)
+                   in_interm90_dt = interm90_dt,
+                   in_sprich = sprich)
   )
   ,
   
@@ -106,10 +106,10 @@ list(
     alpha_cor,
     alphadat_merged[, list(meanS_totdur90_cor = stats::cor(mean_S, totdur90),
                            meanS_discharge_cor = stats::cor(mean_S, discharge)
-                           ), by=Country]
+    ), by=Country]
   )
   ,
-
+  
   tar_target(
     alpha_cor_plots,
     plot_alpha_cor(alphadat_merged,
@@ -117,31 +117,37 @@ list(
   )
   ,
   
-  
   # fungi_biof_path <- file.path(datdir, 'Datasets', 'fungi_dna_Biof_removed_zero_rows_and_columns.csv')
   # fungi_biof <- fread(fungi_biof_path)
   # fungi_biof[Country == 'Czech Republic', Country := 'Czech']
   # countries_list <- unique(fungi_biof$Country)
   # fungi_biof[1:10, 1:10]
-  # 
-  # in_dt = bio_dt[[1]][Country=='France',]
-  # min_siteN=2
-  # species_col_regex='^NB.*'
-  # nsimul=20
-  # in_metacols=metacols
   
   tar_target(
     null_models,
-    lapply(bio_dt, function(organism_dt) {
-      organism_dt[, compute_null_model_inner(
-        in_dt=.SD, 
-        min_siteN=2, 
-        species_col_regex='^NB.*',
-        nsimul=20)
-        , by=Country] %>%
-        .[, Organism := 'Biofilm_fungi']
-    }) %>% rbindlist
+    lapply(
+      names(bio_dt)[!(names(bio_dt) %in% c('bac_sedi', 'bac_biof'))],
+      function(organism_type) {
+        print(organism_type)
+        organism_dt <- bio_dt[[organism_type]]
+
+        if (organism_type %in% c("bac_biof_nopools", "bac_sedi_nopools")) {
+          in_nsimul = 5; in_method = 'greedyqswap'; in_thin = 100
+        } else {
+          in_nsimul = 10; in_method = 'quasiswap'; in_thin = 1
+        }
+
+        organism_dt[, compute_null_model_inner(
+          in_dt = .SD,
+          in_metacols = metacols,
+          min_siteN = 2,
+          nsimul = in_nsimul,
+          method = in_method,
+          thin = in_thin)
+          , by = Country] %>%
+          .[, organism := organism_type]
+      }
+    )  %>% rbindlist
   )
-  
 )
 

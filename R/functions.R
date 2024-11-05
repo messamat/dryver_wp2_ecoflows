@@ -1,5 +1,6 @@
 #-------------- workflow functions ---------------------------------------------
-#path_list = tar_read(bio_data_paths)
+# path_list = tar_read(bio_data_paths)
+# in_metadata_edna <- tar_read(metadata_edna)
 
 #------ read_biodt -------------------------------------------------------------
 read_biodt <- function(path_list, in_metadata_edna) {
@@ -15,20 +16,36 @@ read_biodt <- function(path_list, in_metadata_edna) {
   dt_list$bac_biof[, c('Site', 'Campaign') := tstrsplit(V1, '_')] %>%
     setnames('V1', 'running_id')
   
+  #Standardize country names
+  country_standard <- data.table(
+    original = c("CRO", "FRA", "SPA", "CZ",  "HUN", "FIN"),
+    new = c("Croatia", 'France', "spain", "Czech", "Hungary", 'Finland')
+  )
+  in_metadata_edna <- merge(in_metadata_edna, country_standard,
+                            by.x='Country', by.y='original') %>%
+    .[, Country := new] %>%
+    .[, `:=`(new = NULL)]
+                                 
   #Remove bacteria in pools
-  dt_list$bac_sedi_nopools <- merge(dt_list$bac_sedi, 
-                                    in_metadata_edna[Sample_type=='sediment', 
-                                                     .(matchingEnvID, Habitat)],
-                                    by.x='running_id', by.y='matchingEnvID') %>%
-    .[Habitat!='pool',] %>%
-    .[, Habitat := NULL]
+  dt_list$bac_sedi <- merge(dt_list$bac_sedi, 
+                            in_metadata_edna[Sample_type=='sediment', 
+                                             .(matchingEnvID, Habitat, Country)],
+                            by.x='running_id', by.y='matchingEnvID')
+  dt_list$bac_biof <- merge(dt_list$bac_biof,
+                            in_metadata_edna[Sample_type=='biofilm',
+                                             .(matchingEnvID, Habitat, Country)],
+                            by.x='running_id', by.y='matchingEnvID')
   
-  dt_list$bac_biof_nopools <- merge(dt_list$bac_biof,
-                                    in_metadata_edna[Sample_type=='biofilm',
-                                                     .(matchingEnvID, Habitat)],
-                                    by.x='running_id', by.y='matchingEnvID') %>%
+  dt_list$bac_biof_nopools <- dt_list$bac_biof %>%
     .[Habitat!='pool',] %>%
     .[, Habitat := NULL]
+  dt_list$bac_biof[, Habitat := NULL]
+  
+  
+  dt_list$bac_sedi_nopools <- dt_list$bac_sedi %>%
+    .[Habitat!='pool',] %>%
+    .[, Habitat := NULL]
+  dt_list$bac_sedi[, Habitat := NULL]
   
   return(dt_list)
 }
@@ -128,16 +145,17 @@ plot_alpha_cor <- function(in_alphadat_merged, out_dir) {
   })
 }
 
-#metacols_sub <- names(in_dt)[names(in_dt) %in% in_metacols]
 #------ compute_null_model_inner -----------------------------------------------
 compute_null_model_inner <- function(in_dt, 
+                                     in_metacols,
                                      min_siteN, 
-                                     species_col_regex='^NB.*',
+                                     method,
+                                     thin,
                                      nsimul=999,
                                      in_dist='jac') {
   
   #Remove sampling site/dates with 0 abundance across all species
-  sp_cols <- grep(species_col_regex, names(in_dt), value=T)
+  sp_cols <- names(in_dt)[!(names(in_dt) %in% in_metacols)]
   nonnull_sites <- in_dt[,rowSums(.SD), .SDcols=sp_cols]>0
   in_dt_sub <- in_dt[nonnull_sites,] 
   #Remove rate sites
@@ -154,14 +172,16 @@ compute_null_model_inner <- function(in_dt,
   foo <-function(x, groups, ...) {
     diag(meandist(vegdist(x, in_dist, binary =TRUE), grouping = groups))
   }
-  oecosimu_out <- oecosimu(comm = com, nestfun = foo, method = "quasiswap", 
-                           nsimul = nsimul, groups = site_factorID)
+  oecosimu_out <- oecosimu(comm = com, nestfun = foo, method = method, 
+                           thin = thin, nsimul = nsimul, groups = site_factorID)
+
   
   #Format null model outputs
   oecosimu_dt <- as.data.table(oecosimu_out$oecosimu)[
     , .(statistic, z, means, pval)] %>%
     .[, `:=`(Site = names(oecosimu_out$statistic),
-             dist = in_dist)]
+             dist = in_dist
+             )]
   
   return(oecosimu_dt)
 }
