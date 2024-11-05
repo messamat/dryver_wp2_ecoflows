@@ -35,8 +35,10 @@ read_biodt <- function(path_list, in_metadata_edna) {
 
 #------ calc_sprich ------------------------------------------------------------
 calc_sprich <- function(in_biodt, in_metacols) {
+  #Get metadata columns (all except species data)
   metacols_sub <- names(in_biodt)[names(in_biodt) %in% in_metacols]
   biodt_melt <- melt(in_biodt, id.vars = metacols_sub)
+  #Compute species richness
   biodt_sprich <- biodt_melt[, list(S=sum(value>0)), 
                              by=.(Site, Campaign, organism)] %>%
     .[, mean_S := mean(S), by=Site]
@@ -49,13 +51,14 @@ calc_sprich <- function(in_biodt, in_metacols) {
 # in_sprich = tar_read(sprich)
 
 merge_alphadat <- function(in_env_dt, in_interm90_dt, in_sprich) {
-
+  #Compute mean 90-day drying duration and event length
   interm90_mean <- in_interm90_dt[
     , list(totdur90 = mean(TotDur, na.rm=T),
            totleng90 = mean(TotLeng, na.rm=T)),
     by=Sites] %>%
     setnames('Sites', 'site')
 
+  #Average environmental variables
   env_mean <- in_env_dt[
     , list(discharge = mean(discharge_l_s, na.rm=T),
            moss = mean(moss_cover, na.rm=T),
@@ -125,3 +128,40 @@ plot_alpha_cor <- function(in_alphadat_merged, out_dir) {
   })
 }
 
+#metacols_sub <- names(in_dt)[names(in_dt) %in% in_metacols]
+#------ compute_null_model_inner -----------------------------------------------
+compute_null_model_inner <- function(in_dt, 
+                                     min_siteN, 
+                                     species_col_regex='^NB.*',
+                                     nsimul=999,
+                                     in_dist='jac') {
+  
+  #Remove sampling site/dates with 0 abundance across all species
+  sp_cols <- grep(species_col_regex, names(in_dt), value=T)
+  nonnull_sites <- in_dt[,rowSums(.SD), .SDcols=sp_cols]>0
+  in_dt_sub <- in_dt[nonnull_sites,] 
+  #Remove rate sites
+  nonrare_sites <- in_dt_sub[, .N, by=Site][N >= min_siteN, Site]
+  in_dt_sub <- in_dt_sub[Site %in% nonrare_sites,]
+  site_factorID <- as.factor(in_dt_sub$Site) #Get factor for each site
+  
+  #Only keep species that occur in at least one of the sites, and sites with at least one species
+  nonnull_cols <- in_dt_sub[, lapply(.SD, sum)>0, .SDcols=sp_cols] %>%
+    names(.)[.]
+  com <- in_dt_sub[, nonnull_cols, with=F]
+  
+  #Compute null models and compare to simulations
+  foo <-function(x, groups, ...) {
+    diag(meandist(vegdist(x, in_dist, binary =TRUE), grouping = groups))
+  }
+  oecosimu_out <- oecosimu(comm = com, nestfun = foo, method = "quasiswap", 
+                           nsimul = nsimul, groups = site_factorID)
+  
+  #Format null model outputs
+  oecosimu_dt <- as.data.table(oecosimu_out$oecosimu)[
+    , .(statistic, z, means, pval)] %>%
+    .[, `:=`(Site = names(oecosimu_out$statistic),
+             dist = in_dist)]
+  
+  return(oecosimu_dt)
+}

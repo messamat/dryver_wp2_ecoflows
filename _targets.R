@@ -115,5 +115,33 @@ list(
     plot_alpha_cor(alphadat_merged,
                    out_dir = file.path(resdir, 'Null_models'))
   )
+  ,
+  
+  
+  # fungi_biof_path <- file.path(datdir, 'Datasets', 'fungi_dna_Biof_removed_zero_rows_and_columns.csv')
+  # fungi_biof <- fread(fungi_biof_path)
+  # fungi_biof[Country == 'Czech Republic', Country := 'Czech']
+  # countries_list <- unique(fungi_biof$Country)
+  # fungi_biof[1:10, 1:10]
+  # 
+  # in_dt = bio_dt[[1]][Country=='France',]
+  # min_siteN=2
+  # species_col_regex='^NB.*'
+  # nsimul=20
+  # in_metacols=metacols
+  
+  tar_target(
+    null_models,
+    lapply(bio_dt, function(organism_dt) {
+      organism_dt[, compute_null_model_inner(
+        in_dt=.SD, 
+        min_siteN=2, 
+        species_col_regex='^NB.*',
+        nsimul=20)
+        , by=Country] %>%
+        .[, Organism := 'Biofilm_fungi']
+    }) %>% rbindlist
+  )
   
 )
+
