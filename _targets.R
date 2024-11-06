@@ -1,3 +1,10 @@
+#Small changes to implement before next run
+  #L22 functions: capitalize S in spain
+  #L56 and L158 functions: catch metacols regardless of capitalization
+  #Standardize country names across all input datasets
+  #Standardize metacols across all input datasets
+
+
 library(rprojroot)
 rootdir <- rprojroot::find_root(has_dir('R'))
 setwd(rootdir)
@@ -132,9 +139,9 @@ list(
         organism_dt <- bio_dt[[organism_type]]
 
         if (organism_type %in% c("bac_biof_nopools", "bac_sedi_nopools")) {
-          in_nsimul = 5; in_method = 'greedyqswap'; in_thin = 100
+          in_nsimul = 99; in_method = 'greedyqswap'; in_thin = 100
         } else {
-          in_nsimul = 10; in_method = 'quasiswap'; in_thin = 1
+          in_nsimul = 999; in_method = 'quasiswap'; in_thin = 1
         }
 
         organism_dt[, compute_null_model_inner(
