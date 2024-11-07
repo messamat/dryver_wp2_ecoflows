@@ -7,6 +7,7 @@ SES_TotDur90 <- all[, cor.test(z, TotDur90), by=.(Country, organism)]
 SES_discharge <- all[, cor.test(z, discharge), by=.(Country, organism)] 
 
 
+<<<<<<< HEAD
 # TotLeng90
 for (in_organism in unique(in_env_null_models_dt$organism)) {
   print(in_organism)
@@ -45,6 +46,124 @@ for (in_organism in unique(in_env_null_models_dt$organism)) {
 for (in_organism in unique(in_env_null_models_dt$organism)) {
   print(in_organism)
   ss <- in_env_null_models_dt[organism == in_organism] 
+=======
+int90 <- int[, list(TotDur90 = mean(TotDur, na.rm=T),
+                    TotLeng90 = mean(TotLeng, na.rm=T)), by=.(Site, Country)]
+env_mean <- env[, list(discharge = mean(discharge_l_s, na.rm=T),
+                       moss = mean(moss_cover, na.rm=T),
+                       particle_size = mean(particle_size, na.rm=T)
+                       )
+                , by=.(Site, Country, stream_type)]
+
+all <- merge(res, int90, by=c("Site", "Country"), all.x=T, sort=F) %>%
+  merge(env_mean, by=c("Site", "Country"), all.x=T, sort=F) %>%
+  .[Site != 'BUK52', ] %>% #Intermittence indicators are missing here 
+  .[, Country := as.factor(Country)]
+
+SES_TotDur90 <- all[, cor.test(z, TotDur90), by=.(Country, organism)] 
+SES_discharge <- all[, cor.test(z, discharge), by=.(Country, organism)] 
+
+
+plt_z_by_stream_type <- function(in_dt) {
+  plots <- list()
+  for(i in levels(in_dt$Country)){
+    d <- subset(in_dt, Country == i)
+    plots[[paste0(i)]] <- ggplot(d, aes(x=z, y=Site, color=stream_type)) + 
+      scale_colour_manual(values = c("steelblue","orange")) +
+      geom_boxplot() + 
+      coord_flip() +
+      ggtitle(paste(i)) +
+      theme_classic() +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  }
+  
+  pdf(file.path(resdir, "Null_models", 
+                paste0(unique(in_dt$organism), "_SES_vs_streamtype.pdf")), 
+      height=10, width=10)
+  do.call('grid.arrange', c(plots))
+  dev.off()
+}
+
+for (in_organism in unique(all$organism)) {
+  print(in_organism)
+  plt_z_by_stream_type(in_dt = all[organism==in_organism,])
+}
+
+#### scatterplot, all countries in the same plot, separately for each organism group ####
+all[, significance := fifelse(pval <= 0.05, "sig", "nonsig")]
+
+# TotDur90
+for (in_organism in unique(all$organism)) {
+  print(in_organism)
+  ss <- all[organism == in_organism] 
+  ss2 <- ss[significance == "sig",]
+  p.vals = sapply(unique(ss$Country), function(i) {
+    coef(summary(lm(z~TotDur90, data=ss[Country==i, ])))[2,4] 
+  })
+  p1 <- ggplot() + 
+    geom_point(aes(TotDur90, z, colour=Country), data = ss, size = 1, alpha=0.2) +
+    geom_point(aes(TotDur90, z, colour=Country), data = ss2, size = 1, alpha=0.5) +
+    geom_smooth(data=ss[ss$Country %in% names(p.vals)[p.vals < 0.05],], aes(TotDur90, z, colour=Country), method = "lm", linewidth = 0.75, se = F) + 
+    geom_smooth(data=ss[ss$Country %in% names(p.vals)[p.vals > 0.05],], aes(TotDur90, z, colour=Country), method = "lm", linewidth = 0.75, se = F, linetype="dashed") +
+    geom_smooth(aes(TotDur90, z), data=ss, colour="black", method = "lm", linewidth = 1.1, se = F) + # , linetype="dashed"
+    theme_classic() +
+    ggtitle("Sediment diatoms") + # MUOKKAA
+    xlab("Number of dry days") +
+    ylab("z") +
+    scale_color_manual(values = c("Croatia" = "#ef476f",
+                                  "Czech Republic" = "#f78c6b", 
+                                  "Finland" = "#ffd166", 
+                                  "France" = "#06d6a0", 
+                                  "Hungary" = "#118ab2",
+                                  "Spain" = "#073b4c")) +
+    theme(legend.position = "none")
+
+  pdf(file.path(resdir, "Null_models", 
+                paste0("All_", in_organism, "_SES_vs_TotDur90_lm2.pdf")), 
+      height=3, width=4)
+  print(p1)
+  dev.off()
+}
+
+# TotLeng90
+for (in_organism in unique(all$organism)) {
+  print(in_organism)
+  ss <- all[organism == in_organism] 
+  ss2 <- ss[significance == "sig",]
+  p.vals = sapply(unique(ss$Country), function(i) {
+    coef(summary(lm(z~TotLeng90, data=ss[Country==i, ])))[2,4] 
+  })
+  p1 <- ggplot() + 
+    geom_point(aes(TotLeng90, z, colour=Country), data = ss, size = 1, alpha=0.2) +
+    geom_point(aes(TotLeng90, z, colour=Country), data = ss2, size = 1, alpha=0.5) +
+    geom_smooth(data=ss[ss$Country %in% names(p.vals)[p.vals < 0.05],], aes(TotLeng90, z, colour=Country), method = "lm", linewidth = 0.75, se = F) + 
+    geom_smooth(data=ss[ss$Country %in% names(p.vals)[p.vals > 0.05],], aes(TotLeng90, z, colour=Country), method = "lm", linewidth = 0.75, se = F, linetype="dashed") +
+    geom_smooth(aes(TotLeng90, z), data=ss, colour="black", method = "lm", linewidth = 1.1, se = F) + # , linetype="dashed"
+    theme_classic() +
+    ggtitle("Sediment diatoms") + # MUOKKAA
+    xlab("Duration of dry periods") +
+    ylab("z") +
+    scale_color_manual(values = c("Croatia" = "#ef476f",
+                                  "Czech Republic" = "#f78c6b", 
+                                  "Finland" = "#ffd166", 
+                                  "France" = "#06d6a0", 
+                                  "Hungary" = "#118ab2",
+                                  "Spain" = "#073b4c")) +
+    theme(legend.position = "none")
+  
+  pdf(file.path(resdir, "Null_models", 
+                paste0("All_", in_organism, "_SES_vs_TotLeng90_lm2.pdf")), 
+      height=3, width=4)
+  print(p1)
+  dev.off()
+}
+
+
+#Discharge
+for (in_organism in unique(all$organism)) {
+  print(in_organism)
+  ss <- all[organism == in_organism] 
+>>>>>>> ccdc49c786ea61bd62b5f2be33108a7f6e707e04
   ss2 <- ss[significance == "sig",]
   p.vals = sapply(unique(ss$Country), function(i) {
     coef(summary(lm(z~discharge, data=ss[Country==i, ])))[2,4] 
@@ -73,6 +192,10 @@ for (in_organism in unique(in_env_null_models_dt$organism)) {
   print(p1)
   dev.off()
 }
+<<<<<<< HEAD
+=======
+
+>>>>>>> ccdc49c786ea61bd62b5f2be33108a7f6e707e04
 
 #### mixed models ####
 lmer_int <- all[,
