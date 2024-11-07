@@ -3,6 +3,7 @@
   #L56 and L158 functions: catch metacols regardless of capitalization
   #Standardize country names across all input datasets
   #Standardize metacols across all input datasets
+  #update readxl
 
 
 library(rprojroot)
@@ -155,6 +156,44 @@ list(
           .[, organism := organism_type]
       }
     )  %>% rbindlist
+  ),
+  
+  tar_target(
+    env_null_models_dt,
+    merge_env_null_models(in_null_models = null_models, 
+                     in_env = env_dt, 
+                     in_int = interm90_dt)
+  ),
+  
+  tar_target(
+    p_z_by_stream_type,
+    for (in_organism in unique(env_null_models_dt$organism)) {
+      print(in_organism)
+      plot_z_by_stream_type(in_env_null_models_dt = env_null_models_dt[organism==in_organism,],
+                            outdir = resdir)
+    }
+  ),
+  
+  tar_map(
+    values = list(env_var_mapped = c('TotDur90', 'TotLeng90', 'discharge')),
+    tar_target(
+    p_by_env,
+    plot_z_by_env(in_env_null_models_dt = env_null_models_dt,
+                  env_var = env_var_mapped, 
+                  outdir = resdir),
+    
+    )
+  ),
+  
+  tar_target(
+    lmer_z_int,
+    compute_lmer_mods(in_env_null_models_dt = env_null_models_dt)
+  ),
+  
+  tar_target(
+    p_z_jitter,
+    plot_z_jitter_by_organism(in_env_null_models_dt = env_null_models_dt,
+                              outdir = resdir)
   )
 )
 
