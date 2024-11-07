@@ -26,18 +26,35 @@ countries_list <- c('Croatia', 'Czech Republic', 'Finland',
 #--------------------------  Define targets plan -------------------------------
 list(
   #------------------------------- Define paths ----------------------------------
+  #Path to local environmental data
   tar_target(
     env_data_path, 
     file.path(datdir, "ENV_all_NAs_as_blank.csv"),
     format='file'
   ),
   
+  #Path to metadata accompanying eDNA data
   tar_target(
     metadata_edna_path,
     file.path('data', 'metadata_DRYvER_eDNA_updated.xlsx'),
     format='file'
   ),
   
+  #Paths to intermittence data (90 days)
+  tar_target(
+    interm90_data_paths,
+    {path_list <- sapply(countries_list,
+                         function(country) {
+                           file.path(datdir, 'Datasets', 'Intermittence_Data',
+                                     paste0(country, '_Local_Interm_90_d.csv'))
+                         },
+                         USE.NAMES = TRUE)
+    path_list['France'] <- gsub('90_d', '90_d_corrected', path_list['France'])
+    return(path_list)
+    }
+  ),
+  
+  #Paths to pre-processed biological sampling data
   tar_target(
     bio_data_paths,
     list(
@@ -55,31 +72,14 @@ list(
     #, format='file'
   ),
   
-  tar_target(
-    interm90_data_paths,
-    {path_list <- sapply(countries_list,
-                         function(country) {
-                           file.path(datdir, 'Datasets', 'Intermittence_Data',
-                                     paste0(country, '_Local_Interm_90_d.csv'))
-                         },
-                         USE.NAMES = TRUE)
-    path_list['France'] <- gsub('90_d', '90_d_corrected', path_list['France'])
-    return(path_list)
-    }
-  ),
-  
   #------------------------------- Read in data ----------------------------------
+  #Read local environmental data
   tar_target(
     env_dt,
     fread(env_data_path)
   ),
   
-  tar_target(
-    interm90_dt,
-    lapply(interm90_data_paths, fread) %>% 
-      rbindlist 
-  ),
-  
+  #Read metadata accompanying eDNA data
   tar_target(
     metadata_edna,
     read.xlsx(metadata_edna_path, 
@@ -87,12 +87,21 @@ list(
       as.data.table
   ),
   
+  #Read intermittence data (90 days)
+  tar_target(
+    interm90_dt,
+    lapply(interm90_data_paths, fread) %>% 
+      rbindlist 
+  ),
+  
+  #Read pre-processed biological sampling data
   tar_target(
     bio_dt,
     read_biodt(path_list = bio_data_paths,
                in_metadata_edna = metadata_edna)
   ),
   
+  #Compute local species richness
   tar_target(
     sprich,
     lapply(bio_dt, function(dt) {
@@ -102,6 +111,7 @@ list(
   )
   ,
   
+  #Merge species richness with local environmental and intermittence data
   tar_target(
     alphadat_merged,
     merge_alphadat(in_env_dt = env_dt,
@@ -110,20 +120,37 @@ list(
   )
   ,
   
+  
   tar_target(
     alpha_cor,
-    alphadat_merged[, list(meanS_totdur90_cor = stats::cor(mean_S, totdur90),
+    alphadat_merged[, list(meanS_totdur90_cor = stats::cor(mean_S, TotDur90),
                            meanS_discharge_cor = stats::cor(mean_S, discharge)
     ), by=Country]
   )
   ,
   
   tar_target(
-    alpha_cor_plots,
+    alpha_cor_plots_wrap,
     plot_alpha_cor(alphadat_merged,
-                   out_dir = file.path(resdir, 'Null_models'))
+                   out_dir = file.path(resdir, 'Null_models'),
+                   facet_wrap = TRUE)
   )
   ,
+  
+  tar_target(
+    alpha_cor_plots_all,
+    plot_alpha_cor(alphadat_merged,
+                   out_dir = file.path(resdir, 'Null_models'),
+                   facet_wrap = FALSE)
+  )
+  ,
+  
+  tar_target(
+    lmer_S_int,
+    compute_lmer_mods(
+      in_dt = unique(alphadat_merged, by=c('site', 'organism')),
+      in_yvar = 'mean_S')
+  ),
   
   # fungi_biof_path <- file.path(datdir, 'Datasets', 'fungi_dna_Biof_removed_zero_rows_and_columns.csv')
   # fungi_biof <- fread(fungi_biof_path)
@@ -161,8 +188,8 @@ list(
   tar_target(
     env_null_models_dt,
     merge_env_null_models(in_null_models = null_models, 
-                     in_env = env_dt, 
-                     in_int = interm90_dt)
+                          in_env = env_dt, 
+                          in_int = interm90_dt)
   ),
   
   tar_target(
@@ -177,17 +204,18 @@ list(
   tar_map(
     values = list(env_var_mapped = c('TotDur90', 'TotLeng90', 'discharge')),
     tar_target(
-    p_by_env,
-    plot_z_by_env(in_env_null_models_dt = env_null_models_dt,
-                  env_var = env_var_mapped, 
-                  outdir = resdir),
-    
+      p_by_env,
+      plot_z_by_env(in_env_null_models_dt = env_null_models_dt,
+                    env_var = env_var_mapped, 
+                    outdir = resdir),
+      
     )
   ),
   
   tar_target(
     lmer_z_int,
-    compute_lmer_mods(in_env_null_models_dt = env_null_models_dt)
+    compute_lmer_mods(in_dt = env_null_models_dt,
+                      in_yvar = 'z')
   ),
   
   tar_target(

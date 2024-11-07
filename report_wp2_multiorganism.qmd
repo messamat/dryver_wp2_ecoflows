@@ -1,0 +1,69 @@
+---
+title: "Report_WP2_multiorganism"
+format: html
+editor: visual
+---
+
+```{r set-up}
+library(data.table)
+library(flextable)
+library(ggpubr)
+library(targets)
+```
+
+## Temporal alpha diversity
+
+```{r lmer_int90_alpha}
+tar_load(lmer_S_int)
+
+lmer_tab_S <- lapply(unique(lmer_S_int$organism), function(in_organism) {
+  lapply(c('TotDur90_full', 'TotLeng90_full'), function(in_mod) {
+    lmer_S_int[organism == in_organism,
+               round(coef(summary(get(in_mod)[[1]])), 3)
+    ] %>%
+      as.data.table(keep.rownames = TRUE) %>%
+      .[, organism := in_organism]
+  }) %>%
+    rbindlist }) %>%
+  rbindlist 
+
+flextable(lmer_tab_S) %>% 
+  theme_vanilla() %>%
+  bold(i = ~ (`Pr(>|t|)` <= 0.05) & (rn %in% c('TotDur90', 'TotLeng90')))
+```
+
+
+```{r plots_int90_alpha}
+tar_load(alpha_cor_plots_all)
+dur90plots <- alpha_cor_plots_all$totdur90
+ggpubr::ggarrange(
+  plotlist= dur90plots[names(dur90plots) %in% c('dia_sedi', 'dia_biof', 'fun_sedi', 'fun_biof', 'miv')],
+  ncol=2, nrow=3, common.legend = TRUE, legend="bottom")
+```
+
+## Temporal beta diversity
+```{r lmer_int90_beta}
+tar_load(lmer_z_int)
+
+lmer_tab_z <- lapply(unique(lmer_z_int$organism), function(in_organism) {
+  lapply(c('TotDur90_full', 'TotLeng90_full'), function(in_mod) {
+    lmer_z_int[organism == in_organism,
+               round(coef(summary(get(in_mod)[[1]])), 3)
+    ] %>%
+      as.data.table(keep.rownames = TRUE) %>%
+      .[, organism := in_organism]
+  }) %>%
+    rbindlist }) %>%
+  rbindlist 
+
+flextable(lmer_tab_z) %>% 
+  theme_vanilla() %>%
+  bold(i = ~ (`Pr(>|t|)` <= 0.05) & (rn %in% c('TotDur90', 'TotLeng90')))
+```
+
+```{r plots_int90_alpha}
+tar_load(p_by_env_TotDur90)
+ggpubr::ggarrange(
+  plotlist= p_by_env_TotDur90[names(p_by_env_TotDur90) %in% c('dia_sedi', 'fun_biof', 'miv')],
+  ncol=2, nrow=2, common.legend = TRUE, legend="bottom")
+```

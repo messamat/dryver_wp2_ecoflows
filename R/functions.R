@@ -70,8 +70,8 @@ calc_sprich <- function(in_biodt, in_metacols) {
 merge_alphadat <- function(in_env_dt, in_interm90_dt, in_sprich) {
   #Compute mean 90-day drying duration and event length
   interm90_mean <- in_interm90_dt[
-    , list(totdur90 = mean(TotDur, na.rm=T),
-           totleng90 = mean(TotLeng, na.rm=T)),
+    , list(TotDur90 = mean(TotDur, na.rm=T),
+           TotLeng90 = mean(TotLeng, na.rm=T)),
     by=Sites] %>%
     setnames('Sites', 'site')
   
@@ -96,10 +96,10 @@ merge_alphadat <- function(in_env_dt, in_interm90_dt, in_sprich) {
   return(merged_dat)
 }
 
-#------- plot_alpha_cor --------------------------------------------------------
+#------ plot_alpha_cor --------------------------------------------------------
 # tar_load(alphadat_merged)
 
-plot_alpha_cor_inner <- function(in_alphadat_merged_organism, x_var) {
+plot_alpha_cor_inner <- function(in_alphadat_merged_organism, x_var, facet_wrap=F) {
   #Compute simple linear regression
   in_alphadat_merged_organism[
     , lm_pval_ltype := fifelse(
@@ -108,41 +108,82 @@ plot_alpha_cor_inner <- function(in_alphadat_merged_organism, x_var) {
     ),
     by=Country] 
   
-  alpha_plots <- ggplot(in_alphadat_merged_organism, aes(x=get(x_var), y=mean_S)) + 
-    geom_point(size = 2) + 
-    geom_smooth(aes(linetype=lm_pval_ltype), method='lm', linewidth = 0.5, se = F) +
-    scale_linetype_identity() +
-    labs(x=x_var) +
-    facet_wrap(~Country) +
-    theme_classic()
-  
+  if (facet_wrap) {
+    alpha_plots <- ggplot(in_alphadat_merged_organism, aes(x=get(x_var), y=mean_S)) + 
+      geom_point(size = 2) + 
+      geom_smooth(aes(linetype=lm_pval_ltype), method='lm', linewidth = 0.5, se = F) +
+      scale_linetype_identity() +
+      labs(x=x_var) +
+      facet_wrap(~Country) +
+      theme_classic()
+  } else {
+    alpha_plots <- ggplot(in_alphadat_merged_organism, aes(get(x_var), mean_S)) + 
+      geom_point(aes(colour=Country), size = 1, alpha=0.5) +
+      geom_smooth(aes(linetype=lm_pval_ltype, colour=Country), method='lm', linewidth = 0.5, se = F) +
+      geom_smooth(colour="black", method = "lm", linewidth = 1.1, se = F) + 
+      scale_linetype_identity() +   
+      scale_color_manual(values = c("Croatia" = "#ef476f",
+                                    "Czech Republic" = "#f78c6b", 
+                                    "Finland" = "#ffd166", 
+                                    "France" = "#06d6a0", 
+                                    "Hungary" = "#118ab2",
+                                    "Spain" = "#073b4c")) +
+      labs(x=x_var) +
+      theme_classic()
+    #+  theme(legend.position = "none")
+  }
+
   return(alpha_plots)
 }  
 
-plot_alpha_cor <- function(in_alphadat_merged, out_dir) {
+plot_alpha_cor <- function(in_alphadat_merged, out_dir, facet_wrap=F) {
   if (!dir.exists(out_dir)) {
     dir.create(out_dir)
   }
   
+  organism_list <- unique(in_alphadat_merged$organism)
+  
   #Plot relationship between each organism alpha div and totdur90 for each country
-  lapply(unique(in_alphadat_merged$organism), function(org_sel) {
+  plotlist_totdur90 <- lapply(organism_list, function(org_sel) {
+    out_p <- plot_alpha_cor_inner(in_alphadat_merged[organism == org_sel,],
+                                  x_var = 'TotDur90',
+                                  facet_wrap = facet_wrap) +
+      ggtitle(org_sel)
+    
+    out_suffix <- paste0(ifelse(facet_wrap==F, '_all', ''), 
+                         '_mean_S_vs_totdur90_lm_sig.png') 
     ggsave(
-      filename = file.path(out_dir, paste0(org_sel, '_mean_S_vs_totdur90_lm_sig.png')),
-      plot = plot_alpha_cor_inner(in_alphadat_merged[organism == org_sel,],
-                                  x_var = 'totdur90') + scale_x_log10(),
-      width=10, height=10
-    )
-  })
+      filename = file.path(out_dir, paste0(org_sel, out_suffix)),
+      plot = out_p, 
+      width=10, height=10)
+    
+    return(out_p)
+    })
+  names(plotlist_totdur90) <- organism_list
   
   #Plot relationship between each organism alpha div and discharge for each country
-  lapply(unique(in_alphadat_merged$organism), function(org_sel) {
+  plotlist_discharge <- lapply(organism_list, function(org_sel) {
+    out_p <- plot_alpha_cor_inner(in_alphadat_merged[organism == org_sel,],
+                                  x_var = 'discharge',
+                                  facet_wrap = facet_wrap) + 
+      scale_x_log10() +
+      ggtitle(org_sel)
+    
+    out_suffix <- paste0(ifelse(facet_wrap==F, '_all', ''), 
+                         '_mean_S_vs_discharge_lm_sig.png') 
     ggsave(
-      filename = file.path(out_dir, paste0(org_sel, '_mean_S_vs_discharge_lm_sig.png')),
-      plot = plot_alpha_cor_inner(in_alphadat_merged[organism == org_sel,],
-                                  x_var = 'discharge') + scale_x_log10(),
+      filename = file.path(out_dir, 
+                           paste0(org_sel, '_mean_S_vs_discharge_lm_sig.png')),
+      plot = out_p,
       width=10, height=10
     )
   })
+  names(plotlist_discharge) <- organism_list
+  
+  return(list(
+    totdur90 = plotlist_totdur90,
+    discharge = plotlist_discharge
+  ))
 }
 
 #------ compute_null_model_inner -----------------------------------------------
@@ -186,8 +227,7 @@ compute_null_model_inner <- function(in_dt,
   return(oecosimu_dt)
 }
 
-
-#------------------------ merge_env_mod ----------------------------------------
+#------ merge_env_mod ----------------------------------------
 merge_env_null_models <- function(in_null_models, in_env, in_int) {
   res <- in_null_models[, Country := str_to_title(Country)] %>%
     .[Country == 'Czech', Country := 'Czech Republic']
@@ -217,7 +257,7 @@ merge_env_null_models <- function(in_null_models, in_env, in_int) {
   return(env_mods_dt)
 }
 
-#-------------------------- plot_z_by_stream_type ------------------------------
+#------ plot_z_by_stream_type ------------------------------
 plot_z_by_stream_type <- function(in_env_null_models_dt, outdir) {
   plots <- list()
   for(i in levels(in_env_null_models_dt$Country)){
@@ -238,14 +278,16 @@ plot_z_by_stream_type <- function(in_env_null_models_dt, outdir) {
   dev.off()
 }
 
-#------------------------- plot_z_by_env ----------------------------------------
+#------ plot_z_by_env ----------------------------------------
 # in_env_null_models_dt <- tar_read(env_null_models_dt)
 # env_var <- 'TotDur90'
 # outdir <- resdir 
 
 plot_z_by_env <- function(in_env_null_models_dt, env_var, outdir) {
   #### scatterplot, all countries in the same plot, separately for each organism group ####
-  for (in_organism in unique(in_env_null_models_dt$organism)) {
+  organism_list <- unique(in_env_null_models_dt$organism)
+  
+  plotlist <- lapply(organism_list, function(in_organism) {
     print(in_organism)
     ss <- in_env_null_models_dt[organism == in_organism] %>%
       .[, pval_lm := coef(summary(lm(z~get(env_var), data=.SD)))[2,4], 
@@ -281,21 +323,37 @@ plot_z_by_env <- function(in_env_null_models_dt, env_var, outdir) {
     pdf(out_path, height=3, width=4)
     print(p1)
     dev.off()
-  }
+    
+    return(p1)
+  })
+  names(plotlist) <- organism_list
+  
+  return(plotlist)
 }
 
 #------ compute_lmer_mods ------------------------------------------------------
-compute_lmer_mods <- function(in_env_null_models_dt) {
-  lmer_int <- in_env_null_models_dt[
+compute_lmer_mods <- function(in_dt, in_yvar) {
+  lmer_int <- in_dt[
     ,  list(
-      TotDur90_full = list(lmer(z ~ TotDur90 + (1|Country), data=.SD)),
-      TotDur90_null = list(lmer(z ~ (1|Country), data=.SD)),
-      TotDur90_ML = list(anova(lmer(z ~ TotDur90 + (1|Country), data=.SD),
-                               lmer(z ~ (1|Country), data=.SD))),
-      TotLeng90_full = list(lmer(z ~ TotLeng90 + (1|Country), data=.SD)),
-      TotLeng90_null = list(lmer(z ~ (1|Country), data=.SD)),
-      TotLeng90_ML = list(anova(lmer(z ~ TotLeng90 + (1|Country), data=.SD),
-                                lmer(z ~ (1|Country), data=.SD)))
+      #TotDur90 models
+      TotDur90_full = list(
+        lmer(as.formula(paste(in_yvar, 
+                              "~ TotDur90 + (1|Country)")), data=.SD)),
+      TotDur90_null = list(lmer(as.formula(paste(in_yvar, 
+                                                 "~ (1|Country)")), data=.SD)),
+      TotDur90_ML = list(anova(lmer(as.formula(paste(in_yvar, 
+                                                     "~ TotDur90 + (1|Country)")), data=.SD),
+                               lmer(as.formula(paste(in_yvar, 
+                                                     "~ (1|Country)")), data=.SD))),
+      #TotLeng90 models
+      TotLeng90_full = list(lmer(as.formula(paste(in_yvar, 
+                                                  "~ TotLeng90 + (1|Country)")), data=.SD)),
+      TotLeng90_null = list(lmer(as.formula(paste(in_yvar, 
+                                                  "~ (1|Country)")), data=.SD)),
+      TotLeng90_ML = list(anova(lmer(as.formula(paste(in_yvar, 
+                                                      "~ TotLeng90 + (1|Country)")), data=.SD),
+                                lmer(as.formula(paste(in_yvar, 
+                                                      "~ (1|Country)")), data=.SD)))
     )
     , by=organism] 
   return(lmer_int)
