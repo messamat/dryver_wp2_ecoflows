@@ -1,6 +1,190 @@
+#-------------- utility functions ----------------------------------------------
+#------ hsaHydroYearSeasons ----------------------------------------------------
+# Compute a data.frame containing the hydrological year, and 
+# optionnally the days of the hydrological year and the season which
+# each day belongs to. (developped by Ivan Horner)
+
+# dates:        a date/time vector (will be coerced to date using 
+#               as.Dates())
+# month:        month defining the start of a hydrological year
+# day_of_the_year: should the days of the (hydrological) year be
+#               computed?
+# seasons:      list defining the seasons in month number (1:12)
+#               (or days if 'seasons_by_day' is TRUE).
+# seasons_by_day: are seasons defined by days (of the year)?
+# minimal:      should only the minimal desired results be returned
+#               or intermediate results as well?
+hsaHydroYearSeasons <- function(dates, month = 9, day_of_the_year = TRUE, 
+                                seasons = list("SummerFall" = 5:10, "WinterSpring" = c(11:12, 1:4)),
+                                seasons_by_day = FALSE, minimal = FALSE) {
+  dates <- as.Date(dates)
+  
+  # get hydrological year
+  m <- as.numeric(format(dates, format = "%m"))
+  hy <- y <- as.numeric(format(dates, format = "%Y"))
+  m_prevy <- !m%in%c(month:12)
+  hy[m_prevy] <- hy[m_prevy] - 1
+  
+  # get days of the year
+  if (day_of_the_year) {
+    j <- as.numeric(format(dates, format = "%j"))
+    start_hy <- as.Date(paste0(y, "-", month, "-1"))
+    start_y <- as.Date(paste0(y, "-1-1"))
+    j_hy <- as.numeric(format(dates - start_hy + start_y, format = "%j"))
+  } else {
+    j_hy <- NA
+  }
+  
+  # get seasons
+  if (!is.null(seasons) && is.list(seasons)) {
+    # check season formatting
+    if (!all(vapply(seasons, is.atomic, logical(1L)))) {
+      stop("Wrong formatting for 'seasons': it should be a named list containing only atomic vectors (e.g. not lists).")
+    }
+    s_names <- names(seasons)
+    s_names <- factor(s_names, levels = s_names)
+    # build a table with character string and corresponding factors for matching with the whole time series
+    s_table <- data.frame(i = unname(unlist(seasons)), season = rep(s_names, unlist(lapply(seasons, length))))
+    if (seasons_by_day && day_of_the_year){
+      s <- s_table[match(j, s_table[, 1]), 2]
+    } else {
+      if (seasons_by_day) stop("If 'seasons_by_day' is TRUE, you must also have 'day_of_the_year' set to TRUE.")
+      
+      s <- s_table[match(m, s_table[, 1]), 2]
+    }
+    if (minimal) return(data.frame(hy = hy, j_hy = j_hy, s = s))
+    data.frame(dates = dates, m = m, y = y, hy = hy, j = j, j_hy = j_hy, s = s)
+  } else {
+    if (minimal) return(data.frame(hy = hy, j_hy = j_hy))
+    data.frame(dates = dates, m = m, y = y, hy = hy, j = j, j_hy = j_hy)
+  }
+}
+
+#------ hsaValidHydroYear ------------------------------------------------------
+# Given a hydrological year vector and a matrix with the same number
+# of rows (and any number of column), this function returns a logical
+# vector of the same length as the hydrological year vector that
+# indicates whether or not the time steps are part of a valid
+# hydrological year. Validity of a hydrological year is assessed 
+# according the two following rules:
+#  - is the year complete (i.e. is there at least 'n' (365) days)?
+#  - is there less than 'na.th' (proportion) missing values in 
+#    the year?
+# hy:           a hydrological year vector (will be coerced to factor)
+# x:            a matrix (or a vector) with as many row (elements) as the length 
+#               of 'hy' used to look for missing values
+# n:            the minimum length of a complete hydrological year
+#               this is also use to compute the proportion of missing 
+#               values
+# na.th:        the minimal tolerated proportion of missing values
+hsaValidHydroYear <- function(hy, x = NULL, n = 365, na.th = 0.005) {
+  # only full year
+  rle_res <- rle(hy)
+  unique_hy<- rle_res$values
+  valid_hy_1 <- rep(rle_res$lengths >= n, rle_res$lengths)
+  
+  if (!is.null(x))  {
+    # if x is provided, only year where the percentage of missing value is below na.th
+    if (is.null(dim(x))) x <- matrix(x, length(x), 1)
+    na <- apply(apply(x, 2, is.na), 1, any)
+    valid_hy_2 <- rep(as.vector(tapply(na, hy, sum) / n <= na.th), rle_res$lengths)
+    valid_hy_1 & valid_hy_2
+  } else {
+    valid_hy_1
+  }
+}
+
+
+#------ get_nc_var_present -----------------------------------------------------
+get_nc_var_present <- function(nc, varname, reachID, dates, selected_sims=1:20) {
+  nc_data <- ncvar_get(nc, varname)
+  
+  dates_format <- hsaHydroYearSeasons(
+    dates, month = 10, day_of_the_year = TRUE, # compute hydrological years, and other time periods (seasons, month, civil year, day of the year)
+    seasons = list("SummerFall" = 5:10, "WinterSpring" = c(11:12, 1:4)),
+    seasons_by_day = FALSE, minimal = FALSE) %>%
+    setDT %>%
+    .[, complete_year := hsaValidHydroYear(y, n = 365, na.th = 0.005)] %>%
+    setnames(c('j', 'm', 's', 'y'), c('doy', 'month', 'season', 'year'))
+  
+  get_nc_var_inner <- function(in_nc_data) {
+    as.data.table(in_nc_data) %>%
+      setnames(as.character(reachID)) %>%
+      .[, dates := dates] %>%
+      data.table::melt(id.vars = 'dates', 
+                       variable.name = 'reachID',
+                       value.name = varname) 
+  }
+  
+  #Check if there are multiple layers/sims in the netcdf
+  nsims <- dim(nc_data)[3]
+  if (!is.na(nsims)) {
+    sims <- seq(1, nsims)
+    out_dt <- lapply(sims[sims %in% selected_sims], function(in_sim) {
+      #print(in_sim)
+      get_nc_var_inner(nc_data[,,in_sim]) %>%
+        .[, nsim := in_sim]
+    }) %>%
+      rbindlist
+  } else {
+    out_dt <- get_nc_var_inner(nc_data)
+  }
+ 
+  return(list(
+    data_all = out_dt,
+    dates_format = dates_format
+  ))
+}
+
 #-------------- workflow functions ---------------------------------------------
 # path_list = tar_read(bio_data_paths)
 # in_metadata_edna <- tar_read(metadata_edna)
+
+#------ define_hydromod_paths --------------------------------------------------
+#List data paths for hydrological data
+define_hydromod_paths <- function(in_hydromod_dir) {
+  hydro_drn_paths_dt <- data.table(
+    country = c("Croatia", "Czech", "Finland", "France",  "Hungary", "Spain"),
+    catchment = c("Butiznica", "Velicka", "Lepsamaanjoki", "Albarine", "Bukkosdi", "Genal"), 
+    all_sims_filename = c(
+      "Butiznica_2022-12-15_option0.nc", #_run8_final
+      "Velicka_2023-02-01_option0.nc",
+      "Lepsamaanjoki_2022-12-16_option0.nc",
+      'Albarine_2022-12-16_option0.nc',
+      "Bukkosdi_2022-12-16_option0.nc", #_run8_final
+      "Genal_2023-01-18_option0.nc"
+    ),
+    sel_sim_filename = c(
+      "Butiznica_2022-12-15_option0_run8_final.nc",
+      "Velicka_2023-02-01_option0_run9_final.nc",
+      "Lepsamaanjoki_2022-12-16_option0_run20_final.nc",
+      "Albarine_2022-12-16_option0_run3_final.nc",
+      "Bukkosdi_2022-12-16_option0_run8_final.nc", 
+      "Genal_2023-01-18_option0_run15_final.nc"
+    )
+  ) %>%
+    .[, `:=`(all_sims_path = file.path(in_hydromod_dir, catchment, 
+                                       "Results_present_period", all_sims_filename),
+             sel_sim_path = file.path(in_hydromod_dir, catchment, 
+                                      "Results_present_period", sel_sim_filename),
+             catchment_path = file.path(in_hydromod_dir, catchment,
+                                        "watershed_small_catchment.shp"),
+             network_path = file.path(in_hydromod_dir, catchment,
+                                      "river_network.shp"))]
+}
+
+#------ get_drn_hydromod -------------------------------------------------------
+get_drn_hydromod <- function(hydromod_path, varname, selected_sims) {
+  nc <- nc_open(hydromod_path) # open netcdf file
+  reachID <- ncvar_get(nc, "reachID") # get list of reaches IDs
+  dates <- ncvar_get(nc, "date") # get dates of simulation period
+  dates <- as.Date(dates, origin="1950-01-01") # convert dates into R date format
+  
+  out_dt <- get_nc_var_present(nc = nc, varname = varname, # 0=dry, 1=flowing
+                               reachID = reachID, dates = dates,
+                               selected_sims = selected_sims) 
+  return(out_dt)
+}
 
 #------ read_biodt -------------------------------------------------------------
 read_biodt <- function(path_list, in_metadata_edna) {
@@ -132,7 +316,7 @@ plot_alpha_cor_inner <- function(in_alphadat_merged_organism, x_var, facet_wrap=
       theme_classic()
     #+  theme(legend.position = "none")
   }
-
+  
   return(alpha_plots)
 }  
 
@@ -158,7 +342,7 @@ plot_alpha_cor <- function(in_alphadat_merged, out_dir, facet_wrap=F) {
       width=10, height=10)
     
     return(out_p)
-    })
+  })
   names(plotlist_totdur90) <- organism_list
   
   #Plot relationship between each organism alpha div and discharge for each country

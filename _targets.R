@@ -10,6 +10,8 @@ library(rprojroot)
 rootdir <- rprojroot::find_root(has_dir('R'))
 setwd(rootdir)
 
+hydromod_present_dir <- file.path('data', 'wp1', 'Results_present_period_final', 'data')
+
 source('R/packages.R')
 source("R/functions.R")
 
@@ -26,11 +28,18 @@ countries_list <- c('Croatia', 'Czech Republic', 'Finland',
 #--------------------------  Define targets plan -------------------------------
 list(
   #------------------------------- Define paths ----------------------------------
+  #
   #Path to local environmental data
   tar_target(
     env_data_path, 
     file.path(datdir, "ENV_all_NAs_as_blank.csv"),
     format='file'
+  ),
+  
+  #Path to modeled hydrological data
+  tar_target(
+    hydromod_paths_dt,
+    define_hydromod_paths(in_hydromod_dir = hydromod_present_dir)
   ),
   
   #Path to metadata accompanying eDNA data
@@ -79,6 +88,20 @@ list(
     fread(env_data_path)
   ),
   
+  #Read hydrological modeling data for flow intermittence and discharge
+  tarchetypes::tar_map(
+    values = tibble(
+      in_country = unique(hydromod_paths_dt$country), 
+      in_varname = c('isflowing', 'qsim')
+    ),
+    tar_target(
+      hydromod_dt,
+      get_drn_hydromod(hydromod_paths_dt[country==in_country, all_sims_path],
+                       varname = in_varname, 
+                       selected_sims = 1:20)
+    )
+  ),
+    
   #Read metadata accompanying eDNA data
   tar_target(
     metadata_edna,
