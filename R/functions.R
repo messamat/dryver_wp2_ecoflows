@@ -129,7 +129,7 @@ get_nc_var_present <- function(nc, varname, reachID, dates, selected_sims=1:20) 
   } else {
     out_dt <- get_nc_var_inner(nc_data)
   }
- 
+  
   return(list(
     data_all = out_dt,
     dates_format = dates_format
@@ -186,6 +186,229 @@ get_drn_hydromod <- function(hydromod_path, varname, selected_sims) {
   return(out_dt)
 }
 
+#------ read_envdt -------------------------------------------------------------
+# in_env_data_path_annika <- tar_read(env_data_path_annika)
+# in_env_data_path_common <- tar_read(env_data_path_common)
+
+read_envdt <- function(in_env_data_path_annika, 
+                       in_env_data_path_common) {
+  env_dt_annika <- fread(in_env_data_path_annika)
+  env_dt_common <- fread(in_env_data_path_common)
+  
+  #Analyze missing data:
+  #Finland, campaign #1, LEP21, not sampled
+  #France, campaign #1, AL06, not sampled for macroinvertebrates
+  #       campaign #3, RA01, impossible to access due to floods
+  #       campaign #4, CA02, substrate, depth and velocity miv not recorded 
+  #       campaign #5, lots of sites could not be sampled due to dangerously high flows
+  #                     AL03, substrate, depth and velocity miv not recorded 
+  #       campaign #6, data sheet lost for AL02
+  #                     JO01 and RO01 were frozen
+  #                     AL04, substrate, depth and velocity miv not recorded 
+  #Hungary, campaign #4, BUK10 too little water to measure depth, velocity
+  #Spain, campaign #1, GEN-04 was not sampled
+  #       campaign #6, GEN-21 was not sampled
+  
+  #No oxygen saturation measure for Finland
+  #No basin area for Spain
+  #No upstream geology for Hungary
+  
+  #No embeddedness, substrate type, oxygen sat, etc. for Dry sites
+  
+  #To do on common data:
+  
+  #Merge Annika's env data and that from the final data directory from teams
+  #Several typoes/issues have been corrected in the final data but the rounding
+  #has been badly performed, so keep Annika's for most columns, aside for those
+  #where there have been significant upates to the data
+  compare_env_dts <- merge(
+    env_dt_annika, 
+    env_dt_common[, names(env_dt_annika), with=F],
+    by='running_id', suffixes=c('_annika', '_common')) %>%
+    .[, sort(names(.)), with=F] %>%
+    data.table::melt(id.var='running_id') %>%
+    .[, value := trimws(value, which='both')] %>%
+    .[, orig_dt := grepl('.*_annika$', variable)] %>%
+    .[, variable := gsub('(_annika)|(_common)', '', variable)] %>%
+    data.table::dcast(formula=running_id+variable~orig_dt) %>%
+    setnames(c('FALSE', 'TRUE'), c('common', 'annika'))
+  
+  check_diff <- compare_env_dts[
+    common!=annika & 
+      (is.na(as.numeric(common)) |
+         (!is.na(as.numeric(common)) & 
+            (abs(as.numeric(common)-as.numeric(annika))/as.numeric(annika))>0.1)),] 
+  
+  #Use updated data from the following columns because errors have been corrected
+  cols_common <- c('Average_wetted_width_m',
+                   'Bankfull_at_max__wetted_width_m',
+                   'Bankfull_at_min__wetted_width_m',
+                   'conductivity_micros_cm',
+                   'Max_wetted_width_m',
+                   'Min_wetted_width_m',
+                   'native_riparian_species_richness',
+                   'oxygen_mg_l',
+                   'ph',
+                   'state_of_flow',
+                   'temperature_C')
+  
+  env_dt_merged <- merge(env_dt_annika[, -cols_common, with=F],
+                         env_dt_common[, c('running_id', cols_common), with = F]) %>%
+    setnames(tolower(names(.))) %>% #Convert all columns to lower case
+    .[!(is.na(date) & is.na(state_of_flow)),] %>% #Remove records that were not sampled at all, but keep those that were simply dry
+    setnames(c('bankfull_at_max__wetted_width_m', 'bankfull_at_min__wetted_width_m'),
+             c('bankfull_at_max_wetted_width_m', 'bankfull_at_min_wetted_width_m'))
+  
+  #Substitute date for those that are dry
+  env_dt_merged[is.na(date),]
+  env_dt_merged[running_id == 'AL02_6', date := as.Date('20/01/2022')]
+  env_dt_merged[running_id %in% c('GEN04_6', 'GEN10_6', 'GEN11_6', 'GEN13_6'),
+                date := as.Date('10/02/2022')]
+  
+  #Trim white spaces in character columns
+  env_dt_merged[, names(.SD) := lapply(.SD, str_trim), .SDcols=is.character]
+  
+  #Check for empty strings
+  col_w_empty_strings <- env_dt_merged[
+    ,sapply(.SD, function(x) any(x=='', na.rm=T))] %>%
+    names(.)[.]
+  #if_ip_number_and_size_2_axes_+_depth_of_the_pools is 
+  #the only column with empty strings
+  
+  #Correct issues
+  env_dt_merged[running_id %in% c('AL02_4', 'AL03_4'), #Correct typo
+                state_of_flow := 'D']
+  env_dt_merged[running_id %in% c('JO01_6', 'RO01_6'), #Replace NA with frozen
+                state_of_flow := 'FROZEN']
+  #Remove un-analyzable records
+  env_dt_merged <- env_dt_merged[state_of_flow != 'FROZEN',]
+  
+  env_dt_merged[running_id == 'BUK10_4', avg_depth_macroinvertebrates := 1] #too small to measure
+  env_dt_merged[running_id == 'AL03_6', avg_depth_macroinvertebrates := 0] #dry
+  env_dt_merged[state_of_flow == 'IP' & is.na(avg_velocity_macroinvertebrates), #assign 0 velocity to pools
+                avg_velocity_macroinvertebrates := 0]
+  
+  #In a dozen site in Hungary, "could not measure velocity" -- assign very low value just below existing minimum
+  env_dt_merged[
+    drn=='Hungary' & is.na(avg_velocity_macroinvertebrates) & state_of_flow == 'F',
+    avg_velocity_macroinvertebrates := 0.001]
+  
+  #Replace missing values for geomorphological measures with average across campaigns
+  invisible(lapply(c('embeddedness', 'maximum_depth_cm', "filamentous_algae", 
+                     "incrusted_algae", "macrophyte_cover", "leaf_litter_cover",
+                     "moss_cover","wood_cover"), 
+                   function(col) {
+                     env_dt_merged[state_of_flow %in% c('F'), 
+                                   (col) := nafill(get(col), type = "const", 
+                                                   fill = mean(get(col), na.rm = TRUE)),
+                                   by=site]
+                   }))
+  
+  #Other geomorphological attributes are NA for dry periods
+  env_dt_merged[state_of_flow == 'D', `:=`(
+    maximum_depth_cm = 0,
+    discharge_l_s = 0,
+    average_wetted_width_m = 0,
+    max_wetted_width_m = 0,
+    min_wetted_width_m = 0,
+    avg_depth_macroinvertebrates = 0,
+    avg_velocity_macroinvertebrates = 0
+  )]
+  
+  env_dt_merged[state_of_flow == 'D', `:=`(
+    conductivity_micros_cm = NA,
+    oxygen_mg_l = NA,
+    oxygen_sat = NA,
+    ph = NA,
+    temperature_c = NA
+  )]
+  
+  #Fill missing data for average depth and velocity for macroinvertebrates based on discharge
+  #using the average ratio between log(discharge) and these measures in other dates
+  avg_ratio_sampling_hydraulic_dis <- env_dt_merged[
+    drn=='France' & avg_depth_macroinvertebrates>0 & discharge_l_s>1, 
+    list(
+      site_id = site,
+      ratio_depth = avg_depth_macroinvertebrates/log10(discharge_l_s),
+      ratio_velo = avg_velocity_macroinvertebrates/log10(discharge_l_s)
+    ), by=site
+  ] %>%
+    .[, list(mean_ratio_d = mean(ratio_depth),
+             mean_ratio_v = mean(ratio_velo)),
+      by=site_id]
+  
+  env_dt_merged[
+    state_of_flow == 'F' & is.na(avg_depth_macroinvertebrates) & 
+      discharge_l_s>1,
+    avg_depth_macroinvertebrates := log10(discharge_l_s)*
+      avg_ratio_sampling_hydraulic_dis[avg_ratio_sampling_hydraulic_dis$site_id == site, 'mean_ratio_d'],
+    by=site]
+  
+  env_dt_merged[
+    state_of_flow == 'F' & is.na(avg_velocity_macroinvertebrates) & 
+      discharge_l_s>1,
+    avg_velocity_macroinvertebrates := log10(discharge_l_s)*
+      avg_ratio_sampling_hydraulic_dis[avg_ratio_sampling_hydraulic_dis$site_id == site, 'mean_ratio_v'],
+    by=site]
+  
+  #Compute simple discharge for the site
+  env_dt_merged[running_id == 'AL07_1',
+                discharge_l_s := avg_velocity_macroinvertebrates*
+                  (average_wetted_width_m*avg_depth_macroinvertebrates/100)]
+  
+  #Complete altitude for GEN04 based on topographic map from Spanish IGN
+  env_dt_merged[site == 'GEN04', altitude_m := 610]
+  
+  #Fill average wetted width with average ratio between max and min for that site
+  mean_width_ratio <- env_dt_merged[site == 'GEN09', mean(
+    (average_wetted_width_m - min_wetted_width_m)/
+      (max_wetted_width_m - min_wetted_width_m),
+    na.rm=T)]
+  env_dt_merged[running_id == 'GEN09_3',
+                average_wetted_width_m := mean_width_ratio*
+                  (max_wetted_width_m - min_wetted_width_m)]
+  
+  #Fill conductivity data for the few Hungarian sites for campaign #5
+  #by computing their conductivity compared to the mean across sites
+  avg_conductivity_ratio <- env_dt_merged[
+    drn=='Hungary' & campaign != 5  & state_of_flow == 'F',
+    list(
+      site_id = site,
+      ratio=conductivity_micros_cm/mean(conductivity_micros_cm, na.rm=T),
+      mean_conduct = mean(conductivity_micros_cm, na.rm=T)
+    ), by=campaign] %>%
+    .[, mean(ratio), by=site_id]
+  
+  avg_conduct_5 <- env_dt_merged[
+    drn=='Hungary' & campaign == 5  & state_of_flow == 'F', 
+    mean(conductivity_micros_cm, na.rm=T)]
+  
+  env_dt_merged[running_id %in% c('BUK09_5', 'BUK10_5','BUK50_5','BUK52_5'),
+                conductivity_micros_cm := avg_conduct_5*
+                  avg_conductivity_ratio[avg_conductivity_ratio$site_id == site, 'V1'],
+                by=site]
+  
+  #Use corrected data for some records
+  env_dt_merged[running_id == 'BUK42_3', bankfull_at_max_wetted_width_m := 4.7]
+  
+  #Check that max is larger than min
+  check <- env_dt_merged[max_wetted_width_m < min_wetted_width_m,]
+  env_dt_merged[running_id=='BUK50_4', max_wetted_width_m := min_wetted_width_m]
+  env_dt_merged[running_id=='BUK50_4', min_wetted_width_m := 2]
+  substitute_width <- env_dt_merged[average_wetted_width_m < min_wetted_width_m, min_wetted_width_m]
+  env_dt_merged[average_wetted_width_m < min_wetted_width_m,
+                `:=`(min_wetted_width_m = average_wetted_width_m,
+                     average_wetted_width_m =  substitute_width)]
+  env_dt_merged[running_id=='BUK30_2', 
+                max_wetted_width_m := average_wetted_width_m]
+  env_dt_merged[running_id=='BUK30_2', 
+                average_wetted_width_m := 3.05]
+  
+  #Inspect data
+  #skim(env_dt_merged[])
+  
+  return(env_dt_merged)
+}
 #------ read_biodt -------------------------------------------------------------
 read_biodt <- function(path_list, in_metadata_edna) {
   #Read and name all data tables

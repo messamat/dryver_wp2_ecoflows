@@ -1,26 +1,30 @@
-library(data.table)
-library(ggplot2)
-library(gridExtra)
-library(lmerTest) #
-library(lme4) #
-library(lubridate)
-library(magrittr)
-library(MuMIn) #
-library(ncdf4)
-library(qs)
-library(readxl)
-library(reshape2)
-library(rprojroot)
-library(sf)
-library(stringr)
-library(tarchetypes)
-library(targets)
-library(terra)
-library(tibble)
-library(vegan)
-
-#For interactive
-library(mapview)
+pkg_vec <- list('ggplot2',
+             'gridExtra',
+             'lmerTest', 
+             'lme4', 
+             'lubridate',
+             'magrittr',
+             'MuMIn', 
+             'ncdf4',
+             'qs',
+             'readxl',
+             'reshape2',
+             'rprojroot',
+             'sf',
+             'skimr',
+             'stringr',
+             'tarchetypes',
+             'targets',
+             'terra',
+             'tibble',
+             'vegan',
+             'mapview',
+             'data.table')
+lapply(pkg_vec, function(p) {
+  suppressPackageStartupMessages(
+    require(p, character.only = TRUE, warn.conflicts = FALSE, quietly = FALSE)
+  )
+})
 
 
 
