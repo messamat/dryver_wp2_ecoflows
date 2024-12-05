@@ -20,12 +20,17 @@ resdir <- 'results'
 
 tar_option_set(format = "qs")
 
-metacols <- c('Campaign', 'Site', 'running_id', 'Country', 'Date',
-              'summa_sample', 'Sample.ID', 'Sample_ID', 'organism')
+metacols <- c('campaign', 'site', 'running_id', 'country', 'date',
+              'summa_sample', 'sample.id', 'sample_id', 'organism')
 drn_dt <- data.table(
   country = c("Croatia", "Czech", "Finland", "France",  "Hungary", "Spain"),
   catchment = c("Butiznica", "Velicka", "Lepsamaanjoki", "Albarine", "Bukkosdi", "Genal")
 )
+
+hydro_combi <- expand.grid(
+  in_country = drn_dt$country,
+  in_varname =  c('isflowing', 'qsim'),
+  stringsAsFactors = FALSE)
 
 #--------------------------  Define targets plan -------------------------------
 list(
@@ -52,11 +57,11 @@ list(
 
   #Path to metadata accompanying eDNA data
   tar_target(
-    metadata_edna_path_ex,
-    file.path(rootdir, 'data', 'metadata_DRYvER_eDNA_updated.xlsx'),
+    metadata_edna_path,
+    file.path(bio_dir, '_Microbes data', 'metadata DRYvER eDNA updated.xlsx'),
     format='file'
   ),
-
+  
   #Paths to pre-processed biological sampling data
   tar_target(
     bio_data_paths,
@@ -75,35 +80,60 @@ list(
       lapply(function(path) file.path(rootdir, 'data', 'data_annika', path))
     #, format='file'
   )
-  #,
+  ,
 
   #------------------------------- Read in data ----------------------------------
   #Read local environmental data
+  tar_target(
+    env_dt,
+    read_envdt(in_env_data_path_annika = env_data_path_annika, 
+               in_env_data_path_common = env_data_path_common)
+  ),
 
-  # 
-  # #Read hydrological modeling data for flow intermittence and discharge
-  # # tarchetypes::tar_map(
-  # #   values = tibble(
-  # #     in_country = quote(unique(hydromod_paths_dt$country)), 
-  # #     in_varname = c('isflowing', 'qsim')
-  # #   ),
-  # #   tar_target(
-  # #     hydromod_dt,
-  # #     print(paste0(in_country, in_varname))
-  # #     # get_drn_hydromod(hydromod_paths_dt[country==in_country, all_sims_path],
-  # #     #                  varname = in_varname, 
-  # #     #                  selected_sims = 1:20)
-  # #   )
-  # # ),
-  #   
-  # #Read metadata accompanying eDNA data
-  # tar_target(
-  #   metadata_edna,
-  #   read.xlsx(metadata_edna_path, 
-  #             sheetName = 'metadataDNA') %>%
-  #     as.data.table
-  # ),
-  # 
+  #Read hydrological modeling data for flow intermittence and discharge
+  tarchetypes::tar_map(
+    values = hydro_combi,
+    tar_target(
+      hydromod_dt,
+      get_drn_hydromod(hydromod_path = hydromod_paths_dt[country==in_country, all_sims_path],
+                       varname = in_varname,
+                       selected_sims = 1:20)
+    )
+  )
+  ,
+
+  #Read metadata accompanying eDNA data
+  tar_target(
+    metadata_edna,
+    read_xlsx(metadata_edna_path,
+              sheet = 'metadataDNA') %>%
+      as.data.table %>%
+      setnames(tolower(names(.)))
+  ),
+  
+  #Read pre-processed biological sampling data
+  tar_target(
+    bio_dt,
+    read_biodt(path_list = bio_data_paths,
+               in_metadata_edna = metadata_edna)
+  ),
+  
+  #Compute local species richness
+  tar_target(
+    sprich,
+    lapply(bio_dt, function(dt) {
+      calc_sprich(in_biodt=dt,
+                  in_metacols=metacols)
+    }) %>% 
+      rbindlist %>%
+      .[, running_id := paste0(site, '_', campaign)] %>%
+      merge(env_dt, by=c('site', 'campaign', 'running_id'))
+  )
+  #,
+  
+  #Compute intermitt
+  
+
   # #Read intermittence data (90 days)
   # tar_target(
   #   interm90_dt,
@@ -111,22 +141,8 @@ list(
   #     rbindlist 
   # ),
   # 
-  # #Read pre-processed biological sampling data
-  # tar_target(
-  #   bio_dt,
-  #   read_biodt(path_list = bio_data_paths,
-  #              in_metadata_edna = metadata_edna)
-  # ),
   # 
-  # #Compute local species richness
-  # tar_target(
-  #   sprich,
-  #   lapply(bio_dt, function(dt) {
-  #     calc_sprich(in_biodt=dt, 
-  #                 in_metacols=metacols)
-  #   }) %>% rbindlist
-  # )
-  # ,
+
   # 
   # #Merge species richness with local environmental and intermittence data
   # tar_target(

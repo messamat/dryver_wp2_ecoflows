@@ -110,10 +110,12 @@ get_nc_var_present <- function(nc, varname, reachID, dates, selected_sims=1:20) 
   get_nc_var_inner <- function(in_nc_data) {
     as.data.table(in_nc_data) %>%
       setnames(as.character(reachID)) %>%
-      .[, dates := dates] %>%
-      data.table::melt(id.vars = 'dates', 
-                       variable.name = 'reachID',
-                       value.name = varname) 
+      .[, date := dates] %>%
+      data.table::melt(id.vars = 'date', 
+                       variable.name = 'reach_id',
+                       value.name = varname,
+                       variable.factor = FALSE) %>%
+      .[, reach_id := as.integer(reach_id)]
   }
   
   #Check if there are multiple layers/sims in the netcdf
@@ -141,6 +143,8 @@ get_nc_var_present <- function(nc, varname, reachID, dates, selected_sims=1:20) 
 # in_metadata_edna <- tar_read(metadata_edna)
 
 #------ define_hydromod_paths --------------------------------------------------
+#in_hydromod_dir <- hydromod_present_dir
+
 #List data paths for hydrological data
 define_hydromod_paths <- function(in_hydromod_dir) {
   hydro_drn_paths_dt <- data.table(
@@ -170,7 +174,10 @@ define_hydromod_paths <- function(in_hydromod_dir) {
              catchment_path = file.path(in_hydromod_dir, catchment,
                                         "watershed_small_catchment.shp"),
              network_path = file.path(in_hydromod_dir, catchment,
-                                      "river_network.shp"))]
+                                      "river_network.shp"),
+             sites_reachids = file.path(in_hydromod_dir, catchment,
+                                        paste0(catchment, 
+                                        '_sampling_sites_ReachIDs.csv')))]
 }
 
 #------ get_drn_hydromod -------------------------------------------------------
@@ -186,6 +193,7 @@ get_drn_hydromod <- function(hydromod_path, varname, selected_sims) {
   return(out_dt)
 }
 
+#------ get_reach_in
 #------ read_envdt -------------------------------------------------------------
 # in_env_data_path_annika <- tar_read(env_data_path_annika)
 # in_env_data_path_common <- tar_read(env_data_path_common)
@@ -212,10 +220,7 @@ read_envdt <- function(in_env_data_path_annika,
   #No oxygen saturation measure for Finland
   #No basin area for Spain
   #No upstream geology for Hungary
-  
   #No embeddedness, substrate type, oxygen sat, etc. for Dry sites
-  
-  #To do on common data:
   
   #Merge Annika's env data and that from the final data directory from teams
   #Several typoes/issues have been corrected in the final data but the rounding
@@ -260,7 +265,7 @@ read_envdt <- function(in_env_data_path_annika,
              c('bankfull_at_max_wetted_width_m', 'bankfull_at_min_wetted_width_m'))
   
   #Substitute date for those that are dry
-  env_dt_merged[is.na(date),]
+  #env_dt_merged[is.na(date),]
   env_dt_merged[running_id == 'AL02_6', date := as.Date('20/01/2022')]
   env_dt_merged[running_id %in% c('GEN04_6', 'GEN10_6', 'GEN11_6', 'GEN13_6'),
                 date := as.Date('10/02/2022')]
@@ -284,7 +289,6 @@ read_envdt <- function(in_env_data_path_annika,
   env_dt_merged <- env_dt_merged[state_of_flow != 'FROZEN',]
   
   env_dt_merged[running_id == 'BUK10_4', avg_depth_macroinvertebrates := 1] #too small to measure
-  env_dt_merged[running_id == 'AL03_6', avg_depth_macroinvertebrates := 0] #dry
   env_dt_merged[state_of_flow == 'IP' & is.na(avg_velocity_macroinvertebrates), #assign 0 velocity to pools
                 avg_velocity_macroinvertebrates := 0]
   
@@ -388,8 +392,11 @@ read_envdt <- function(in_env_data_path_annika,
                   avg_conductivity_ratio[avg_conductivity_ratio$site_id == site, 'V1'],
                 by=site]
   
+  #Correct riparian area based on observation of satellite imagery
+  env_dt_merged[running_id == 'BUK36_1', riparian_cover_in_the_riparian_area := 90]
+  
   #Use corrected data for some records
-  env_dt_merged[running_id == 'BUK42_3', bankfull_at_max_wetted_width_m := 4.7]
+  env_dt_merged[running_id == 'BUK42_3', bankfull_at_max_wetted_width_m := 4.7] #from original data sheet uploaded on Teams
   
   #Check that max is larger than min
   check <- env_dt_merged[max_wetted_width_m < min_wetted_width_m,]
@@ -405,23 +412,30 @@ read_envdt <- function(in_env_data_path_annika,
                 average_wetted_width_m := 3.05]
   
   #Inspect data
-  #skim(env_dt_merged[])
+  #skim(env_dt_merged)
+  #skim(env_dt_merged[state_of_flow == 'F',])
   
   return(env_dt_merged)
 }
 #------ read_biodt -------------------------------------------------------------
+# path_list = tar_read(bio_data_paths)
+# in_metadata_edna = tar_read(metadata_edna)
+
 read_biodt <- function(path_list, in_metadata_edna) {
   #Read and name all data tables
   dt_list <- mapply(function(in_path, in_name) {
     fread(in_path) %>% 
-      .[, organism := in_name]},
+      .[, organism := in_name] %>%
+      setnames(tolower(names(.)))},
     path_list, names(path_list))
   
   #Add Campaign and Site to bacteria data, then remove pool sites
-  dt_list$bac_sedi[, c('Site', 'Campaign') := tstrsplit(V1, '_')] %>%
-    setnames('V1', 'running_id')
-  dt_list$bac_biof[, c('Site', 'Campaign') := tstrsplit(V1, '_')] %>%
-    setnames('V1', 'running_id')
+  dt_list$bac_sedi[, c('site', 'campaign') := tstrsplit(v1, '_')] %>%
+    setnames('v1', 'running_id') %>%
+    .[, campaign := as.integer(campaign)]
+  dt_list$bac_biof[, c('site', 'campaign') := tstrsplit(v1, '_')] %>%
+    setnames('v1', 'running_id') %>%
+    .[, campaign := as.integer(campaign)]
   
   #Standardize country names
   country_standard <- data.table(
@@ -429,45 +443,171 @@ read_biodt <- function(path_list, in_metadata_edna) {
     new = c("Croatia", 'France', "spain", "Czech", "Hungary", 'Finland')
   )
   in_metadata_edna <- merge(in_metadata_edna, country_standard,
-                            by.x='Country', by.y='original') %>%
-    .[, Country := new] %>%
+                            by.x='country', by.y='original') %>%
+    .[, country := new] %>%
     .[, `:=`(new = NULL)]
   
   #Remove bacteria in pools
   dt_list$bac_sedi <- merge(dt_list$bac_sedi, 
-                            in_metadata_edna[Sample_type=='sediment', 
-                                             .(matchingEnvID, Habitat, Country)],
-                            by.x='running_id', by.y='matchingEnvID')
+                            in_metadata_edna[sample_type=='sediment', 
+                                             .(matchingenvid, habitat, country)],
+                            by.x='running_id', by.y='matchingenvid')
   dt_list$bac_biof <- merge(dt_list$bac_biof,
-                            in_metadata_edna[Sample_type=='biofilm',
-                                             .(matchingEnvID, Habitat, Country)],
-                            by.x='running_id', by.y='matchingEnvID')
+                            in_metadata_edna[sample_type=='biofilm',
+                                             .(matchingenvid, habitat, country)],
+                            by.x='running_id', by.y='matchingenvid')
   
   dt_list$bac_biof_nopools <- dt_list$bac_biof %>%
-    .[Habitat!='pool',] %>%
-    .[, Habitat := NULL]
-  dt_list$bac_biof[, Habitat := NULL]
+    .[habitat!='pool',] %>%
+    .[, habitat := NULL]
+  dt_list$bac_biof[, habitat := NULL]
   
   
   dt_list$bac_sedi_nopools <- dt_list$bac_sedi %>%
-    .[Habitat!='pool',] %>%
-    .[, Habitat := NULL]
-  dt_list$bac_sedi[, Habitat := NULL]
+    .[habitat!='pool',] %>%
+    .[, habitat := NULL]
+  dt_list$bac_sedi[, habitat := NULL]
   
   return(dt_list)
 }
 
 #------ calc_sprich ------------------------------------------------------------
+# in_biodt <- tar_read(bio_dt)[[1]]
+# in_metacols <- metacols
+
 calc_sprich <- function(in_biodt, in_metacols) {
   #Get metadata columns (all except species data)
   metacols_sub <- names(in_biodt)[names(in_biodt) %in% in_metacols]
   biodt_melt <- melt(in_biodt, id.vars = metacols_sub)
   #Compute species richness
-  biodt_sprich <- biodt_melt[, list(S=sum(value>0)), 
-                             by=.(Site, Campaign, organism)] %>%
-    .[, mean_S := mean(S), by=Site]
+  biodt_sprich <- biodt_melt[, list(richness = sum(value > 0)), 
+                             by=.(site, campaign, organism)] %>%
+    .[, mean_richness := mean(richness), by=site]
   return(biodt_sprich)
 }
+
+#------ sprich_plot ------------------------------------------------------------
+# in_sprich <- tar_read(sprich)
+# in_envdt <- tar_read(env_dt)
+
+plot_sprich <- function(in_sprich, in_envdt) {
+  
+  sprich_hydroobs <- merge(
+    in_sprich[, list(mean_drn_richness = mean(richness)),
+              by=.(campaign, drn, organism)],
+    in_envdt[, list(per_flowing = 100*.SD[state_of_flow=='F', .N]/.N),
+             by=.(campaign, drn)],
+    by=c('campaign', 'drn')) %>%
+    .[, mean_drn_richness_relative := mean_drn_richness/max(mean_drn_richness),
+      by=.(drn, organism)]
+  
+  ggplot(sprich_hydroobs[
+    !(organism %in% c('miv', 'miv_nopools_flying', 'miv_nopools_nonflying')),],
+    aes(x=campaign, y=mean_drn_richness_relative)) +
+    geom_line(aes(group=drn, color=drn), size=1.2) +
+    new_scale_color() +
+    geom_point(aes(color=per_flowing), size=2) +
+    scale_color_distiller(palette='Spectral', direction=1) +
+    facet_wrap(~organism, scales='free_y') +
+    theme_classic()
+  
+  ggplot(sprich_hydroobs[
+    !(organism %in% c('miv', 'miv_nopools_flying', 'miv_nopools_nonflying')),],
+    aes(x=per_flowing, y=mean_drn_richness_relative, color=drn)) +
+    geom_point() +
+    geom_smooth(method='lm', se=F) +
+    facet_wrap(~organism, scales='free_y')
+  
+  overall_lines <- ggplot(
+    in_sprich[!(organism %in% c('miv', 'miv_nopools_flying', 'miv_nopools_nonflying')),],
+    aes(x=campaign, y=richness)) +
+    #geom_point() +
+    geom_line(aes(group=site, color=site)) +
+    geom_smooth(aes(group=drn)) +
+    facet_wrap(drn~organism, scales = 'free_y') +
+    theme(legend.position='none')
+  
+  ggplot(
+    in_sprich[!(organism %in% c('miv', 'miv_nopools_flying', 'miv_nopools_nonflying')),],
+    aes(x=campaign, y=richness)) +
+    #geom_point() +
+    geom_boxplot(aes(group=site, color=state_of_flow)) +
+    facet_wrap(drn~organism, scales = 'free_y') 
+  
+  ggplot(
+    in_sprich[(organism %in% c('miv_nopools')),],
+    aes(x=campaign, y=richness)) +
+    #geom_point() +
+    geom_line(aes(group=site, color=site)) +
+    geom_smooth(aes(group=drn)) +
+    facet_wrap(drn~organism, scales = 'free_y') +
+    theme(legend.position='none')
+}
+#------ calc_hydrostats -------------------------------------------------------
+in_hydromod_paths_dt <- tar_read(hydromod_paths_dt)
+# 
+
+#Need reach length info
+
+#Need reach site info
+
+calc_hydrostats <- function(in_hydromod_dt,
+                            in_hydromod_paths_dt) {
+  
+  in_country <- 'Finland'
+  in_hydromod_dt <- tar_read(hydromod_dt_Finland_isflowing)
+  qdat <- in_hydromod_dt$data_all %>%
+    setDT
+  
+  #Import reach IDs of sampling sites
+  sites_reachids <- in_hydromod_paths_dt[country == 'Finland', 
+                                         fread(sites_reachids)] %>%
+    setnames(tolower(names(.)))
+  
+  #Import reach shapefiles and get their length
+  reach_v <- in_hydromod_paths_dt[country == 'Finland', 
+                                         terra::vect(network_path)]
+  reach_v$reach_length <- terra::perim(reach_v)
+  reach_dt <- as.data.table(reach_v[, c('cat', 'reach_length')]) %>%
+    setnames('cat', 'reach_id') %>%
+    .[, list(reach_length = sum(reach_length)), by=reach_id]
+  remove(reach_v)
+  
+  #Merge hydro data and reach length for compute network-wide statistics
+  #qdat[, unique(reach_id)[!(unique(reach_id) %in% reach_dt$reach_id)]] #Two IDs are not in the shapefile? maybe a hydrological unit not associated
+  qdat <- merge(qdat, reach_dt, by='reach_id', all.x=F, all.y=F)
+
+  # -- Compute network-wide statistics ---------------------------------------
+  total_reach_length <- unique(qdat, by='reach_id')[, sum(reach_length)]
+  relflow_dt <- qdat[isflowing == 1,
+                     list(relflow = sum(reach_length)/total_reach_length)
+                     , by=.(date, nsim)]
+  ggplot(relflow_dt) + geom_line(aes(x=date, y=relflow, color=nsim))
+
+  
+  #At different time steps
+  #RelFlow: Proportion of network length with flowing conditions (opposite of RelInt)
+  #Annual average length of dry/pool/flowing reaches: LengthF, LengthP, LengthD
+  
+  #Patchiness of steady and intermittent flow conditions
+  #PatchC: proportion of model-derived reach length with changing steady and intermittent flow conditions compared to downstream reaches
+  
+  #Upstream?
+  
+  # -- Compute statistics for specific reaches -------------------------------
+  #PrdD: prior days to last dry/pool/flowing event
+  # 10, 30, 45, 60, 90, 120, 180, 365, 365*5, 365*10 - longterm
+  # DurD: DryDuration
+  # PDurD: DryDuration_relative_to_longterm
+  # FreDr: Drying frequency - absolute or relative number of drying events per time interval
+  # DryFreq
+  # DryFreq_relative_to_longterm
+  # meanQ
+  # mean_absolute_percentile 
+  # mean_relative_percentile
+  # max_absolute_percentile
+}
+
 
 #------ format_envinterm -------------------------------------------------------
 # in_env_dt <- tar_read(env_dt)
@@ -502,6 +642,8 @@ merge_alphadat <- function(in_env_dt, in_interm90_dt, in_sprich) {
   
   return(merged_dat)
 }
+
+
 
 #------ plot_alpha_cor --------------------------------------------------------
 # tar_load(alphadat_merged)
