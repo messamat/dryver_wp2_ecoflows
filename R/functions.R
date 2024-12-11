@@ -655,7 +655,7 @@ calc_hydrostats <- function(in_hydromod_dt,
     ), by = nsim]
   
   #Compute previous mean over many windows
-  meanstep <- c(10, 30, 60, 90, 120, 180)
+  meanstep <- c(10, 30, 60, 90, 120, 180, 365, 365*5, 365*10)
   relF_dt[, paste0("relF", meanstep, "past") := frollmean(relF, meanstep, na.rm=T), 
              by = nsim]
 
@@ -735,38 +735,44 @@ calc_hydrostats <- function(in_hydromod_dt,
   qstats_absolute <- qdat_sub[,
                               list(
                                 DurD = sum(isflowing==0),
-                                FreD = uniqueN(noflow_period, na.rm=T)
+                                FreD = length(na.omit(unique(noflow_period, na.rm=T))) #faster than uniqueN
                               ),
                               by = .(month, hy, reach_id, nsim)
   ]
   
-  
-  qstats_relative <- compute_ecdf_multimerge(in_dt = qstats_absolute,
-                          ecdf_columns = c('DurD', 'FreD'),
-                          grouping_columns = c('nsim', 'reach_id', 'month'), 
-                          keep_column = 'hy',
-                          na.rm=TRUE)
+  monthly_qstats_relative <- compute_ecdf_multimerge(
+    in_dt = qstats_absolute,
+    ecdf_columns = c('DurD', 'FreD'),
+    grouping_columns = c('nsim', 'reach_id', 'month'), 
+    keep_column = 'hy',
+    na.rm=TRUE)
 
   #Compute moving-window statistics --------------------------------------------
-  meanstep <- 7
-  qdat_sub[, `:=`(
-    DurD7past =  frollapply(isflowing, n=meanstep, 
-                       FUN=function(x) sum(x==0), 
-                       align='right'),
-    FreD7past = frollapply(noflow_period, n=meanstep, 
-                      FUN=function(x) uniqueN(x, na.rm=T), 
-                      align='right')  
-  ), by = .(reach_id, nsim)
+  rollingstep <- c(10, 30, 60, 90, 120, 180)
+  qdat_sub[, paste0("DurD", meanstep, "past") :=  
+             frollapply(isflowing, n=rollingstep, 
+                        FUN=function(x) sum(x==0), 
+                        align='right'), by = .(reach_id, nsim)
   ]
+  tic()
+  qdat_sub[, paste0("FreD", meanstep, "past") := 
+             frollapply(noflow_period, n=rollingstep, 
+                        FUN=function(x) length(na.omit(unique(x))), 
+                        align='right')  
+           , by = .(reach_id, nsim)
+  ]
+  toc()
   
   #Compute ecdf value by day of year for moving windows < 365 days
-  qdat_sub <- compute_ecdf_values(in_dt = qdat_sub, 
-                                  ecdf_column = 'DurD7past',
-                                  grouping_columns = c('nsim', 'reach_id', 'doy'),
-                                  na.rm=T) %>%
-    compute_ecdf_values(ecdf_column = 'FreD7past',
-                        grouping_columns = c('nsim', 'reach_id', 'doy'),
-                        na.rm=T)
+  rolling_column_names <- expand.grid(c('DurD', 'FreD'), rollingstep) %>%
+    setDT %>% .[, paste0(Var1, Var2, 'past')]
+  
+  rolling_qstats_relative <- compute_ecdf_multimerge(
+    in_dt = qdat_sub,
+    ecdf_columns = rolling_column_names,
+    grouping_columns = c('nsim', 'reach_id', 'doy'), 
+    keep_column = 'date',
+    na.rm=TRUE)
   
   #Compute ecdf value across entire records for moving windows > 365 days
   
