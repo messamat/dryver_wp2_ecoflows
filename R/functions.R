@@ -105,7 +105,8 @@ get_nc_var_present <- function(nc, varname, reachID, dates, selected_sims=1:20) 
     seasons_by_day = FALSE, minimal = FALSE) %>%
     setDT %>%
     .[, complete_year := hsaValidHydroYear(y, n = 365, na.th = 0.005)] %>%
-    setnames(c('j', 'm', 's', 'y'), c('doy', 'month', 'season', 'year'))
+    setnames(c('dates', 'j', 'm', 's', 'y'), 
+             c('date', 'doy', 'month', 'season', 'year'))
   
   get_nc_var_inner <- function(in_nc_data) {
     as.data.table(in_nc_data) %>%
@@ -138,6 +139,44 @@ get_nc_var_present <- function(nc, varname, reachID, dates, selected_sims=1:20) 
   ))
 }
 
+#------ zero_lomf -----------------
+#' Last \[non-zero\] Observation Moved Forward (lomf)
+#'
+#' Finds the index, for each row, of the previous row with a non-zero value
+#'
+#' @param x Numeric vector.
+#' @param first (logical) Whether to consider first value as a non-zero value
+#'   whose index is moved forward even if it is zero. This prevents having NAs
+#'   in the results and somewhat assumes that, for a time series, the day prior
+#'   to the first value is non-zero.
+#'
+#' @return Numeric vector of the indices of the previous non-zero for each
+#'   element of the input vector.
+#'
+#' @examples
+#' test1 <- c(1,1,1,0,0,0,0,1,1)
+#' zero_lomf(test1)
+#' test2 <- c(0,0,0,0,0,1,1,0,1)
+#' zero_lomf(test2, first=FALSE)
+#' zero_lomf(test2, first=TRUE)
+#'
+#' @export
+zero_lomf <- function(x, first=TRUE) {
+  if (length(x) > 0) {
+    non.zero.idx <- which(x != 0)
+    if (x[1]==0) {
+      if(first==T) {
+        non.zero.idx=c(1,non.zero.idx)
+        #Repeat index of previous row with non-zero as many times gap until next non-zero values
+        rep.int(non.zero.idx, diff(c(non.zero.idx, length(x) + 1)))
+      } else {
+        non.zero.idx=c(0,non.zero.idx)
+        #Repeat index of previous row with non-zero as many times gap until next non-zero values
+        rep.int(non.zero.idx, diff(c(non.zero.idx, length(x) + 1)))[-1]
+      }
+    }
+  }
+}
 #-------------- workflow functions ---------------------------------------------
 # path_list = tar_read(bio_data_paths)
 # in_metadata_edna <- tar_read(metadata_edna)
@@ -177,7 +216,7 @@ define_hydromod_paths <- function(in_hydromod_dir) {
                                       "river_network.shp"),
              sites_reachids = file.path(in_hydromod_dir, catchment,
                                         paste0(catchment, 
-                                        '_sampling_sites_ReachIDs.csv')))]
+                                               '_sampling_sites_ReachIDs.csv')))]
 }
 
 #------ get_drn_hydromod -------------------------------------------------------
@@ -544,8 +583,19 @@ plot_sprich <- function(in_sprich, in_envdt) {
     theme(legend.position='none')
 }
 #------ calc_hydrostats -------------------------------------------------------
+#Make sure this matches for ALbarine:
+#Reach ID for sampling site VI01 was changed from 2483801 to 2438600
+#Reach ID for sampling site AL01	was changed from 2455401 to 2455400
+
+#Make sure this matches for Bukkosdi:
+# Reach ID for sampling site BUK03 was changed from 659601 to 659600
+# Reach ID for sampling site BUK27 was changed from 674601 to 674600
+# Reach ID for sampling site BUK30 was changed from 676601 to 676600
+# Reach ID for sampling site BUK37 was changed from 665201 to 665200
+# Reach ID for sampling site BUK45 was changed from 666401 to 666400
+# Reach ID for sampling site BUK50 was changed from 652001 to 652000
+
 in_hydromod_paths_dt <- tar_read(hydromod_paths_dt)
-# 
 
 #Need reach length info
 
@@ -558,6 +608,10 @@ calc_hydrostats <- function(in_hydromod_dt,
   in_hydromod_dt <- tar_read(hydromod_dt_Finland_isflowing)
   qdat <- in_hydromod_dt$data_all %>%
     setDT
+  dates_format <- in_hydromod_dt$dates_format %>%
+    setDT %>%
+    setnames('dates', 'date')
+  remove(in_hydromod_dt) #purge for memory
   
   #Import reach IDs of sampling sites
   sites_reachids <- in_hydromod_paths_dt[country == 'Finland', 
@@ -566,7 +620,7 @@ calc_hydrostats <- function(in_hydromod_dt,
   
   #Import reach shapefiles and get their length
   reach_v <- in_hydromod_paths_dt[country == 'Finland', 
-                                         terra::vect(network_path)]
+                                  terra::vect(network_path)]
   reach_v$reach_length <- terra::perim(reach_v)
   reach_dt <- as.data.table(reach_v[, c('cat', 'reach_length')]) %>%
     setnames('cat', 'reach_id') %>%
@@ -575,33 +629,204 @@ calc_hydrostats <- function(in_hydromod_dt,
   
   #Merge hydro data and reach length for compute network-wide statistics
   #qdat[, unique(reach_id)[!(unique(reach_id) %in% reach_dt$reach_id)]] #Two IDs are not in the shapefile? maybe a hydrological unit not associated
-  qdat <- merge(qdat, reach_dt, by='reach_id', all.x=F, all.y=F)
-
+  qdat <- merge(qdat, reach_dt, by='reach_id', all.x=F, all.y=F) %>%
+    merge(dates_format[, .(date, month, hy, doy)], by='date', all.x=T, all.y=F)
+  
   # -- Compute network-wide statistics ---------------------------------------
+  #minimum 7-day and 30-day average over previous year
+  #average in previous 10, 30, 45, 60, 90, 120, 180, 365, 365*5, 365*10 
+  
   total_reach_length <- unique(qdat, by='reach_id')[, sum(reach_length)]
-  relflow_dt <- qdat[isflowing == 1,
-                     list(relflow = sum(reach_length)/total_reach_length)
-                     , by=.(date, nsim)]
-  ggplot(relflow_dt) + geom_line(aes(x=date, y=relflow, color=nsim))
-
   
-  #At different time steps
   #RelFlow: Proportion of network length with flowing conditions (opposite of RelInt)
-  #Annual average length of dry/pool/flowing reaches: LengthF, LengthP, LengthD
+  relF_dt <- qdat[isflowing == 1,
+                     list(relF = sum(reach_length)/total_reach_length)
+                     , by=.(date, nsim)]
   
-  #Patchiness of steady and intermittent flow conditions
-  #PatchC: proportion of model-derived reach length with changing steady and intermittent flow conditions compared to downstream reaches
+  #Compute min 7-day and 30-day relF
+  relF_dt[, `:=`(
+    relF7mean = frollmean(x=relF, n=7, align='center', na.rm=T),
+    relF30mean = frollmean(x=relF, n=30, align='center', na.rm=T)
+  ), by = nsim] %>%
+    .[, `:=`(
+      relF7mean_yrmin = frollapply(relF7mean, n=365, FUN=min, align='right'),
+      relF30mean_yrmin = frollapply(relF30mean, n=365, FUN=min, align='right')
+    ), by = nsim]
   
-  #Upstream?
+  #Compute previous mean over many windows
+  meanstep <- c(10, 30, 60, 90, 120, 180, 365, 365*5, 365*10)
+  relF_dt[, paste0("relF", meanstep, "past") := frollmean(relF, meanstep, na.rm=T), 
+             by = nsim]
+
+  #PatchC: Patchiness of steady and intermittent flow conditions
+  #proportion of model-derived reach length with changing flow conditions 
+  #compared to downstream reaches
+  #-> not sure how to compute it. Hard to access JAM source files
+  
+  #Size of flowing connected patch
+  
   
   # -- Compute statistics for specific reaches -------------------------------
-  #PrdD: prior days to last dry/pool/flowing event
+  qdat_sub <- merge(sites_reachids[, .(id, reach_id)], qdat, 
+                    by = 'reach_id', all.x = T, all.y = F) %>%
+    setorderv(c('nsim', 'reach_id', 'date'))
+  
+  #Compute duration of no-flow periods and time since last no-flow period #PrdD: prior days to last dry/pool/flowing event
+  qdat_sub[, `:=`(noflow_period = rleid(isflowing==0), #Compute no-flow periods
+                  last_noflow = zero_lomf(isflowing==0, first=FALSE) #Compute row index of last no flow day
+                  ), by=.(nsim, reach_id)] %>%
+    .[isflowing == 1, noflow_period := NA] %>% 
+    .[last_noflow ==0, last_noflow := NA] %>%
+    .[!is.na(noflow_period), noflow_period_dur := .N,  #Compute duration of each no-flow period
+      by = .(noflow_period, nsim, reach_id)] %>%
+  .[, last_noflowdate := .SD[last_noflow, date], by = .(nsim, reach_id)] %>% #Convert to data
+  .[, PrdD := difftime(date, last_noflowdate, units='days'), #Compute duration of each no-flow period
+    by = .(nsim, reach_id)] %>%
+    .[, last_noflow := NULL]
+
+  # ggplot(qdat_sub[nsim==1,], aes(x=date, y=time_to_lastzero,color=nsim)) +
+  #   geom_line() +
+  #   facet_wrap(~id)
+  
+  qstats_absolute <- qdat_sub[,
+                              list(
+                                DurD = sum(isflowing==0),
+                                FreD = uniqueN(noflow_period, na.rm=T)
+                              ),
+                              by = .(month, hy, reach_id, nsim)
+  ]
+  
+  #Compute right-continuous ecdf (but if nine 0s and one 1, then 0s are given 0.9)
+  tic()
+  qstats_ecdf <- qstats_absolute[, list(ecdf_DurD = list(ecdf(DurD)),
+                                        ecdf_FreD = list(ecdf(FreD))
+                                        ),
+                                 by = .(month, reach_id, nsim)]
+  toc()
+  
+  qstats_absolute[month==in_month & reach_id==in_reach_id & nsim==in_nsim,
+                  qstats_ecdf[month==in_month & reach_id==in_reach_id & nsim==in_nsim, 
+                              ecdf_DurD[[1]]](DurD)] 
+  
+  qstats_relative <-  qstats_absolute[, list(
+    PDurD = qstats_ecdf[month==month & reach_id==reach_id & nsim==nsim,
+                        ecdf_DurD[[1]]](DurD),
+    PFreD = qstats_ecdf[month==month & reach_id==reach_id & nsim==nsim,
+                        ecdf_FreD[[1]]](FreD)
+  ), by = .(month, hy, reach_id, nsim)]
+  
+  #Batch-Compute left-continuous ecdf values (if nine 0s and one 1, then 0s are given 0 and 1 is given 0.9)
+  #and compare
+  #https://stats.stackexchange.com/questions/585291/is-there-an-equivalent-to-an-ecdf-with-a-sign
+  #https://math.stackexchange.com/questions/1807120/why-arent-cdfs-left-continuous/1807136#1807136
+  #Change the ecdf to be left-continuous.
+  dt <- qstats_absolute[, list(freq = .N), by = .(DurD, nsim, reach_id, month)]
+  
+  # Sort data
+  setorderv(dt, 'DurD')
+  
+  # Compute cumulative frequencies for the ECDF
+  dt[, ecdf_val := (cumsum(freq) - freq) / sum(freq), by = .(nsim, reach_id, month)]
+  
+  # Create a lookup table for ECDF values
+  ecdf_lookup <- dt[, .(DurD, ecdf_val), by = .(nsim, reach_id, month)]
+  
+  qstats_relative <- merge(qstats_absolute, ecdf_lookup, 
+                           by= c('nsim', 'reach_id', 'month', 'DurD'))
+  check <- qstats_relative[reach_id == 1033201 & nsim == 1 & month==8, ]
+  
+  
+  tic()
+  
+  
+  
+  # Add a frequency column
+  dt <- qstats_absolute[, list(freq=.N), by = .(DurD, nsim, reach_id, month)]
+  
+  # Sort data
+  setorderv(dt, 'DurD')
+  
+  # Compute cumulative frequencies for the ECDF
+  dt[, ecdf_val := (cumsum(freq) - freq) / sum(freq), by = .(nsim, reach_id, month)]
+  
+  # Generate the ECDF function
+  qstats_ecdf_DurD <- dt[, list(ecdf_DurD = list(
+    function(val) {
+      idx <- .SD[, max(which(DurD < val))]
+      if (is.na(idx) ) return(0)  # If val is less than or equal to the smallest element
+      return(.SD[, ecdf_val[idx]])
+    }))
+    , by = c('nsim', 'reach_id', 'month')]
+  toc()
+  
+  dt[reach_id == 1033201 & nsim == 1 & month==8,]
+  idx <- dt[reach_id == 1033201 & nsim == 1 & month==8, max(which(DurD <7))]
+  dt[reach_id == 1033201 & nsim == 1 & month==8, ecdf_val[[ max(which(DurD < 7))]]]
+  
+  qstats_ecdf_DurD[reach_id == 1033201 & nsim == 1 & month==8, ecdf_DurD[[1]](7)]
+  
+  tic()
+  qstats_absolute[
+    ,
+    `:=`(PDurD = qstats_ecdf_DurD[month==month & reach_id==reach_id & nsim==nsim, 
+                                  ecdf_DurD[[1]]](DurD)
+    ), by = .(month, hy, reach_id, nsim)
+  ] 
+  toc()
+  
+  
+  
+
+
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  dt <- qstats_absolute
+  var_name <- 'DurD'
+  
+  left_continuous_ecdf <- function(dt, var_name) {
+    # Sort the data.table by the specified variable
+    setorderv(dt, c("DurD"))
+    
+    # Compute ECDF values for unique values in the specified column
+    dt_unique <- unique(dt, by = var_name)
+    dt_unique[, ecdf_val := seq_len(.N) / .N]
+    
+    # Create a lookup function that finds the ECDF for any given value
+    function(val) {
+      idx <- which(dt_unique[[var_name]] >= val)[1]
+      if (is.na(idx)) return(1)  # If val is greater than the largest element
+      return(dt_unique$ecdf_val[idx])
+    }
+  }
+
+
+  
+  
+  dt_ecdf <- 
+  
+  tic()
+  left_continuous_ecdf(qstats_absolute, 'DurD')
+  qstats_ecdf <- qstats_absolute[, list(ecdf_DurD = list(left_continuous_ecdf(DurD)),
+                                        ecdf_FreD = list(left_continuous_ecdf(FreD))
+  ),
+  by = .(month, reach_id, nsim)]
+  toc()
+  
   # 10, 30, 45, 60, 90, 120, 180, 365, 365*5, 365*10 - longterm
   # DurD: DryDuration
   # PDurD: DryDuration_relative_to_longterm
-  # FreDr: Drying frequency - absolute or relative number of drying events per time interval
-  # DryFreq
-  # DryFreq_relative_to_longterm
+  # FreD: Drying frequency - absolute or relative number of drying events per time interval
+  # PFreD: FreD_relative_to_longterm
+  
   # meanQ
   # mean_absolute_percentile 
   # mean_relative_percentile
