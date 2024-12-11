@@ -689,21 +689,14 @@ calc_hydrostats <- function(in_hydromod_dt,
   #   geom_line() +
   #   facet_wrap(~id)
   
-  #Compute monthly statistics --------------------------------------------------
-  qstats_absolute <- qdat_sub[,
-                              list(
-                                DurD = sum(isflowing==0),
-                                FreD = uniqueN(noflow_period, na.rm=T)
-                              ),
-                              by = .(month, hy, reach_id, nsim)
-  ]
-  
   #Batch-Compute left-continuous ecdf values (if nine 0s and one 1, then 0s are given 0 and 1 is given 0.9)
   #and compare
   #https://stats.stackexchange.com/questions/585291/is-there-an-equivalent-to-an-ecdf-with-a-sign
   #https://math.stackexchange.com/questions/1807120/why-arent-cdfs-left-continuous/1807136#1807136
   #Change the ecdf to be left-continuous.
-  compute_ecdf_values <- function(in_dt, ecdf_column, grouping_columns, 
+  
+  
+  compute_ecdf_lookup <- function(in_dt, ecdf_column, grouping_columns, 
                                   na.rm=TRUE) {
     # Filter out NAs in the specified ECDF column if na.rm is TRUE
     dt_freq <- in_dt[if (na.rm) !is.na(get(ecdf_column)) else TRUE,
@@ -716,21 +709,44 @@ calc_hydrostats <- function(in_hydromod_dt,
     dt_freq[, paste0('P', ecdf_column) := (cumsum(freq) - freq) / sum(freq),
             by = grouping_columns]
     
-    out_dt <- merge(in_dt, 
-                    dt_freq[, c(paste0('P', ecdf_column), 
-                                ecdf_column, grouping_columns), with=F], 
-                    by = c(ecdf_column, grouping_columns),
-                    all.x=T)
-    
-    return(out_dt)
+    return(dt_freq[, c(paste0('P', ecdf_column), ecdf_column, grouping_columns), 
+                   with=F])
   }
   
-  qstats_relative <- compute_ecdf_values(in_dt=qstats_absolute, 
-                                         ecdf_column = 'DurD',
-                                         grouping_columns = c('nsim', 'reach_id', 'month')) %>%
-    compute_ecdf_values(ecdf_column = 'FreD',
-                        grouping_columns = c('nsim', 'reach_id', 'month'))
+  compute_ecdf_multimerge <- function(in_dt, ecdf_columns, grouping_columns, 
+                                      keep_column, na.rm=TRUE) {
+    ecdf_lookup_list <- lapply(ecdf_columns, function(in_ecdf_column) {
+      compute_ecdf_lookup(in_dt = in_dt,
+                          ecdf_column = in_ecdf_column, 
+                          grouping_columns = grouping_columns, 
+                          na.rm=na.rm) %>%
+      merge(in_dt, ., by=c(in_ecdf_column, grouping_columns), all.x=T) %>%
+        .[, c(paste0('P', in_ecdf_column), grouping_columns, keep_column), with=F]
+    })
+    
+    ecdf_out <- Reduce(
+      function(...) {
+        merge(..., by = c(grouping_columns, keep_column), all = TRUE, sort = FALSE)
+      }, c(list(in_dt), ecdf_lookup_list))
+    
+  }
+
+  #Compute monthly statistics --------------------------------------------------
+  qstats_absolute <- qdat_sub[,
+                              list(
+                                DurD = sum(isflowing==0),
+                                FreD = uniqueN(noflow_period, na.rm=T)
+                              ),
+                              by = .(month, hy, reach_id, nsim)
+  ]
   
+  
+  qstats_relative <- compute_ecdf_multimerge(in_dt = qstats_absolute,
+                          ecdf_columns = c('DurD', 'FreD'),
+                          grouping_columns = c('nsim', 'reach_id', 'month'), 
+                          keep_column = 'hy',
+                          na.rm=TRUE)
+
   #Compute moving-window statistics --------------------------------------------
   meanstep <- 7
   qdat_sub[, `:=`(
