@@ -696,25 +696,6 @@ calc_hydrostats <- function(in_hydromod_dt,
                               by = .(month, hy, reach_id, nsim)
   ]
   
-  #Compute right-continuous ecdf (but if nine 0s and one 1, then 0s are given 0.9)
-  tic()
-  qstats_ecdf <- qstats_absolute[, list(ecdf_DurD = list(ecdf(DurD)),
-                                        ecdf_FreD = list(ecdf(FreD))
-                                        ),
-                                 by = .(month, reach_id, nsim)]
-  toc()
-  
-  qstats_absolute[month==in_month & reach_id==in_reach_id & nsim==in_nsim,
-                  qstats_ecdf[month==in_month & reach_id==in_reach_id & nsim==in_nsim, 
-                              ecdf_DurD[[1]]](DurD)] 
-  
-  qstats_relative <-  qstats_absolute[, list(
-    PDurD = qstats_ecdf[month==month & reach_id==reach_id & nsim==nsim,
-                        ecdf_DurD[[1]]](DurD),
-    PFreD = qstats_ecdf[month==month & reach_id==reach_id & nsim==nsim,
-                        ecdf_FreD[[1]]](FreD)
-  ), by = .(month, hy, reach_id, nsim)]
-  
   #Batch-Compute left-continuous ecdf values (if nine 0s and one 1, then 0s are given 0 and 1 is given 0.9)
   #and compare
   #https://stats.stackexchange.com/questions/585291/is-there-an-equivalent-to-an-ecdf-with-a-sign
