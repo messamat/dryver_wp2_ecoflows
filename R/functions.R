@@ -720,107 +720,31 @@ calc_hydrostats <- function(in_hydromod_dt,
   #https://stats.stackexchange.com/questions/585291/is-there-an-equivalent-to-an-ecdf-with-a-sign
   #https://math.stackexchange.com/questions/1807120/why-arent-cdfs-left-continuous/1807136#1807136
   #Change the ecdf to be left-continuous.
-  dt <- qstats_absolute[, list(freq = .N), by = .(DurD, nsim, reach_id, month)]
-  
-  # Sort data
-  setorderv(dt, 'DurD')
-  
-  # Compute cumulative frequencies for the ECDF
-  dt[, ecdf_val := (cumsum(freq) - freq) / sum(freq), by = .(nsim, reach_id, month)]
-  
-  # Create a lookup table for ECDF values
-  ecdf_lookup <- dt[, .(DurD, ecdf_val), by = .(nsim, reach_id, month)]
-  
-  qstats_relative <- merge(qstats_absolute, ecdf_lookup, 
-                           by= c('nsim', 'reach_id', 'month', 'DurD'))
-  check <- qstats_relative[reach_id == 1033201 & nsim == 1 & month==8, ]
-  
-  
-  tic()
-  
-  
-  
-  # Add a frequency column
-  dt <- qstats_absolute[, list(freq=.N), by = .(DurD, nsim, reach_id, month)]
-  
-  # Sort data
-  setorderv(dt, 'DurD')
-  
-  # Compute cumulative frequencies for the ECDF
-  dt[, ecdf_val := (cumsum(freq) - freq) / sum(freq), by = .(nsim, reach_id, month)]
-  
-  # Generate the ECDF function
-  qstats_ecdf_DurD <- dt[, list(ecdf_DurD = list(
-    function(val) {
-      idx <- .SD[, max(which(DurD < val))]
-      if (is.na(idx) ) return(0)  # If val is less than or equal to the smallest element
-      return(.SD[, ecdf_val[idx]])
-    }))
-    , by = c('nsim', 'reach_id', 'month')]
-  toc()
-  
-  dt[reach_id == 1033201 & nsim == 1 & month==8,]
-  idx <- dt[reach_id == 1033201 & nsim == 1 & month==8, max(which(DurD <7))]
-  dt[reach_id == 1033201 & nsim == 1 & month==8, ecdf_val[[ max(which(DurD < 7))]]]
-  
-  qstats_ecdf_DurD[reach_id == 1033201 & nsim == 1 & month==8, ecdf_DurD[[1]](7)]
-  
-  tic()
-  qstats_absolute[
-    ,
-    `:=`(PDurD = qstats_ecdf_DurD[month==month & reach_id==reach_id & nsim==nsim, 
-                                  ecdf_DurD[[1]]](DurD)
-    ), by = .(month, hy, reach_id, nsim)
-  ] 
-  toc()
-  
-  
-  
-
-
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  dt <- qstats_absolute
-  var_name <- 'DurD'
-  
-  left_continuous_ecdf <- function(dt, var_name) {
-    # Sort the data.table by the specified variable
-    setorderv(dt, c("DurD"))
+  compute_ecdf_values <- function(in_dt, ecdf_column, grouping_columns) {
+    dt_freq <- in_dt[, list(freq = .N), by = c(ecdf_column, grouping_columns)]
     
-    # Compute ECDF values for unique values in the specified column
-    dt_unique <- unique(dt, by = var_name)
-    dt_unique[, ecdf_val := seq_len(.N) / .N]
+    # Sort data
+    setorderv(dt_freq, ecdf_column)
     
-    # Create a lookup function that finds the ECDF for any given value
-    function(val) {
-      idx <- which(dt_unique[[var_name]] >= val)[1]
-      if (is.na(idx)) return(1)  # If val is greater than the largest element
-      return(dt_unique$ecdf_val[idx])
-    }
+    # Compute cumulative frequencies for the ECDF
+    dt_freq[, paste0('P', ecdf_column) := (cumsum(freq) - freq) / sum(freq),
+            by = grouping_columns]
+    
+    out_dt <- merge(in_dt, 
+                    dt_freq[, c(paste0('P', ecdf_column), 
+                                ecdf_column, grouping_columns), with=F], 
+                    by = c(ecdf_column, grouping_columns))
+    
+    return(out_dt)
   }
+  
+  qstats_relative <- compute_ecdf_values(in_dt=qstats_absolute, 
+                                         ecdf_column = 'DurD',
+                                         grouping_columns = c('nsim', 'reach_id', 'month')) %>%
+    compute_ecdf_values(ecdf_column = 'FreD',
+                        grouping_columns = c('nsim', 'reach_id', 'month'))
 
 
-  
-  
-  dt_ecdf <- 
-  
-  tic()
-  left_continuous_ecdf(qstats_absolute, 'DurD')
-  qstats_ecdf <- qstats_absolute[, list(ecdf_DurD = list(left_continuous_ecdf(DurD)),
-                                        ecdf_FreD = list(left_continuous_ecdf(FreD))
-  ),
-  by = .(month, reach_id, nsim)]
-  toc()
-  
   # 10, 30, 45, 60, 90, 120, 180, 365, 365*5, 365*10 - longterm
   # DurD: DryDuration
   # PDurD: DryDuration_relative_to_longterm
