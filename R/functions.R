@@ -641,7 +641,8 @@ calc_hydrostats <- function(in_hydromod_dt,
   #RelFlow: Proportion of network length with flowing conditions (opposite of RelInt)
   relF_dt <- qdat[isflowing == 1,
                      list(relF = sum(reach_length)/total_reach_length)
-                     , by=.(date, nsim)]
+                     , by=.(date, nsim)] %>%
+    setorder(date)
   
   #Compute min 7-day and 30-day relF
   relF_dt[, `:=`(
@@ -654,7 +655,7 @@ calc_hydrostats <- function(in_hydromod_dt,
     ), by = nsim]
   
   #Compute previous mean over many windows
-  meanstep <- c(10, 30, 60, 90, 120, 180, 365, 365*5, 365*10)
+  meanstep <- c(10, 30, 60, 90, 120, 180)
   relF_dt[, paste0("relF", meanstep, "past") := frollmean(relF, meanstep, na.rm=T), 
              by = nsim]
 
@@ -688,6 +689,7 @@ calc_hydrostats <- function(in_hydromod_dt,
   #   geom_line() +
   #   facet_wrap(~id)
   
+  #Compute monthly statistics --------------------------------------------------
   qstats_absolute <- qdat_sub[,
                               list(
                                 DurD = sum(isflowing==0),
@@ -701,8 +703,11 @@ calc_hydrostats <- function(in_hydromod_dt,
   #https://stats.stackexchange.com/questions/585291/is-there-an-equivalent-to-an-ecdf-with-a-sign
   #https://math.stackexchange.com/questions/1807120/why-arent-cdfs-left-continuous/1807136#1807136
   #Change the ecdf to be left-continuous.
-  compute_ecdf_values <- function(in_dt, ecdf_column, grouping_columns) {
-    dt_freq <- in_dt[, list(freq = .N), by = c(ecdf_column, grouping_columns)]
+  compute_ecdf_values <- function(in_dt, ecdf_column, grouping_columns, 
+                                  na.rm=TRUE) {
+    # Filter out NAs in the specified ECDF column if na.rm is TRUE
+    dt_freq <- in_dt[if (na.rm) !is.na(get(ecdf_column)) else TRUE,
+                     list(freq = .N), by = c(ecdf_column, grouping_columns)]
     
     # Sort data
     setorderv(dt_freq, ecdf_column)
@@ -714,7 +719,8 @@ calc_hydrostats <- function(in_hydromod_dt,
     out_dt <- merge(in_dt, 
                     dt_freq[, c(paste0('P', ecdf_column), 
                                 ecdf_column, grouping_columns), with=F], 
-                    by = c(ecdf_column, grouping_columns))
+                    by = c(ecdf_column, grouping_columns),
+                    all.x=T)
     
     return(out_dt)
   }
@@ -724,7 +730,31 @@ calc_hydrostats <- function(in_hydromod_dt,
                                          grouping_columns = c('nsim', 'reach_id', 'month')) %>%
     compute_ecdf_values(ecdf_column = 'FreD',
                         grouping_columns = c('nsim', 'reach_id', 'month'))
-
+  
+  #Compute moving-window statistics --------------------------------------------
+  meanstep <- 7
+  qdat_sub[, `:=`(
+    DurD7past =  frollapply(isflowing, n=meanstep, 
+                       FUN=function(x) sum(x==0), 
+                       align='right'),
+    FreD7past = frollapply(noflow_period, n=meanstep, 
+                      FUN=function(x) uniqueN(x, na.rm=T), 
+                      align='right')  
+  ), by = .(reach_id, nsim)
+  ]
+  
+  #Compute ecdf value by day of year for moving windows < 365 days
+  qdat_sub <- compute_ecdf_values(in_dt = qdat_sub, 
+                                  ecdf_column = 'DurD7past',
+                                  grouping_columns = c('nsim', 'reach_id', 'doy'),
+                                  na.rm=T) %>%
+    compute_ecdf_values(ecdf_column = 'FreD7past',
+                        grouping_columns = c('nsim', 'reach_id', 'doy'),
+                        na.rm=T)
+  
+  #Compute ecdf value across entire records for moving windows > 365 days
+  
+  #, 365, 365*5, 365*10)
 
   # 10, 30, 45, 60, 90, 120, 180, 365, 365*5, 365*10 - longterm
   # DurD: DryDuration
