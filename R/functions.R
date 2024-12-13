@@ -461,6 +461,81 @@ compute_hydrostats_q <- function(in_hydromod_dt = hydromod_dt_sites) {
   return(in_hydromod_dt)
 }
 
+#------ dist_proj  -------------------------------------------------
+# Define standard two-point equidistance projection for a given bounding box
+#https://gis.stackexchange.com/questions/313721/automatically-get-an-adequate-projection-system-based-on-a-bounding-box
+## distance projection (tpeqd - two-point equidistant) with projection parameters 
+## derived from feature extent
+dist_proj <- function(x) {
+  bb <- sf::st_bbox(x)
+  paste0("+proj=tpeqd +lat_1=",
+         bb[2],
+         " +lon_1=", 
+         bb[1],
+         " +lat_2=",
+         bb[4], 
+         " +lon_2=", 
+         bb[3],
+         " +x_0=0",
+         " +y_0=0",
+         " +ellps=WGS84 +datum=WGS84 +units=m +no_defs")
+}
+
+#------ Snap sites to nearest segment ---------------------------------------------
+snap_points_inner <- function(in_pts,
+                              in_target,
+                              sites_idcol,
+                              attri_to_join=NULL
+                              ) {
+  #Snap points (fastest custom way in R, it seems):
+  #first computing a line between site and snapping place on nearest segment
+  sitesnap_l <- terra::nearest(in_pts, in_target, centroids = F, lines = T)
+  values(sitesnap_l) <- values(in_pts)
+  sitesnap_l$snap_dist_m <- perim(sitesnap_l)
+  
+  #convert the line to a point (the line's end point)
+  sitesnap_p <- terra::as.points(sitesnap_l) %>%
+    .[duplicated(values(.)[, sites_idcol]),]
+  
+  #Join attributes of nearest line to that point
+  if (!is.null(attri_to_join)) {
+    if (attri_to_join == 'all') { 
+      sitesnap_p[, names(in_target)] <- terra::nearby(
+        sitesnap_p, in_target, k=1, centroids=FALSE)[,'k1'] %>% #Could grab the nth nearest or place a distance limit
+        as.data.frame(in_target)[.,] 
+    } else {
+      sitesnap_p[, attri_to_join] <- terra::nearby(
+        sitesnap_p, in_target, k=1, centroids=FALSE)[,'k1'] %>%
+        as.data.frame(in_target)[., attri_to_join] 
+    }
+  }
+  
+  return(sitesnap_p)
+}
+
+
+#Custom snap method. Lighter and faster than other tests options
+#sf::st_snap doesn't work
+#maptools::snapPointsToLines requires SpatialPoint and SpatialLines - too heavy/slow for this dataset
+#The option used here relies on terra::nearest, which is faster and returns only 
+# one line for each point compared to sf::st_nearest_points
+snap_sites <- function(in_sites_point, 
+                       in_sitesSQL="", #SQL expression to subset sites to be snapped
+                       in_target_path, 
+                       in_targetSQL="", #SQL expression to subset objects that sites will be snapped to
+                       sites_idcol, 
+                       join_idcol=NULL,
+                       target_idcol=NULL,
+                       custom_proj = T, #Whether to first re-project data
+                       attri_to_join = NULL, #Either a single name, a vector of character, or "all"
+                       write_snapped = F, #Whether to write snapped points (out_path)
+                       out_path=NULL,
+                       overwrite = F) {
+  
+
+  
+  return(sitesnap_p)
+}
 #-------------- workflow functions ---------------------------------------------
 # path_list = tar_read(bio_data_paths)
 # in_metadata_edna <- tar_read(metadata_edna)
@@ -996,6 +1071,98 @@ create_sites_shp <- function(in_hydromod_paths_dt,
 }
 
 
+#------ snap_sites -------------------------------------------------------------
+# drn <- 'France'
+# in_sites_path <- tar_read(site_points_shp_list)[[drn]]
+# in_network_path <- tar_read(network_sub_shp_list)[[drn]]
+# out_snapped_sites_path = NULL
+# overwrite = T
+# custom_proj = T
+
+snap_river_sites <- function(in_sites_path, 
+                             in_network_path,
+                             out_snapped_sites_path=NULL, 
+                             custom_proj = T,
+                             overwrite = F) {
+  
+  if (is.null(out_snapped_sites_path)) {
+    out_snapped_sites_path <- sub('[.](?=(shp|gpkg)$)', '_snap.',
+                                  in_sites_path, perl=T)
+  }
+  
+  if (!file.exists(out_snapped_sites_path) | overwrite) {
+    #Iterate over every basin where there is a site
+    if (length(in_sites_path) > 1) {
+      sitesp <- do.call(rbind, lapply(in_sites_path, vect)) 
+    } else {
+      sitesp <- terra::vect(in_sites_path)
+    }
+    
+    #Read network
+    target <- terra::vect(in_network_path)
+    
+    #Project sites 
+    # Global datasets tend to be in geographic coordinates. The unit of these 
+    # coordinates are decimal degrees, whose west-east length decreases
+    # with increasing latitude. Therefore, for identifying the nearest line,
+    # which is based on distance calculation, the point dataset needs to be 
+    # projected. However, no single projection is valid for the entire planet. 
+    # Consequently, for each basin, the sites are projected using a custom 
+    # projection which minimizes distortions for distance calculations within the
+    # network bounding box.
+    if (custom_proj) {
+      if (nrow(target) > 1 & ((xmax(target) != xmin(target)) | 
+                              (ymax(target) != ymin(target)))
+      ){
+        target_proj <- terra::project(target, 
+                                      dist_proj(target))
+      } else {
+        #if only one target object, project to UTM
+        target_proj <- terra::project(
+          target,
+          paste0('+proj=utm +zone=', 
+                 floor((xmin(target) + 180) / 6) + 1,
+                 ' +datum=WGS84 +units=m +no_defs +ellps=WGS84')
+        )
+      } 
+    } else {
+      target_proj <- target
+    } 
+    remove(target)
+    
+    #Project sites to custom projection
+    sitesp_proj <- terra::project(sitesp, crs(target_proj))
+    
+    #Snap each site to the nearest point on the reach that it is paired with
+    sitesnap_p <- lapply(
+      sitesp_proj$id, 
+      function(in_pt_id) {
+        pt <- unique(sitesp_proj[sitesp_proj$id == in_pt_id,])
+        tar <- target_proj[target_proj$cat == pt$reach_id,]
+        
+        if (!is.empty(tar) && nrow(pt) > 0) {
+          out_p <- snap_points_inner(in_pts = pt,
+                                     in_target = tar,
+                                     sites_idcol = 'id',
+                                     attri_to_join = 'cat'
+          )
+        }
+        return(out_p)
+      }) %>%
+      vect(.)
+    
+    #Reproject points to WGS84
+    sitesnap_p <- terra::project(sitesnap_p, "+proj=longlat +datum=WGS84")
+    
+    #Write it out
+    terra::writeVector(sitesnap_p,
+                       out_snapped_sites_path,
+                       overwrite=overwrite)
+  }
+  
+  return(out_snapped_sites_path) #Path to layer containing site points with attribute data
+}
+
 #------ compute_hydrostats_drn -------------------------------------------------
 # in_drn <- 'Czech'
 # varname <- 'qsim'#'isflowing'
@@ -1052,6 +1219,22 @@ compute_hydrostats_drn <- function(in_network_path,
   return(q_stats)
 }
 
+#------ create_ssn -------------------------------------------------------------
+# in_country <- 'France'
+# in_network_path = tar_read(network)
+# out_dir
+create_ssn <- function(in_network_path,
+                       out_dir) {
+  
+  
+  
+}
+#------ compute_connectivity ---------------------------------------------------
+# load("data/data_annika\\STconMEGAmatrix_annika\\Final_STconmat_MegaMat.RData")
+# check <- Final_STconmat_MegaMat
+
+
+###################### OLD #####################################################
 #------ format_envinterm -------------------------------------------------------
 # in_env_dt <- tar_read(env_dt)
 # in_interm90_dt <- tar_read(interm90_dt)

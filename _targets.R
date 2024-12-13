@@ -5,6 +5,7 @@
   #Standardize metacols across all input datasets
   #site names in "data/wp1/Results_present_period_final/data/Genal/Genal_sampling_sites_ReachIDs.csv" are incorrect
   #update readxl
+  #Need to know how sites were snapped to network "C:\DRYvER_wp2\WP2 - Predicting biodiversity changes in DRNs\Coordinates\Shapefiles with sites moved to the river network\Croatia_near_coords.shp"
 #3s flow acc for Europe: https://data.hydrosheds.org/file/hydrosheds-v1-acc/eu_acc_3s.zip
 
 #Make sure that biological data are standardized by area to get densities
@@ -118,7 +119,8 @@ list(
     create_sites_shp(in_hydromod_paths_dt = hydromod_paths_dt,
                      in_sites_dt = sites_dt,
                      out_dir = file.path('results', 'gis'),
-                     geom= 'reaches')
+                     geom= 'reaches',
+                     overwrite = T)
   )
   ,
   
@@ -127,7 +129,18 @@ list(
     create_sites_shp(in_hydromod_paths_dt = hydromod_paths_dt,
                      in_sites_dt = sites_dt,
                      out_dir = file.path('results', 'gis'),
-                     geom = 'points')
+                     geom = 'points',
+                     overwrite = T)
+  )
+  ,
+  
+  tar_target(
+    site_snapped_shp_list,
+    lapply(names(site_points_shp_list), function(in_country) {
+      snap_river_sites(in_sites_path = site_points_shp_list[[in_country]], 
+                       in_network_path = network_sub_shp_list[[in_country]],
+                       overwrite = T)
+    })
   )
   ,
 
@@ -151,35 +164,35 @@ list(
         in_hydromod_drn = hydromod_dt)
     )
   )
-  # ,
-  # 
-  # #Read metadata accompanying eDNA data
-  # tar_target(
-  #   metadata_edna,
-  #   read_xlsx(metadata_edna_path,
-  #             sheet = 'metadataDNA') %>%
-  #     as.data.table %>%
-  #     setnames(tolower(names(.)))
-  # ),
-  # 
-  # #Read pre-processed biological sampling data
-  # tar_target(
-  #   bio_dt,
-  #   read_biodt(path_list = bio_data_paths,
-  #              in_metadata_edna = metadata_edna)
-  # ),
-  # 
-  # #Compute local species richness
-  # tar_target(
-  #   sprich,
-  #   lapply(bio_dt, function(dt) {
-  #     calc_sprich(in_biodt=dt,
-  #                 in_metacols=metacols)
-  #   }) %>%
-  #     rbindlist %>%
-  #     .[, running_id := paste0(site, '_', campaign)] %>%
-  #     merge(env_dt, by=c('site', 'campaign', 'running_id'))
-  # )
+  ,
+
+  #Read metadata accompanying eDNA data
+  tar_target(
+    metadata_edna,
+    read_xlsx(metadata_edna_path,
+              sheet = 'metadataDNA') %>%
+      as.data.table %>%
+      setnames(tolower(names(.)))
+  ),
+
+  #Read pre-processed biological sampling data
+  tar_target(
+    bio_dt,
+    read_biodt(path_list = bio_data_paths,
+               in_metadata_edna = metadata_edna)
+  ),
+
+  #Compute local species richness
+  tar_target(
+    sprich,
+    lapply(bio_dt, function(dt) {
+      calc_sprich(in_biodt=dt,
+                  in_metacols=metacols)
+    }) %>%
+      rbindlist %>%
+      .[, running_id := paste0(site, '_', campaign)] %>%
+      merge(env_dt, by=c('site', 'campaign', 'running_id'))
+  )
   #,
 
 
