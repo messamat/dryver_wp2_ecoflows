@@ -180,16 +180,16 @@ zero_lomf <- function(x, first=TRUE) {
     }
   }
 }
-#------ Create points from coordinates --------------------------------------------
+#------ create_sitepoints_raw --------------------------------------------------
 create_sitepoints_raw <- function(in_dt, lon_col, lat_col, out_points_path,
                                   columns_to_include=NULL) {
   #Create point feature class from formatted site data
   sitesp <- terra::vect(in_dt,
                         geom = c(lon_col, lat_col),
                         crs = "+proj=longlat +datum=WGS84")
-  if (is.null(columns_to_include) {
-    columns_to_include <- names(in_dt)
-  })
+  if (is.null(columns_to_include)) {
+    columns_to_include <- names(sitesp)
+  }
   terra::writeVector(sitesp[, columns_to_include], 
                      out_points_path, overwrite=TRUE)
   return(out_points_path)
@@ -948,12 +948,14 @@ format_site_dt <- function(in_path, in_country) {
 # in_hydromod_paths_dt = tar_read(hydromod_paths_dt)
 # in_sites_dt = tar_read(sites_dt)
 # out_dir = file.path('results', 'gis')
+# geom = 'points'
 # overwrite = TRUE
 
 create_sites_shp <- function(in_hydromod_paths_dt,
                              in_sites_dt,
                              out_dir, 
-                             geom) {
+                             geom,
+                             overwrite = FALSE) {
   if (!dir.exists(out_dir)) {
     dir.create(out_dir)
   }
