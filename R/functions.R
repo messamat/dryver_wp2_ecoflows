@@ -481,7 +481,7 @@ dist_proj <- function(x) {
          " +ellps=WGS84 +datum=WGS84 +units=m +no_defs")
 }
 
-#------ Snap sites to nearest segment ---------------------------------------------
+#------ snap sites to nearest segment ---------------------------------------------
 snap_points_inner <- function(in_pts,
                               in_target,
                               sites_idcol,
@@ -1219,13 +1219,70 @@ compute_hydrostats_drn <- function(in_network_path,
   return(q_stats)
 }
 
+#------ clean_network ---------------------------------------------------------
+# in_country <- 'France'
+# in_network_path = tar_read(network_sub_shp_list)[[in_country]]
+# out_dir = 'results/ssn'
+
+#208: Spain
+#201: France
+#210: Finland
+#205: Croatia, Czech, Hungary
+
+
+clean_network <- function(in_network_path,
+                          out_dir) {
+  net <- st_read(in_network_path)
+  net$length <- st_length(net)
+  
+  #------------------ Split lines at intersections -----------------------------
+  st_precision(net) <- 0.05 #Reduce precision to make up for imperfect geometry alignments
+  
+  #Get outlet
+  # outlet_p <-  st_cast(net[net[[idcol]] == outlet_id,], "POINT") %>%
+  #   .[nrow(.),]
+  
+  sfnet <- as_sfnetwork(net) %>%
+    activate(edges) %>%
+    arrange(edge_length()) %>%
+    tidygraph::convert(to_spatial_simple) %>% #Remove loops
+    tidygraph::convert(to_spatial_subdivision) #Split at intersections
+  
+  net<- activate(sfnet, "edges") %>% #Grab edges
+    st_as_sf() 
+  net$newID <- seq_len(nrow(net)) #Create new IDs because of merging and resplitting
+  
+  st_precision(net) <- 0.05
+  
+  st_write(net, dsn=file.path(out_dir, 'test_france.shp'))
+}
+
 #------ create_ssn -------------------------------------------------------------
 # in_country <- 'France'
-# in_network_path = tar_read(network)
-# out_dir
+# in_network_path = tar_read(network_sub_shp_list)[[in_country]]
+# out_dir = 'results/ssn'
+
 create_ssn <- function(in_network_path,
-                       out_dir) {
+                       custom_proj,
+                       out_dir,
+                       overwrite = T) {
+  if (!dir.exists(out_dir)) {
+    dir.create(out_dir)
+  }
   
+  lsn_path <- file.path(out_dir,
+                        sub('[.](?=(shp|gpkg)$)', '_lsn.',
+                            basename(in_network_path), perl=T)
+  )
+  
+  edges <- SSNbler::lines_to_lsn(
+    streams = net,
+    lsn_path = lsn_path,
+    check_topology = TRUE,
+    snap_tolerance = 0.05,
+    topo_tolerance = 20,
+    overwrite = overwrite
+  )
   
   
 }
