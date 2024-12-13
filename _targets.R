@@ -3,7 +3,12 @@
   #L56 and L158 functions: catch metacols regardless of capitalization
   #Standardize country names across all input datasets
   #Standardize metacols across all input datasets
+  #site names in "data/wp1/Results_present_period_final/data/Genal/Genal_sampling_sites_ReachIDs.csv" are incorrect
   #update readxl
+#3s flow acc for Europe: https://data.hydrosheds.org/file/hydrosheds-v1-acc/eu_acc_3s.zip
+
+#Make sure that biological data are standardized by area to get densities
+#Get ancillary catchment data
 
 
 library(rprojroot)
@@ -38,13 +43,13 @@ list(
   #
   #Path to local environmental data
   tar_target(
-    env_data_path_annika, 
+    env_data_path_annika,
     file.path(rootdir, 'data', 'data_annika', "ENV_all_NAs_as_blank.csv"),
     format='file'
   ),
-  
+
   tar_target(
-    env_data_path_common, 
+    env_data_path_common,
     file.path(bio_dir,"_Environmental data", "ENV_all_1622023.csv"),
     format='file'
   ),
@@ -61,7 +66,7 @@ list(
     file.path(bio_dir, '_Microbes data', 'metadata DRYvER eDNA updated.xlsx'),
     format='file'
   ),
-  
+
   #Paths to pre-processed biological sampling data
   tar_target(
     bio_data_paths,
@@ -86,64 +91,108 @@ list(
   #Read local environmental data
   tar_target(
     env_dt,
-    read_envdt(in_env_data_path_annika = env_data_path_annika, 
+    read_envdt(in_env_data_path_annika = env_data_path_annika,
                in_env_data_path_common = env_data_path_common)
   ),
+  
+  #Correct river site names 
+  tar_target(
+    sites_dt,
+    hydromod_paths_dt[, format_site_dt(in_path = sites_reachids, 
+                                       in_country = country),
+                      by = country] 
+  ),
+  
+  #Subset river network shapefiles to only keep sections within which there
+  #are sampling site-reaches (based on sub-catchment file given by countries)
+  tar_target(
+    network_sub_shp_list,
+    subset_network(in_hydromod_paths_dt = hydromod_paths_dt,
+                   out_dir = file.path('results', 'gis'))
+  )
+  ,
+
+  #Create shapefile of sampling site-reaches
+  tar_target(
+    site_reaches_shp_list,
+    create_sites_shp(in_hydromod_paths_dt = hydromod_paths_dt,
+                     in_sites_dt = sites_dt,
+                     out_dir = file.path('results', 'gis'),
+                     geom= 'reaches')
+  )
+  ,
+  
+  tar_target(
+    site_points_shp_list,
+    create_sites_shp(in_hydromod_paths_dt = hydromod_paths_dt,
+                     in_sites_dt = sites_dt,
+                     out_dir = file.path('results', 'gis'),
+                     geom = 'points')
+  )
+  ,
 
   #Read hydrological modeling data for flow intermittence and discharge
   tarchetypes::tar_map(
     values = hydro_combi,
     tar_target(
       hydromod_dt,
-      get_drn_hydromod(hydromod_path = hydromod_paths_dt[country==in_country, all_sims_path],
+      get_drn_hydromod(hydromod_path = hydromod_paths_dt[country==in_country,
+                                                         all_sims_path],
                        varname = in_varname,
                        selected_sims = 1:20)
+    ),
+
+    tar_target(
+      hydrostats,
+      compute_hydrostats_drn(
+        in_network_path = network_sub_shp_list[[in_country]],
+        in_sites_dt = sites_dt[country == in_country,],
+        varname = in_varname,
+        in_hydromod_drn = hydromod_dt)
     )
   )
-  ,
-
-  #Read metadata accompanying eDNA data
-  tar_target(
-    metadata_edna,
-    read_xlsx(metadata_edna_path,
-              sheet = 'metadataDNA') %>%
-      as.data.table %>%
-      setnames(tolower(names(.)))
-  ),
-  
-  #Read pre-processed biological sampling data
-  tar_target(
-    bio_dt,
-    read_biodt(path_list = bio_data_paths,
-               in_metadata_edna = metadata_edna)
-  ),
-  
-  #Compute local species richness
-  tar_target(
-    sprich,
-    lapply(bio_dt, function(dt) {
-      calc_sprich(in_biodt=dt,
-                  in_metacols=metacols)
-    }) %>% 
-      rbindlist %>%
-      .[, running_id := paste0(site, '_', campaign)] %>%
-      merge(env_dt, by=c('site', 'campaign', 'running_id'))
-  )
+  # ,
+  # 
+  # #Read metadata accompanying eDNA data
+  # tar_target(
+  #   metadata_edna,
+  #   read_xlsx(metadata_edna_path,
+  #             sheet = 'metadataDNA') %>%
+  #     as.data.table %>%
+  #     setnames(tolower(names(.)))
+  # ),
+  # 
+  # #Read pre-processed biological sampling data
+  # tar_target(
+  #   bio_dt,
+  #   read_biodt(path_list = bio_data_paths,
+  #              in_metadata_edna = metadata_edna)
+  # ),
+  # 
+  # #Compute local species richness
+  # tar_target(
+  #   sprich,
+  #   lapply(bio_dt, function(dt) {
+  #     calc_sprich(in_biodt=dt,
+  #                 in_metacols=metacols)
+  #   }) %>%
+  #     rbindlist %>%
+  #     .[, running_id := paste0(site, '_', campaign)] %>%
+  #     merge(env_dt, by=c('site', 'campaign', 'running_id'))
+  # )
   #,
-  
-  #Compute intermitt
-  
+
 
   # #Read intermittence data (90 days)
   # tar_target(
   #   interm90_dt,
-  #   lapply(interm90_data_paths, fread) %>% 
-  #     rbindlist 
+  #   lapply(interm90_data_paths, fread) %>%
+  #     rbindlist
   # ),
-  # 
-  # 
+  #
+  #
 
-  # 
+  #
   # #Merge species richness with local environmental and intermittence data
   # tar_target(
   #   alphadat_merged,
@@ -152,8 +201,8 @@ list(
   #                  in_sprich = sprich)
   # )
   # ,
-  # 
-  # 
+  #
+  #
   # tar_target(
   #   alpha_cor,
   #   alphadat_merged[, list(meanS_totdur90_cor = stats::cor(mean_S, TotDur90),
@@ -161,7 +210,7 @@ list(
   #   ), by=Country]
   # )
   # ,
-  # 
+  #
   # tar_target(
   #   alpha_cor_plots_wrap,
   #   plot_alpha_cor(alphadat_merged,
@@ -169,7 +218,7 @@ list(
   #                  facet_wrap = TRUE)
   # )
   # ,
-  # 
+  #
   # tar_target(
   #   alpha_cor_plots_all,
   #   plot_alpha_cor(alphadat_merged,
@@ -177,20 +226,20 @@ list(
   #                  facet_wrap = FALSE)
   # )
   # ,
-  # 
+  #
   # tar_target(
   #   lmer_S_int,
   #   compute_lmer_mods(
   #     in_dt = unique(alphadat_merged, by=c('site', 'organism')),
   #     in_yvar = 'mean_S')
   # ),
-  # 
+  #
   # # fungi_biof_path <- file.path(datdir, 'Datasets', 'fungi_dna_Biof_removed_zero_rows_and_columns.csv')
   # # fungi_biof <- fread(fungi_biof_path)
   # # fungi_biof[Country == 'Czech Republic', Country := 'Czech']
   # # countries_list <- unique(fungi_biof$Country)
   # # fungi_biof[1:10, 1:10]
-  # 
+  #
   # tar_target(
   #   null_models,
   #   lapply(
@@ -198,13 +247,13 @@ list(
   #     function(organism_type) {
   #       print(organism_type)
   #       organism_dt <- bio_dt[[organism_type]]
-  # 
+  #
   #       if (organism_type %in% c("bac_biof_nopools", "bac_sedi_nopools")) {
   #         in_nsimul = 99; in_method = 'greedyqswap'; in_thin = 100
   #       } else {
   #         in_nsimul = 999; in_method = 'quasiswap'; in_thin = 1
   #       }
-  # 
+  #
   #       organism_dt[, compute_null_model_inner(
   #         in_dt = .SD,
   #         in_metacols = metacols,
@@ -217,14 +266,14 @@ list(
   #     }
   #   )  %>% rbindlist
   # ),
-  # 
+  #
   # tar_target(
   #   env_null_models_dt,
-  #   merge_env_null_models(in_null_models = null_models, 
-  #                         in_env = env_dt, 
+  #   merge_env_null_models(in_null_models = null_models,
+  #                         in_env = env_dt,
   #                         in_int = interm90_dt)
   # ),
-  # 
+  #
   # tar_target(
   #   p_z_by_stream_type,
   #   for (in_organism in unique(env_null_models_dt$organism)) {
@@ -233,24 +282,24 @@ list(
   #                           outdir = resdir)
   #   }
   # ),
-  # 
+  #
   # tar_map(
   #   values = list(env_var_mapped = c('TotDur90', 'TotLeng90', 'discharge')),
   #   tar_target(
   #     p_by_env,
   #     plot_z_by_env(in_env_null_models_dt = env_null_models_dt,
-  #                   env_var = env_var_mapped, 
+  #                   env_var = env_var_mapped,
   #                   outdir = resdir),
-  #     
+  #
   #   )
   # ),
-  # 
+  #
   # tar_target(
   #   lmer_z_int,
   #   compute_lmer_mods(in_dt = env_null_models_dt,
   #                     in_yvar = 'z')
   # ),
-  # 
+  #
   # tar_target(
   #   p_z_jitter,
   #   plot_z_jitter_by_organism(in_env_null_models_dt = env_null_models_dt,
