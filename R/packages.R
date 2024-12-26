@@ -1,16 +1,19 @@
 pkg_vec <- list(
+  'dbscan',
   'ggnewscale',
   'ggplot2',
   'gridExtra',
   'lmerTest', 
   'lme4', 
   'lubridate',
+  'lwgeom',
   'magrittr',
   'MuMIn', 
   'ncdf4',
   'qs',
   'readxl',
   'reshape2',
+  'rlang',
   'rprojroot',
   'sf',
   'sfnetworks',
@@ -33,6 +36,3 @@ lapply(pkg_vec, function(p) {
       require(p, character.only = TRUE, warn.conflicts = FALSE, quietly = FALSE)
     ))
 })
-
-
-
