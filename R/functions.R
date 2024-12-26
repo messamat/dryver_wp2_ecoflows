@@ -536,6 +536,110 @@ snap_sites <- function(in_sites_point,
   
   return(sitesnap_p)
 }
+#------ clean_loops ------------------------------
+in_country <- 'France'
+rivnet_path <- tar_read(network_sub_shp_list)[[in_country]]
+in_outlet <- 2408401
+in_outletid <- 'cat'
+library(mapview)
+library(sfnetworks)
+library(dbscan)
+
+setOldClass("sfnetwork")
+setMethod(
+  f = "mapView",
+  signature = "sfnetwork", 
+  definition = function(x, draw_lines = TRUE, ...) {
+    nodes <- sf::st_as_sf(x, "nodes")
+    m1 <- mapview(nodes, ...)
+    if (draw_lines) {
+      x <- sfnetworks:::explicitize_edges(x)
+      edges <- sf::st_as_sf(x, "edges")
+      m2 <- mapview(edges, ...)
+      m1 + m2
+    } else {
+      m1
+    }
+  }
+)
+
+
+  
+clean_rivnet_loops <- function(rivnet_path) {
+  rivnet <- vect(rivnet_path)
+  rivnet_geom <- geom(rivnet) %>%
+    as.data.table %>%
+    merge(rivnet)
+  plot(rivnet)
+  
+  plot(rivnet[1,])
+  
+  points(rivnet_pts)
+  
+  #Dissolve entire network
+  rivnet_agg <- aggregate(rivnet)
+  #Split at line intersections
+  
+  #------------------ Split lines at intersections -----------------------------
+  st_precision(rivnet) <- 0.05 #Reduce precision to make up for imperfect geometry alignments
+  
+  #Get outlet
+  # outlet_p <-  st_cast(net[net[[idcol]] == outlet_id,], "POINT") %>%
+  #   .[nrow(.),]
+  
+  sfnet <- sf::st_as_sf(rivnet) %>%
+    as_sfnetwork %>%
+    activate(edges) %>%
+    arrange(edge_length()) %>%
+    convert(to_spatial_smooth) %>%
+    convert(to_spatial_subdivision) %>%
+    filter(!edge_is_multiple()) %>%
+    filter(!edge_is_loop())
+  
+  node_coords = sfnet %>%
+    activate("nodes") %>%
+    st_coordinates()
+  
+  # Cluster the nodes with the DBSCAN spatial clustering algorithm.
+  # We set eps = 0.5 such that:
+  # Nodes within a distance of 0.5 from each other will be in the same cluster.
+  # We set minPts = 1 such that:
+  # A node is assigned a cluster even if it is the only member of that cluster.
+  clusters = dbscan(node_coords, eps = 30, minPts = 1)$cluster
+
+  # Add the cluster information to the nodes of the network.
+  clustered = sfnet %>%
+    activate("nodes") %>%
+    mutate(cls = clusters)
+  
+  sfnet_clustered <- convert(
+    clustered,
+    to_spatial_contracted,
+    cls,
+    simplify = TRUE
+  ) %>%
+    convert(to_spatial_smooth) 
+  
+  sfnet_clustered_edges <-  st_as_sf(sfnet_clustered, "edges")
+  st_write(sfnet_clustered_edges[, c('from', 'to', 'cat')], 'test_albarine_clean_30m.shp')
+  
+  autoplot(sfnet_clustered) %>%
+    ggplotly
+  mapview(sfnet_clustered)
+  
+  #st_reverse(duplicates)
+  
+  net<- activate(sfnet, "edges") %>% #Grab edges
+    st_as_sf() 
+  net$newID <- seq_len(nrow(net)) #Create new IDs because of merging and resplitting
+  
+  st_precision(net) <- 0.05
+  
+  st_write(net, dsn=file.path(out_dir, 'test_france.shp'))
+  
+}
+
+
 #-------------- workflow functions ---------------------------------------------
 # path_list = tar_read(bio_data_paths)
 # in_metadata_edna <- tar_read(metadata_edna)
@@ -1224,6 +1328,7 @@ compute_hydrostats_drn <- function(in_network_path,
 # in_network_path = tar_read(network_sub_shp_list)[[in_country]]
 # out_dir = 'results/ssn'
 
+#GLOWS 2 reference
 #208: Spain
 #201: France
 #210: Finland
