@@ -537,66 +537,79 @@ snap_sites <- function(in_sites_point,
   return(sitesnap_p)
 }
 #------ clean_loops ------------------------------
-in_country <- 'France'
-rivnet_path <- tar_read(network_sub_shp_list)[[in_country]]
-in_outlet <- 2408401
-in_outletid <- 'cat'
-library(mapview)
-library(sfnetworks)
-library(dbscan)
 
-setOldClass("sfnetwork")
-setMethod(
-  f = "mapView",
-  signature = "sfnetwork", 
-  definition = function(x, draw_lines = TRUE, ...) {
-    nodes <- sf::st_as_sf(x, "nodes")
-    m1 <- mapview(nodes, ...)
-    if (draw_lines) {
-      x <- sfnetworks:::explicitize_edges(x)
-      edges <- sf::st_as_sf(x, "edges")
-      m2 <- mapview(edges, ...)
-      m1 + m2
-    } else {
-      m1
+clean_rivnet_loops <- function(rivnet_path, outletid, idcol) {
+  in_country <- 'France'
+  rivnet_path <- tar_read(network_sub_shp_list)[[in_country]]
+  outletid <- 2408401
+  idcol <- 'cat'
+  library(mapview)
+  library(sfnetworks)
+  library(dbscan)
+  library(lwgeom)
+  
+  
+  setOldClass("sfnetwork")
+  setMethod(
+    f = "mapView",
+    signature = "sfnetwork", 
+    definition = function(x, draw_lines = TRUE, ...) {
+      nodes <- sf::st_as_sf(x, "nodes")
+      m1 <- mapview(nodes, ...)
+      if (draw_lines) {
+        x <- sfnetworks:::explicitize_edges(x)
+        edges <- sf::st_as_sf(x, "edges")
+        m2 <- mapview(edges, ...)
+        m1 + m2
+      } else {
+        m1
+      }
     }
-  }
-)
-
-
+  )
   
-clean_rivnet_loops <- function(rivnet_path) {
-  rivnet <- vect(rivnet_path)
-  rivnet_geom <- geom(rivnet) %>%
-    as.data.table %>%
-    merge(rivnet)
-  plot(rivnet)
-  
-  plot(rivnet[1,])
-  
-  points(rivnet_pts)
-  
-  #Dissolve entire network
-  rivnet_agg <- aggregate(rivnet)
-  #Split at line intersections
-  
-  #------------------ Split lines at intersections -----------------------------
-  st_precision(rivnet) <- 0.05 #Reduce precision to make up for imperfect geometry alignments
-  
-  #Get outlet
-  # outlet_p <-  st_cast(net[net[[idcol]] == outlet_id,], "POINT") %>%
+  # # Step 3: Split the lines at intersection points
+  # lwgeom::st_startpoint()
+  # lwgeom::st_endpoint()
+  #
+  #   # #Get outlet
+  # outlet_p <-  st_cast(rivnet[rivnet[[idcol]] == outlet_id,], "POINT") %>%
   #   .[nrow(.),]
+  #
+  # ggplot(rivnet_agginters) %>%
+  #   ggplotly
+  # 
+  #------------------ Split lines at intersections -----------------------------
+  st_precision(rivnet) <- 0.05 #Reduce precision to make up for occasionally imperfect geometry alignments
   
-  sfnet <- sf::st_as_sf(rivnet) %>%
+  rivnet <- read_sf(rivnet_path)
+  
+  sfnet_ini <- sf::st_as_sf(rivnet) %>%
     as_sfnetwork %>%
     activate(edges) %>%
-    arrange(edge_length()) %>%
-    convert(to_spatial_smooth) %>%
-    convert(to_spatial_subdivision) %>%
     filter(!edge_is_multiple()) %>%
     filter(!edge_is_loop())
   
-  node_coords = sfnet %>%
+  splitting_nodes <- activate(sfnet, nodes) %>%
+    mutate(degree = igraph::degree(.)) %>%
+    filter(degree >= 3) %>%
+    st_as_sf("nodes")
+  
+  ggplotly(
+    ggplot(rivnet) +
+      geom_sf() +
+      geom_sf(data=splitting_nodes, color='red')
+  )
+  
+  st_write(splitting_nodes, 'split_nodes.shp')
+  
+  rivnet_agg <- st_union(rivnet) %>%
+    st_line_merge %>%
+    st_split(., splitting_nodes)  %>%
+    st_collection_extract("LINESTRING")
+  
+  sfnet <- as_sfnetwork(rivnet_agg)
+  
+  node_coords <- sfnet %>%
     activate("nodes") %>%
     st_coordinates()
   
@@ -605,7 +618,7 @@ clean_rivnet_loops <- function(rivnet_path) {
   # Nodes within a distance of 0.5 from each other will be in the same cluster.
   # We set minPts = 1 such that:
   # A node is assigned a cluster even if it is the only member of that cluster.
-  clusters = dbscan(node_coords, eps = 30, minPts = 1)$cluster
+  clusters = dbscan(node_coords, eps = 40, minPts = 1)$cluster
 
   # Add the cluster information to the nodes of the network.
   clustered = sfnet %>%
@@ -620,11 +633,14 @@ clean_rivnet_loops <- function(rivnet_path) {
   ) %>%
     convert(to_spatial_smooth) 
   
-  sfnet_clustered_edges <-  st_as_sf(sfnet_clustered, "edges")
-  st_write(sfnet_clustered_edges[, c('from', 'to', 'cat')], 'test_albarine_clean_30m.shp')
+  sfnet_clustered_edges <- st_as_sf(sfnet_clustered, "edges")
+  st_write(sfnet_clustered_edges[, c('from', 'to')], 'test_albarine_clean_40m_2.shp')
   
-  autoplot(sfnet_clustered) %>%
-    ggplotly
+  ggplotly(
+    ggplot(st_as_sf(sfnet, "edges")) +
+      geom_sf() +
+      geom_sf(data=st_as_sf(sfnet, "nodes"))
+  )
   mapview(sfnet_clustered)
   
   #st_reverse(duplicates)
