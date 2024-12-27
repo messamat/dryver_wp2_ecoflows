@@ -1169,6 +1169,9 @@ clean_network <- function(rivnet_path, idcol,
 # Reverse upstream segments recursively
 # visited <- NULL
 # segment <- outlet_seg
+
+############### INVESTIGATE LINESTRING DIRECTION: what doies that correspond to?
+############### Why doesn't it match QGIS?
 direct_network_inner <- function(segment, in_network, visited = NULL) {
   print(segment[[idcol]])
   visited <- c(visited, segment[[idcol]])
@@ -1176,17 +1179,14 @@ direct_network_inner <- function(segment, in_network, visited = NULL) {
   # Find connected segments 
   inseg_startpoint <- get_startpoint(segment$geometry)
   
-  microbenchmark::microbenchmark({
-    in_network[!(in_network[[idcol]] %in% visited),] %>%
-      .[as.vector(st_intersects(., lwgeom::st_startpoint(segment$geometry), sparse=F)),]
-  },
-  {  in_network[!(in_network[[idcol]] %in% visited),] %>%
-      mutate(endpoint = purrr::map(geometry, get_endpoint)) %>%
-      mutate(startpoint = purrr::map(geometry, get_startpoint)) %>%
-      filter(purrr:::map_lgl(endpoint, ~ all.equal(., inseg_startpoint) == TRUE) |
-               purrr:::map_lgl(startpoint, ~ all.equal(., inseg_startpoint) == TRUE))},
-  times=20
-  )
+  connected <- in_network[!(in_network[[idcol]] %in% visited),] %>%
+    .[as.vector(st_intersects(., lwgeom::st_startpoint(segment$geometry), 
+                              sparse=F)),]
+  
+  ggplotly(ggplot(in_network[!(in_network[[idcol]] %in% visited),]) +
+             geom_sf() +
+             geom_sf(data=segment, color='red') +
+             geom_sf(data=lwgeom::st_startpoint(segment$geometry)))
   
   # Reverse and recurse
   for (i in seq_len(nrow(connected))) {
@@ -1194,12 +1194,13 @@ direct_network_inner <- function(segment, in_network, visited = NULL) {
     seg_geom <- connected$geometry[i]
     # Reverse if not aligned
     if (!(all.equal(get_endpoint(seg_geom), inseg_startpoint) == TRUE)) {
-      connected$geometry[i] <- st_reverse(seg_geom)
+      in_network[in_network[[idcol]]==seg_id,]$geometry <- st_reverse(seg_geom)
     }
     # Recursively process upstream
-    in_network <- direct_network_inner(connected[i, ], in_network, visited)
+    in_network <- direct_network_inner(
+      segment = in_network[in_network[[idcol]]==seg_id,], 
+      in_network, visited)
   }
-  
   return(in_network)
 }
 
