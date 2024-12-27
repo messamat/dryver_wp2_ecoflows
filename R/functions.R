@@ -537,22 +537,48 @@ snap_sites <- function(in_sites_point,
   return(sitesnap_p)
 }
 #------ clean_rivnet ------------------------------
-in_country <- 'France'
+in_country <- 'Finland'
 rivnet_path <- tar_read(network_sub_shp_list)[[in_country]]
 idcol <- 'cat'
+node_clustering_dist = 50
+min_segment_length = 20
+outdir = file.path(resdir, 'gis')
+save_shp = TRUE
 
+hungary_netclean <- clean_network(rivnet_path=rivnet_path,
+                                 idcol = idcol,
+                                 node_clustering_dist = node_clustering_dist,
+                                 min_segment_length = 20,
+                                 outdir = outdir,
+                                 save_shp = TRUE)
+France: 40
+Hungary: 50
+Czech: 60
+Croatia: 50
+Spain: 40
+Finland: 50
 
-clean_rivnet <- function(rivnet_path, outletid, idcol) {
-  #------------------ Split lines at intersections -----------------------------
+clean_network <- function(rivnet_path, idcol, 
+                         node_clustering_dist,
+                         min_segment_length = 20,
+                         outdir=NULL, save_shp=FALSE, 
+                         return_path=FALSE) {
+  #Read input network
   rivnet <- read_sf(rivnet_path)
-  st_precision(rivnet) <- 0.05 #Reduce precision to make up for occasionally imperfect geometry alignments
   
-  #Get basic network
-  sfnet_ini <- sf::st_as_sf(rivnet) %>%
+  #Preformat basic network
+  sfnet_ini <- rivnet %>%
     as_sfnetwork %>%
     activate("edges") %>%
     filter(!edge_is_multiple()) %>% #Keep shortest of edges that connect the same pair of nodes
     filter(!edge_is_loop()) #Remove obvious loops: edges that start and end at the same node
+  
+  #------------------ Split lines at intersections -----------------------------
+  # st_write(sf::st_as_sf(sfnet_ini),
+  #          file.path(outdir,
+  #                    paste0(tools::file_path_sans_ext(basename(rivnet_path)),
+  #                           '_sfnet_ini.shp')
+  #          ), append=F)
   
   #Get confluence nodes (nodes of third degree: with at least 3 intersecting edges)
   #2nd degree nodes are pseudonodes and 1st degree nodes are dangling
@@ -576,7 +602,14 @@ clean_rivnet <- function(rivnet_path, outletid, idcol) {
     lwgeom::st_split(., splitting_nodes)  %>%
     sf::st_collection_extract("LINESTRING")
   
-  #Remove loops by clustering nearby nodes
+  #Intermediate write out
+  # st_write(rivnet,#st_sf(geometry =rivnet_agg, crs = st_crs(rivnet)),
+  #          file.path(outdir,
+  #                    paste0(tools::file_path_sans_ext(basename(rivnet_path)),
+  #                           '_union2.shp')
+  #          ), append=F)
+
+  #------------------ Remove loops by clustering nearby nodes--------------------
   sfnet <- as_sfnetwork(rivnet_agg)
   
   node_coords <- sfnet %>%
@@ -588,7 +621,8 @@ clean_rivnet <- function(rivnet_path, outletid, idcol) {
   # Nodes within a distance of 40 m from each other will be in the same cluster.
   # We set minPts = 1 such that:
   # A node is assigned a cluster even if it is the only member of that cluster.
-  clusters = dbscan::dbscan(node_coords, eps = 40, minPts = 1)$cluster
+  clusters = dbscan::dbscan(node_coords, 
+                            eps = node_clustering_dist, minPts = 1)$cluster
 
   # Add the cluster information to the nodes of the network.
   clustered = sfnet %>%
@@ -608,26 +642,70 @@ clean_rivnet <- function(rivnet_path, outletid, idcol) {
   ) %>%
     tidygraph::convert(sfnetworks::to_spatial_smooth) #Remove pseudo nodes
 
-  #Convert back to sf and write it out
+  #------------------ Trim spits (segments with dangle point under minimum length ) ------------
+  #Convert back to sf
   rivnet_clustered <- st_as_sf(sfnet_clustered, "edges")
-  st_write(rivnet_clustered[, c('from', 'to')], 'test_albarine_clean_40m.shp', append=F)
+  
+  #Re-aggregate and split the network
+  rivnet_clustered_agg <- sf::st_union(rivnet_clustered) %>%
+    sf::st_line_merge(.) %>%
+    lwgeom::st_split(., splitting_nodes)  %>%
+    sf::st_collection_extract("LINESTRING") %>%
+    st_sf(geometry=.)
+  
+  #Compute segment length
+  rivnet_clustered_agg$length <- as.numeric(st_length(rivnet_clustered_agg))
+  
+  #Identify dangle points
+  agg_endpts <- c(lwgeom::st_startpoint(rivnet_clustered_agg), 
+                  lwgeom::st_endpoint(rivnet_clustered_agg)) 
+  
+  danglepts <- agg_endpts[!(duplicated(agg_endpts) | 
+                  duplicated(agg_endpts, fromLast=TRUE)),] %>%
+    st_sf %>%
+    mutate(dangle = 'dangle')
+    
+  #Remove spits under min length
+  rivnet_clustered_aggsub <- st_join(x = rivnet_clustered_agg,
+                                  y = danglepts, 
+                                  join = st_intersects,
+                                  left = TRUE,
+                                  all.x = TRUE) %>%
+    mutate(dangle = replace_na(dangle, "connected")) %>%
+    dplyr::filter(!((dangle == 'dangle') &
+                      (length < min_segment_length))) %>%
+    select(-c(length, dangle))
+
+  #Intermediate write out
+  # st_write(rivnet_clustered_aggsub[, c('length', 'dangle')],
+  #          file.path(outdir,
+  #                    paste0(tools::file_path_sans_ext(basename(rivnet_path)),
+  #                           '_clustered_agg_dangle3.shp')
+  #          ), append=F)
+
+  # st_write(danglepts,
+  #          file.path(outdir,
+  #                    paste0(tools::file_path_sans_ext(basename(rivnet_path)),
+  #                           '_dangles_pretrim.shp')
+  #          ), append=F)
   
   #Visualize
   # ggplotly(
-  #   ggplot(st_as_sf(sfnet, "edges")) +
-  #     geom_sf() +
-  #     geom_sf(data=st_as_sf(sfnet, "nodes"))
+  #   ggplot(rivnet_clustered_agg) +
+  #     geom_sf()
   # )
   
+  #------------------ Re-assign original IDs to all segments ---------------
   #Split back into component linestrings
   rivnet_endpts <- c(lwgeom::st_startpoint(rivnet), 
                      lwgeom::st_endpoint(rivnet))
-  rivnet_clustered_resplit <- lwgeom::st_split(rivnet_clustered, 
+  rivnet_clustered_resplit <- lwgeom::st_split(rivnet_clustered_aggsub, 
                                                rivnet_endpts)  %>%
     sf::st_collection_extract("LINESTRING") %>%
-    .[-unlist(st_equals(., retain_unique=TRUE)),] #Remove duplicate lines
+    dplyr::distinct(.) #Remove duplicate lines
+    #.[-unlist(st_equals(., retain_unique=TRUE)),] 
   
-  rivnet_clustered_resplit$UID <- seq_along(rivnet_clustered_resplit$from)
+  rivnet_clustered_resplit$UID <- seq_along(rivnet_clustered_resplit$geometry)
   
   #Join those that have not moved
   rivnet_clustered_joinini <- st_join(
@@ -673,8 +751,21 @@ clean_rivnet <- function(rivnet_path, outletid, idcol) {
   rivnet_clustered_joinall[[idcol]] <- dplyr::coalesce(
     rivnet_clustered_joinall[[idcol]],
     rivnet_clustered_joinall$nearest_id)
-
-  return(select(rivnet_clustered_joinall, -'nearest_id'))
+  
+  #------------------ Write out results ------------------------------------------
+  out_net <- rivnet_clustered_joinall[
+    , c('UID', names(rivnet)[names(rivnet) != 'geometry'])]
+  
+  out_path <- file.path(outdir,
+                        paste0(tools::file_path_sans_ext(basename(rivnet_path)),
+                               '_clean.shp')
+  )
+  
+  if (save_shp) {
+    st_write(out_net, out_path, append=F)
+  }
+  
+  return(ifelse(return_path, out_path, out_net))
 }
 
 
@@ -1361,44 +1452,7 @@ compute_hydrostats_drn <- function(in_network_path,
   return(q_stats)
 }
 
-#------ clean_network ---------------------------------------------------------
-# in_country <- 'France'
-# in_network_path = tar_read(network_sub_shp_list)[[in_country]]
-# out_dir = 'results/ssn'
 
-#GLOWS 2 reference
-#208: Spain
-#201: France
-#210: Finland
-#205: Croatia, Czech, Hungary
-
-
-clean_network <- function(in_network_path,
-                          out_dir) {
-  net <- st_read(in_network_path)
-  net$length <- st_length(net)
-  
-  #------------------ Split lines at intersections -----------------------------
-  st_precision(net) <- 0.05 #Reduce precision to make up for imperfect geometry alignments
-  
-  #Get outlet
-  # outlet_p <-  st_cast(net[net[[idcol]] == outlet_id,], "POINT") %>%
-  #   .[nrow(.),]
-  
-  sfnet <- as_sfnetwork(net) %>%
-    activate(edges) %>%
-    arrange(edge_length()) %>%
-    tidygraph::convert(to_spatial_simple) %>% #Remove loops
-    tidygraph::convert(to_spatial_subdivision) #Split at intersections
-  
-  net<- activate(sfnet, "edges") %>% #Grab edges
-    st_as_sf() 
-  net$newID <- seq_len(nrow(net)) #Create new IDs because of merging and resplitting
-  
-  st_precision(net) <- 0.05
-  
-  st_write(net, dsn=file.path(out_dir, 'test_france.shp'))
-}
 
 #------ create_ssn -------------------------------------------------------------
 # in_country <- 'France'
