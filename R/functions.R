@@ -1176,11 +1176,17 @@ direct_network_inner <- function(segment, in_network, visited = NULL) {
   # Find connected segments 
   inseg_startpoint <- get_startpoint(segment$geometry)
   
-  connected <- in_network[!(in_network[[idcol]] %in% visited),] %>%
-    mutate(endpoint = purrr::map(geometry, get_endpoint)) %>%
-    mutate(startpoint = purrr::map(geometry, get_startpoint)) %>%
-    filter(purrr:::map_lgl(endpoint, ~ all.equal(., inseg_startpoint) == TRUE) |
-             purrr:::map_lgl(startpoint, ~ all.equal(., inseg_startpoint) == TRUE))
+  microbenchmark::microbenchmark({
+    in_network[!(in_network[[idcol]] %in% visited),] %>%
+      .[as.vector(st_intersects(., lwgeom::st_startpoint(segment$geometry), sparse=F)),]
+  },
+  {  in_network[!(in_network[[idcol]] %in% visited),] %>%
+      mutate(endpoint = purrr::map(geometry, get_endpoint)) %>%
+      mutate(startpoint = purrr::map(geometry, get_startpoint)) %>%
+      filter(purrr:::map_lgl(endpoint, ~ all.equal(., inseg_startpoint) == TRUE) |
+               purrr:::map_lgl(startpoint, ~ all.equal(., inseg_startpoint) == TRUE))},
+  times=20
+  )
   
   # Reverse and recurse
   for (i in seq_len(nrow(connected))) {
