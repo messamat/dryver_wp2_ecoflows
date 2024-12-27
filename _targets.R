@@ -112,6 +112,24 @@ list(
                    out_dir = file.path('results', 'gis'))
   )
   ,
+  
+  #Clean network: remove loops
+  tar_target(
+    network_clean_shp_list,
+    lapply(names(network_sub_shp_list), function(in_country) {
+      #Set size of simplifying radius to remove loops. See function
+      clustering_dist_list <- list(Croatia=50, Czech=60, Finland=50, 
+                              France=40, Hungary=50, Spain=40)
+      clean_network(rivnet_path = network_sub_shp_list[[in_country]],
+                    idcol = 'cat',
+                    node_clustering_dist = clustering_dist_list[[in_country]],
+                    min_segment_length = 20,
+                    outdir = outdir,
+                    save_shp = TRUE, 
+                    return_path = TRUE)
+    })
+  )
+  ,
 
   #Create shapefile of sampling site-reaches
   tar_target(
@@ -138,7 +156,7 @@ list(
     site_snapped_shp_list,
     lapply(names(site_points_shp_list), function(in_country) {
       snap_river_sites(in_sites_path = site_points_shp_list[[in_country]], 
-                       in_network_path = network_sub_shp_list[[in_country]],
+                       in_network_path = network_clean_shp_list[[in_country]],
                        overwrite = T)
     })
   )
@@ -158,7 +176,7 @@ list(
     tar_target(
       hydrostats,
       compute_hydrostats_drn(
-        in_network_path = network_sub_shp_list[[in_country]],
+        in_network_path = network_clean_shp_list[[in_country]],
         in_sites_dt = sites_dt[country == in_country,],
         varname = in_varname,
         in_hydromod_drn = hydromod_dt)
