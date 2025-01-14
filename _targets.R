@@ -107,34 +107,64 @@ list(
   #Subset river network shapefiles to only keep sections within which there
   #are sampling site-reaches (based on sub-catchment file given by countries)
   tar_target(
-    network_sub_shp_list,
+    network_sub_gpkg_list,
     subset_network(in_hydromod_paths_dt = hydromod_paths_dt,
-                   out_dir = file.path('results', 'gis'))
+                   out_dir = file.path('results', 'gis'),
+                   overwrite = T)
   )
   ,
   
-  #Clean network: remove loops
+  #Clean networks
   tar_target(
-    network_clean_shp_list,
-    lapply(names(network_sub_shp_list), function(in_country) {
+    network_clean_gpkg_list,
+    lapply(names(network_sub_gpkg_list), function(in_country) {
       #Set size of simplifying radius to remove loops. See function
       clustering_dist_list <- list(Croatia=50, Czech=60, Finland=50, 
                               France=40, Hungary=50, Spain=40)
-      clean_network(rivnet_path = network_sub_shp_list[[in_country]],
-                    idcol = 'cat',
-                    node_clustering_dist = clustering_dist_list[[in_country]],
-                    min_segment_length = 20,
-                    outdir = outdir,
-                    save_shp = TRUE, 
-                    return_path = TRUE)
-    })
+      
+      out_net_path <- clean_network(
+        rivnet_path = network_sub_gpkg_list[[in_country]],
+        idcol = 'cat',
+        node_clustering_dist = clustering_dist_list[[in_country]],
+        min_segment_length = 20,
+        outdir = file.path(resdir, 'gis'),
+        save_gpkg = TRUE, 
+        return_path = TRUE)
+      
+      if (in_country == 'Czech') {
+        clean_net <- st_read(out_net_path) %>%
+          .[!(.[['cat']] %in% c(40112, 40106, 40478)),]
+        st_write(clean_net, out_net_path, append=F)
+      }
+      
+      return(out_net_path)
+    }) %>% setNames(names(network_sub_gpkg_list))
+  )
+  ,
+  
+  tar_target(
+    network_directed_gpkg_list,
+    lapply(names(network_clean_gpkg_list), function(in_country) {
+      #Set size of simplifying radius to remove loops. See function
+      outlet_uid_list <- list(Croatia = 458, Czech = 4, Finland = 682,
+                              France = 1, Hungary = 5, Spain = 86)
+      
+      out_net_path <- direct_network(
+        rivnet_path = network_clean_gpkg_list[[in_country]],
+        idcol = 'UID',
+        outletid = outlet_uid_list[[in_country]],
+        outdir = file.path(resdir, 'gis'), 
+        save_gpkg = TRUE) 
+      
+      return(out_net_path)
+    }) %>% setNames(names(network_clean_gpkg_list))
   )
   ,
 
   #Create shapefile of sampling site-reaches
   tar_target(
-    site_reaches_shp_list,
-    create_sites_shp(in_hydromod_paths_dt = hydromod_paths_dt,
+    site_reaches_gpkg_list,
+    create_sites_gpkg(in_hydromod_paths_dt = hydromod_paths_dt,
                      in_sites_dt = sites_dt,
                      out_dir = file.path('results', 'gis'),
                      geom= 'reaches',
@@ -143,8 +173,8 @@ list(
   ,
   
   tar_target(
-    site_points_shp_list,
-    create_sites_shp(in_hydromod_paths_dt = hydromod_paths_dt,
+    site_points_gpkg_list,
+    create_sites_gpkg(in_hydromod_paths_dt = hydromod_paths_dt,
                      in_sites_dt = sites_dt,
                      out_dir = file.path('results', 'gis'),
                      geom = 'points',
@@ -153,64 +183,64 @@ list(
   ,
   
   tar_target(
-    site_snapped_shp_list,
-    lapply(names(site_points_shp_list), function(in_country) {
-      snap_river_sites(in_sites_path = site_points_shp_list[[in_country]], 
-                       in_network_path = network_clean_shp_list[[in_country]],
+    site_snapped_gpkg_list,
+    lapply(names(site_points_gpkg_list), function(in_country) {
+      snap_river_sites(in_sites_path = site_points_gpkg_list[[in_country]], 
+                       in_network_path = network_clean_gpkg_list[[in_country]],
                        overwrite = T)
     })
   )
-  ,
-
-  #Read hydrological modeling data for flow intermittence and discharge
-  tarchetypes::tar_map(
-    values = hydro_combi,
-    tar_target(
-      hydromod_dt,
-      get_drn_hydromod(hydromod_path = hydromod_paths_dt[country==in_country,
-                                                         all_sims_path],
-                       varname = in_varname,
-                       selected_sims = 1:20)
-    ),
-
-    tar_target(
-      hydrostats,
-      compute_hydrostats_drn(
-        in_network_path = network_clean_shp_list[[in_country]],
-        in_sites_dt = sites_dt[country == in_country,],
-        varname = in_varname,
-        in_hydromod_drn = hydromod_dt)
-    )
-  )
-  ,
-
-  #Read metadata accompanying eDNA data
-  tar_target(
-    metadata_edna,
-    read_xlsx(metadata_edna_path,
-              sheet = 'metadataDNA') %>%
-      as.data.table %>%
-      setnames(tolower(names(.)))
-  ),
-
-  #Read pre-processed biological sampling data
-  tar_target(
-    bio_dt,
-    read_biodt(path_list = bio_data_paths,
-               in_metadata_edna = metadata_edna)
-  ),
-
-  #Compute local species richness
-  tar_target(
-    sprich,
-    lapply(bio_dt, function(dt) {
-      calc_sprich(in_biodt=dt,
-                  in_metacols=metacols)
-    }) %>%
-      rbindlist %>%
-      .[, running_id := paste0(site, '_', campaign)] %>%
-      merge(env_dt, by=c('site', 'campaign', 'running_id'))
-  )
+  # ,
+  # 
+  # #Read hydrological modeling data for flow intermittence and discharge
+  # tarchetypes::tar_map(
+  #   values = hydro_combi,
+  #   tar_target(
+  #     hydromod_dt,
+  #     get_drn_hydromod(hydromod_path = hydromod_paths_dt[country==in_country,
+  #                                                        all_sims_path],
+  #                      varname = in_varname,
+  #                      selected_sims = 1:20)
+  #   ),
+  # 
+  #   tar_target(
+  #     hydrostats,
+  #     compute_hydrostats_drn(
+  #       in_network_path = network_clean_gpkg_list[[in_country]],
+  #       in_sites_dt = sites_dt[country == in_country,],
+  #       varname = in_varname,
+  #       in_hydromod_drn = hydromod_dt)
+  #   )
+  # )
+  # ,
+  # 
+  # #Read metadata accompanying eDNA data
+  # tar_target(
+  #   metadata_edna,
+  #   read_xlsx(metadata_edna_path,
+  #             sheet = 'metadataDNA') %>%
+  #     as.data.table %>%
+  #     setnames(tolower(names(.)))
+  # ),
+  # 
+  # #Read pre-processed biological sampling data
+  # tar_target(
+  #   bio_dt,
+  #   read_biodt(path_list = bio_data_paths,
+  #              in_metadata_edna = metadata_edna)
+  # ),
+  # 
+  # #Compute local species richness
+  # tar_target(
+  #   sprich,
+  #   lapply(bio_dt, function(dt) {
+  #     calc_sprich(in_biodt=dt,
+  #                 in_metacols=metacols)
+  #   }) %>%
+  #     rbindlist %>%
+  #     .[, running_id := paste0(site, '_', campaign)] %>%
+  #     merge(env_dt, by=c('site', 'campaign', 'running_id'))
+  # )
   #,
 
 

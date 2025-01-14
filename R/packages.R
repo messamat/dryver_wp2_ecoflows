@@ -10,6 +10,7 @@ pkg_vec <- list(
   'magrittr',
   'MuMIn', 
   'ncdf4',
+  'plotly',
   'qs',
   'readxl',
   'reshape2',
@@ -33,6 +34,6 @@ pkg_vec <- list(
 lapply(pkg_vec, function(p) {
   suppressWarnings(
     suppressPackageStartupMessages(
-      require(p, character.only = TRUE, warn.conflicts = FALSE, quietly = FALSE)
+      library(p, character.only = TRUE, warn.conflicts = FALSE, quietly = FALSE)
     ))
 })

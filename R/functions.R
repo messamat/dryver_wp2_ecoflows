@@ -953,13 +953,14 @@ subset_network <- function(in_hydromod_paths_dt, out_dir, overwrite=FALSE) {
   in_hydromod_paths_dt[
     , network_sub_path := file.path(out_dir, 
                                     paste0(tolower(country), 
-                                           '_river_network_sub.shp'))]
+                                           '_river_network_sub.gpkg'))]
   
   in_hydromod_paths_dt[, {
     if (!file.exists(network_sub_path) | overwrite) {
       terra::vect(network_path) %>%
         .[relate(terra::vect(catchment_path), .,"intersects")[1,],] %>% #Contains removes some segments
-        terra::writeVector(filename = network_sub_path)
+        terra::writeVector(filename = network_sub_path,
+                           overwrite = T)
     }
   }, by=country]
   
@@ -967,22 +968,26 @@ subset_network <- function(in_hydromod_paths_dt, out_dir, overwrite=FALSE) {
 }
 
 #------ clean_network ------------------------------
-# in_country <- 'Finland'
-# rivnet_path <- tar_read(network_sub_shp_list)[[in_country]]
+# in_country <- 'Czech'
+# rivnet_path <- tar_read(network_sub_gpkg_list)[[in_country]]
 # idcol <- 'cat'
 # node_clustering_dist = 50
 # min_segment_length = 20
 # outdir = file.path(resdir, 'gis')
-# save_shp = TRUE
+# save_gpkg = TRUE
 
 clean_network <- function(rivnet_path, idcol, 
                           node_clustering_dist,
                           min_segment_length = 20,
-                          outdir=NULL, save_shp=FALSE, 
+                          outdir=NULL, save_gpkg=FALSE, 
                           return_path=FALSE) {
   #Read input network
-  rivnet <- read_sf(rivnet_path)
-  
+  rivnet <- st_read(rivnet_path) %>%
+    st_cast("LINESTRING") %>%
+    #Make sure that the geometry column is equally named regardless 
+    #of file format (see https://github.com/r-spatial/sf/issues/719)
+    st_set_geometry('geometry') 
+
   #Preformat basic network
   sfnet_ini <- rivnet %>%
     as_sfnetwork %>%
@@ -1005,7 +1010,7 @@ clean_network <- function(rivnet_path, idcol,
   #     geom_sf(data=splitting_nodes, color='red')
   # )
   #Write split nodes to double check
-  #st_write(splitting_nodes, 'split_nodes.shp')
+  #st_write(splitting_nodes, 'split_nodes.gpkg')
   
   #Simplify network by first fully dissolving and then splitting at confluences
   rivnet_agg <- sf::st_union(rivnet) %>%
@@ -1143,10 +1148,10 @@ clean_network <- function(rivnet_path, idcol,
   
   out_path <- file.path(outdir,
                         paste0(tools::file_path_sans_ext(basename(rivnet_path)),
-                               '_clean.shp')
+                               '_clean.gpkg')
   )
   
-  if (save_shp) {
+  if (save_gpkg) {
     st_write(out_net, out_path, append=F)
   }
   
@@ -1154,26 +1159,20 @@ clean_network <- function(rivnet_path, idcol,
 }
 
 
+
+
 #------ direct_network -----------------------------------------
-# in_country <- 'France'
-# rivnet_path <- tar_read(network_clean_shp_list)[[in_country]]
-# idcol <- 'UID'
-# outletid <- 1
-# outdir = file.path(resdir, 'gis')
-# save_shp = TRUE
-# 
-# list(
-#   France = 1
-# )
+# Define helper functions
+get_endpoint <- function(line) st_coordinates(line)[nrow(st_coordinates(line)), ]
+get_startpoint <- function(line) st_coordinates(line)[1, ]
 
-# Reverse upstream segments recursively
-# visited <- NULL
-# segment <- outlet_seg
-
-############### INVESTIGATE LINESTRING DIRECTION: what doies that correspond to?
-############### Why doesn't it match QGIS?
-direct_network_inner <- function(segment, in_network, visited = NULL) {
-  print(segment[[idcol]])
+direct_network_inner <- function(segment, in_network, idcol, visited = NULL) {
+  # #Reverse upstream segments recursively
+  # visited <- NULL
+  # segment <- rivnet[rivnet[[idcol]] == 22,] 
+  # in_network = rivnet
+  
+  #print(segment[[idcol]])
   visited <- c(visited, segment[[idcol]])
   
   # Find connected segments 
@@ -1183,10 +1182,10 @@ direct_network_inner <- function(segment, in_network, visited = NULL) {
     .[as.vector(st_intersects(., lwgeom::st_startpoint(segment$geometry), 
                               sparse=F)),]
   
-  ggplotly(ggplot(in_network[!(in_network[[idcol]] %in% visited),]) +
-             geom_sf() +
-             geom_sf(data=segment, color='red') +
-             geom_sf(data=lwgeom::st_startpoint(segment$geometry)))
+  # ggplotly(ggplot(in_network[!(in_network[[idcol]] %in% visited),]) +
+  #            geom_sf() +
+  #            geom_sf(data=segment, color='red') +
+  #            geom_sf(data=lwgeom::st_startpoint(segment$geometry)))
   
   # Reverse and recurse
   for (i in seq_len(nrow(connected))) {
@@ -1199,18 +1198,46 @@ direct_network_inner <- function(segment, in_network, visited = NULL) {
     # Recursively process upstream
     in_network <- direct_network_inner(
       segment = in_network[in_network[[idcol]]==seg_id,], 
-      in_network, visited)
+      in_network, idcol, visited)
   }
+  
   return(in_network)
 }
 
+
+# outlet_uid_list <- list(Croatia = 458,
+#                         Czech = 4,
+#                         Finland = 682,
+#                         France = 1,
+#                         Hungary = 5,
+#                         Spain = 86
+# )
+# 
+# in_country <- 'Croatia'
+# rivnet_path <- tar_read(network_clean_gpkg_list)[[in_country]]
+# idcol <- 'UID'
+# outletid <- outlet_uid_list[[in_country]]
+# outdir = file.path(resdir, 'gis')
+# save_gpkg = TRUE
+
 direct_network <- function(rivnet_path, idcol,
                            outletid, outdir=NULL, 
-                           save_shp=FALSE, 
-                           return_path=FALSE) {
+                           save_gpkg=FALSE) {
   #Read input network
-  rivnet <- read_sf(rivnet_path)
+  rivnet <- st_read(rivnet_path) %>%
+    st_cast("LINESTRING") %>%
+    #Make sure that the geometry column is equally named regardless 
+    #of file format (see https://github.com/r-spatial/sf/issues/719)
+    st_set_geometry('geometry') 
   
+  #Interactively plot network
+  # (ggplot(rivnet) +
+  #   geom_sf(size = 0.1,
+  #           arrow = arrow(angle = 30,
+  #                         length = unit(0.075, 'inches'),
+  #                         ends = "last",
+  #                         type = "closed")))
+
   #Identify dangle points
   agg_endpts <- c(lwgeom::st_startpoint(rivnet), 
                   lwgeom::st_endpoint(rivnet)) 
@@ -1231,24 +1258,23 @@ direct_network <- function(rivnet_path, idcol,
   
   outlet_seg <- rivnet[rivnet[[idcol]] == outletid,]
   
-  # Define helper functions
-  get_endpoint <- function(line) st_coordinates(line)[nrow(st_coordinates(line)), ]
-  get_startpoint <- function(line) st_coordinates(line)[1, ]
-  
   # Apply to the entire network
   out_net <- direct_network_inner(segment = outlet_seg, 
                                  in_network = rivnet, 
+                                 idcol = idcol,
                                  visited = NULL)
   
   #------------------ Write out results ------------------------------------------
   out_path <- file.path(outdir,
                         paste0(tools::file_path_sans_ext(basename(rivnet_path)),
-                               '_directed.shp')
+                               '_directed.gpkg')
   )
   
-  if (save_shp) {
-    st_write(rivnet, out_path, append=F)
+  if (save_gpkg) {
+    st_write(out_net, out_path, append=F)
   }
+  
+  return(out_path)
 }
 
 #------ format_sites_dt ----------------------------------------------------------
@@ -1304,14 +1330,14 @@ format_site_dt <- function(in_path, in_country) {
   return(sites_dt[, .(id, lat, lon, reach_id)])
 }
 
-#------ create_sites_shp --------------------------------------------------------
+#------ create_sites_gpkg --------------------------------------------------------
 # in_hydromod_paths_dt = tar_read(hydromod_paths_dt)
 # in_sites_dt = tar_read(sites_dt)
 # out_dir = file.path('results', 'gis')
 # geom = 'points'
 # overwrite = TRUE
 
-create_sites_shp <- function(in_hydromod_paths_dt,
+create_sites_gpkg <- function(in_hydromod_paths_dt,
                              in_sites_dt,
                              out_dir, 
                              geom,
@@ -1323,19 +1349,19 @@ create_sites_shp <- function(in_hydromod_paths_dt,
   setnames(setDT(in_sites_dt), 'country', 'country_sub')
   
   in_hydromod_paths_dt[
-    , sites_shp_path := file.path(out_dir, 
+    , sites_gpkg_path := file.path(out_dir, 
                                   paste0(tolower(country), 
-                                         '_site_', geom, '.shp'))]
+                                         '_site_', geom, '.gpkg'))]
   
   if (geom == 'reaches') {
     #Create site reaches
     in_hydromod_paths_dt[, {
-      if (!file.exists(sites_shp_path) | overwrite) {
+      if (!file.exists(sites_gpkg_path) | overwrite) {
         terra::vect(network_path) %>%
           aggregate(by='cat') %>%
           merge(in_sites_dt[country_sub==country,],
                 by.x='cat', by.y='reach_id', all.x=F) %>%
-          terra::writeVector(filename = sites_shp_path, 
+          terra::writeVector(filename = sites_gpkg_path, 
                              overwrite = T)
       }
     }, by=country]
@@ -1344,22 +1370,22 @@ create_sites_shp <- function(in_hydromod_paths_dt,
   if (geom == 'points') {
     #Create site points
     in_hydromod_paths_dt[, {
-      if (!file.exists(sites_shp_path) | overwrite) {
+      if (!file.exists(sites_gpkg_path) | overwrite) {
         create_sitepoints_raw(in_dt = in_sites_dt[country_sub==country,], 
                               lon_col = 'lon', lat_col = 'lat',
-                              out_points_path = sites_shp_path) 
+                              out_points_path = sites_gpkg_path) 
       }
     }, by=country]
   }
 
-  return(in_hydromod_paths_dt[, stats::setNames(sites_shp_path, country)])
+  return(in_hydromod_paths_dt[, stats::setNames(sites_gpkg_path, country)])
 }
 
 
 #------ snap_sites -------------------------------------------------------------
 # drn <- 'France'
-# in_sites_path <- tar_read(site_points_shp_list)[[drn]]
-# in_network_path <- tar_read(network_sub_shp_list)[[drn]]
+# in_sites_path <- tar_read(site_points_gpkg_list)[[drn]]
+# in_network_path <- tar_read(network_sub_gpkg_list)[[drn]]
 # out_snapped_sites_path = NULL
 # overwrite = T
 # custom_proj = T
@@ -1449,11 +1475,11 @@ snap_river_sites <- function(in_sites_path,
 }
 
 #------ compute_hydrostats_drn -------------------------------------------------
-# in_drn <- 'Czech'
-# varname <- 'qsim'#'isflowing'
+# in_drn <- 'Hungary'
+# varname <-  'isflowing' #qsim
 # in_sites_dt <- tar_read(sites_dt)[country == in_drn,]
-# in_network_path <- tar_read(network_sub_shp_list)[[in_drn]]
-# in_hydromod_drn <- tar_read(hydromod_dt_Czech_qsim)
+# in_network_path <- tar_read(network_sub_gpkg_list)[[in_drn]]
+# in_hydromod_drn <- tar_read_raw((paste0('hydromod_dt_', in_drn, '_', varname)))
 
 compute_hydrostats_drn <- function(in_network_path,
                                    in_sites_dt,
@@ -1506,7 +1532,7 @@ compute_hydrostats_drn <- function(in_network_path,
 
 #------ create_ssn -------------------------------------------------------------
 # in_country <- 'France'
-# in_network_path = tar_read(network_sub_shp_list)[[in_country]]
+# in_network_path = tar_read(network_directed_gpkg_list)[[in_country]]
 # out_dir = 'results/ssn'
 
 create_ssn <- function(in_network_path,
@@ -1521,6 +1547,8 @@ create_ssn <- function(in_network_path,
                         sub('[.](?=(shp|gpkg)$)', '_lsn.',
                             basename(in_network_path), perl=T)
   )
+  
+  
   
   edges <- SSNbler::lines_to_lsn(
     streams = net,
