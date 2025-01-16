@@ -160,6 +160,22 @@ list(
     }) %>% setNames(names(network_clean_gpkg_list))
   )
   ,
+  
+  
+  tar_target(
+    network_ssnready_gpkg_list,
+    lapply(names(network_directed_gpkg_list), function(in_country) {
+      fix_complex_confluences(
+        rivnet_path = network_directed_gpkg_list[[in_country]], 
+        max_node_shift = 5,
+        out_path= file.path(resdir, 'gis', 
+                            paste0(in_country, '_river_network_ssnready',
+                                   format(Sys.time(), "%Y%m%d"), '.gpkg'
+                            ))
+      )
+    }) %>% setNames(names(network_directed_gpkg_list))
+  )
+  ,
 
   #Create shapefile of sampling site-reaches
   tar_target(

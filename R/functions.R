@@ -536,6 +536,211 @@ snap_sites <- function(in_sites_point,
   
   return(sitesnap_p)
 }
+#------ split_sp_line----------------------------------------------------------
+# Original author: Miguel Porto
+# #From https://github.com/miguel-porto/fix-streams
+# splits a Lines object (or coordinate matrix) in n segments of length length
+#(starting in the begining) plus the remaining segment (what is left)
+
+split_sp_line <- function(line, n, length, debug = F) {
+  # splits a Lines object (or coordinate matrix) in n segments of length length (starting in the begining) plus the remaining segment (what is left)
+  if (debug) plot(line)
+  coo <- sp::coordinates(line)
+  
+  if (inherits(coo, "list")) {
+    if (length(coo) > 1) {
+      stop("Multiple lines not allowed")
+    } else {
+      coo <- coo[[1]]
+      if (!inherits(coo, "matrix")) {
+        if (!inherits(coo, "list")) stop("Invalid line object")
+        if (length(coo) > 1) stop("Multiple lines not allowed")
+        coo <- coo[[1]]
+      }
+    }
+  } else {
+    if (!inherits(coo, "matrix")) stop("Invalid line object")
+  }
+  
+  pieces <- list()
+  accum <- 0
+  i <- 1
+  remainder <- 0
+  newcoords <- matrix(nc = 2, nr = 0)
+  
+  repeat {
+    newcoords <- rbind(newcoords, coo[i, ])
+    v <- c(coo[i + 1, ] - coo[i, ])
+    hyp <- sqrt(sum(v^2))
+    accum <- accum + hyp
+    if (accum > length && length(pieces) < n) { # cut in this segment
+      oript <- coo[i, ]
+      # 			accum=hyp
+      repeat {
+        newpt <- oript + v / hyp * (length - remainder)
+        newcoords <- rbind(newcoords, newpt)
+        pieces <- c(pieces, list(newcoords))
+        newcoords <- matrix(newpt, nr = 1)
+        remainder <- 0
+        if (debug) points(newpt[1], newpt[2], pch = 19)
+        accum <- accum - length
+        if (accum < length || length(pieces) >= n) break
+        oript <- newpt
+      }
+      remainder <- accum
+    } else {
+      remainder <- accum
+    }
+    
+    i <- i + 1
+    if (i >= dim(coo)[1]) {
+      newcoords <- rbind(newcoords, coo[dim(coo)[1], ])
+      pieces <- c(pieces, list(newcoords))
+      break
+    }
+  }
+  
+  if (debug) {
+    for (i in 1:length(pieces)) {
+      pieces[[i]][, 1] <- pieces[[i]][, 1] - 20 * i
+      lines(pieces[[i]], col = "red")
+      points(pieces[[i]][1, 1], pieces[[i]][1, 2])
+    }
+  }
+  
+  return(pieces)
+}
+
+#------ fix_sp_streams ---------------------------------------------------------
+# Fixes complex confluences in stream networks
+# Original author: Miguel Porto (only cosmetic changes were performed)
+# From https://github.com/miguel-porto/fix-streams/blob/master/fix-streams.r
+# All nodes which have >2 streams flowing to it are corrected. The outermost streams' end vertices
+# are adjusted by "step" meters along the downgoing stream. New nodes are created at suitable places,
+# and existing lines suitably split.
+#*** Requires a SpatialLinesDataFrame with the proper FROM_NODE and TO_NODE fields. 
+# The network is assumed to be correct in all other aspects, there is no error checking.
+###### USAGE EXAMPLE
+# rios=readOGR("streams_Pt.shp","streams_Pt")
+# correctedshp=fix.streams(rios,step=10)
+# writeOGR(correctedshp,"streams_corrected.shp","streams_corrected","ESRI Shapefile")
+
+fix_sp_streams <- function(shp, from = "FROM_NODE", to = "TO_NODE", step = 10) {
+  # step is the desired length (in map units) by which the river sinks are adjusted (separated) downstream.
+  pieces <- list()
+  probrivers <- list()
+  removeindexes <- integer(0)
+  CRS <- shp@proj4string
+  
+  # find multiple confluence nodes
+  nv <- table(shp@data[, to])
+  mc <- as.numeric(names(nv[nv > 2])) # these are the nodes with >2 rivers flowing to	them
+  maxnode <- max(c(shp@data[, to], 
+                   shp@data[, from])) # max node ID, for creating new nodes
+  
+  if (length(mc) > 0) {
+    cat(length(mc), "complex confluences found.\n")
+    cat("Cutting lines and tweaking vertices...\n")
+    flush.console()
+    
+    for (i in mc) { # for each problematic node
+      # msrc=shp[shp@data[,to] %in% i,]	# get source rivers flowing to it
+      privers <- which(shp@data[, to] == i) # get source rivers flowing to it (problematic rivers)
+      sinkriver <- which(shp@data[, from] == i) # get sink river
+      msrc <- shp[privers, ]
+      mto <- shp[sinkriver, ]
+      delta <- sum(shp@data[, to] %in% i) - 2 # how many problematic rivers flow to there? leave only two, the others correct
+      newnodes <- c(mto@data[, from], (maxnode + 1):(maxnode + delta), mto@data[, to]) # the IDs of the nodes that will be created (the first remains the same for the two "good" rivers)
+      
+      coo <- sp::coordinates(mto)[[1]][[1]] # coordinates of the sink river
+      
+      # order the rivers by their angle, so that the outermost rivers are first adjusted (alternating the side)
+      v1 <- coo[1, ] - coo[2, ]
+      v2 <- matrix(nc = 2, nr = length(msrc))
+      for (j in 1:length(msrc)) { #For each source river
+        tmp <- sp::coordinates(msrc[j, ])[[1]][[1]] #Get coordinates of all of its nodes
+        v2[j, ] <- tmp[dim(tmp)[1] - 1, ] - tmp[dim(tmp)[1], ] #Compute diff in lon and lat between the second to last and last nodes
+      }
+      ang <- atan2(v2[, 2], v2[, 1]) - atan2(v1[2], v1[1]) #Compute angle between source rivers and sink river
+      ang[ang > 0] <- ang[ang > 0] %% pi
+      ang[ang < 0] <- -((-ang[ang < 0]) %% pi)
+      names(ang) <- privers
+      ang <- ang[order(abs(ang), decreasing = T)]
+      
+      if (sum(ang > 0) > sum(ang < 0)) {
+        angneg <- c(as.numeric(names(ang[ang < 0])), rep(NA, sum(ang > 0) - sum(ang < 0)))
+        angpos <- as.numeric(names(ang[ang >= 0]))
+      } else {
+        angpos <- c(as.numeric(names(ang[ang >= 0])), rep(NA, sum(ang < 0) - sum(ang > 0)))
+        angneg <- as.numeric(names(ang[ang < 0]))
+      }
+      angs <- matrix(c(angpos, angneg), nc = 2)
+      privers <- na.omit(as.vector(t(angs)))[1:delta]
+      
+      # split sink river in delta pieces plus the remainder
+      tmplines <- split_sp_line(line = coo, 
+                                n = delta, 
+                                length = step,
+                                debug = F)
+      
+      if (length(tmplines) <= delta) stop("You must decrease step: river ", sinkriver)
+      
+      for (j in 1:length(tmplines)) {
+        # cut sink river into pieces, as many as necessary
+        rid <- runif(1, 10^6, 10^7) # random ID for the piece
+        # create a new piece with the j'th (step+1) vertices of the sink river
+        piece <- sp::SpatialLines(list(sp::Lines(list(sp::Line(tmplines[[j]])), rid)), 
+                                  proj4string = CRS)
+        newdata <- mto@data
+        newdata[1, ] <- NA
+        newdata[1, from] <- newnodes[j]
+        newdata[1, to] <- newnodes[j + 1]
+        rownames(newdata) <- rid
+        pieces <- c(pieces, 
+                    list(sp::SpatialLinesDataFrame(piece, newdata, match = F))) # save pieces for later use
+        
+        if (j > 1) {
+          # now change coords of problematic rivers
+          pri <- privers[j - 1] # pick the j'th problematic river
+          tmp <- sp::coordinates(shp[pri, ])[[1]][[1]]
+          tmp[dim(tmp)[1], ] <- tmplines[[j]][1, ] # change the coordinate of the last vertex of problematic river
+          tmp1 <- sp::SpatialLines(list(sp::Lines(list(sp::Line(tmp)), 
+                                                  shp[pri, ]@lines[[1]]@ID)), 
+                                   proj4string = CRS) # keep same ID (original will be removed)
+          tmp1 <- sp::SpatialLinesDataFrame(tmp1, shp[pri, ]@data)
+          tmp1@data[1, to] <- newnodes[j]
+          probrivers <- c(probrivers, list(tmp1)) # collect new rivers to replace old
+        }
+      }
+      
+      removeindexes <- c(removeindexes, c(privers[1:delta], sinkriver))
+      maxnode <- maxnode + delta
+    }
+    
+    cat("Now reassembling shape...\n")
+    flush.console()
+    newlines <- pieces[[1]]
+    
+    for (j in 2:length(pieces)) {
+      newlines <- rbind(newlines, pieces[[j]])
+    }
+    
+    for (j in 1:length(probrivers)) {
+      newlines <- rbind(newlines, probrivers[[j]])
+    }
+    
+    # remove all problematic + sink rivers
+    newshp <- shp[-removeindexes, ]
+    newshp <- rbind(newshp, newlines)
+  } else {
+    print("No complex confluences found. Returning input network unchanged.")
+    newshp <- shp
+  }
+  
+  return(newshp)
+}
+
+
 #-------------- workflow functions ---------------------------------------------
 # path_list = tar_read(bio_data_paths)
 # in_metadata_edna <- tar_read(metadata_edna)
@@ -1279,6 +1484,49 @@ direct_network <- function(rivnet_path, idcol,
     st_write(out_net, out_path, append=F)
   }
   
+  return(out_path)
+}
+
+#------ fix_complex_confluences ------------------------------------------------
+# in_country <- 'France'
+# rivnet_path = tar_read(network_directed_gpkg_list)[[in_country]]
+# outdir = file.path(resdir, 'gis')
+
+#Network must be directed & topologically correct aside from the complex confluences
+fix_complex_confluences <- function(rivnet_path, max_node_shift = 5,
+                                    outdir=NULL, out_path=NULL) {
+  # Read input network
+  rivnet <- st_read(rivnet_path) %>%
+    st_cast("LINESTRING") %>%
+    st_set_geometry("geometry")
+  
+  #Compute from-to fields
+  net_fromto <- as_sfnetwork(rivnet) %>%
+    activate(edges) %>%
+    as.data.table %>%
+    .[, .(from, to, UID)]
+  
+  rivnet_fromto <- merge(rivnet, net_fromto, by='UID', all.x=T)
+  
+  #Run fix streamlines from Miguel Porto
+  rivnet_fixed <- fix_sp_streams(shp = as_Spatial(rivnet_fromto), 
+                                 from = "from", to = "to", 
+                                 step = max_node_shift) %>%
+    .[, !(names(.) %in% c('from', 'to'))] %>%
+    st_as_sf
+  
+  #------------------ Write out results ------------------------------------------
+  if (is.null(out_path)) {
+    out_path <- file.path(outdir,
+                          paste0(tools::file_path_sans_ext(basename(rivnet_path)),
+                                 '_conflufixed',
+                                 format(Sys.time(), "%Y%m%d"),
+                                 '.gpkg')
+    )
+  }
+
+  st_write(rivnet_fixed, out_path, append=F)
+
   return(out_path)
 }
 
