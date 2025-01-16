@@ -129,10 +129,6 @@ list(
   )
   ,
   
-  #Subset amber river barrier dataset to only keep barriers on DRNs
-  
-  
-  
   #Clean networks
   tar_target(
     network_clean_gpkg_list,
@@ -227,9 +223,30 @@ list(
     site_snapped_gpkg_list,
     lapply(names(site_points_gpkg_list), function(in_country) {
       snap_river_sites(in_sites_path = site_points_gpkg_list[[in_country]], 
-                       in_network_path = network_clean_gpkg_list[[in_country]],
+                       in_network_path = network_ssnready_gpkg_list[[in_country]],
                        overwrite = T)
-    })
+    }) %>% setNames(names(site_points_gpkg_list))
+  ),
+  
+  #Subset amber river barrier dataset to only keep barriers on DRNs
+  tar_target(
+    barrier_points_gpkg_list,
+    subset_amber(amber_path = amber_path, 
+                 in_hydromod_paths_dt = hydromod_paths_dt, 
+                 out_dir = file.path(resdir, 'gis'),
+                 overwrite = T) 
+  )
+  ,
+  
+  tar_target(
+    barrier_snapped_gpkg_list,
+    lapply(names(barrier_points_gpkg_list), function(in_country) {
+      snap_barrier_sites(in_sites_path = barrier_points_gpkg_list[[in_country]], 
+                         in_network_path = network_ssnready_gpkg_list[[in_country]],
+                         out_snapped_sites_path=NULL, 
+                         custom_proj = F,
+                         overwrite = T)
+    }) %>% setNames(names(site_points_gpkg_list))
   )
   #,
   #

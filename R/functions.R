@@ -533,29 +533,6 @@ snap_points_inner <- function(in_pts,
   return(sitesnap_p)
 }
 
-
-#Custom snap method. Lighter and faster than other tests options
-#sf::st_snap doesn't work
-#maptools::snapPointsToLines requires SpatialPoint and SpatialLines - too heavy/slow for this dataset
-#The option used here relies on terra::nearest, which is faster and returns only 
-# one line for each point compared to sf::st_nearest_points
-snap_sites <- function(in_sites_point, 
-                       in_sitesSQL="", #SQL expression to subset sites to be snapped
-                       in_target_path, 
-                       in_targetSQL="", #SQL expression to subset objects that sites will be snapped to
-                       sites_idcol, 
-                       join_idcol=NULL,
-                       target_idcol=NULL,
-                       custom_proj = T, #Whether to first re-project data
-                       attri_to_join = NULL, #Either a single name, a vector of character, or "all"
-                       write_snapped = F, #Whether to write snapped points (out_path)
-                       out_path=NULL,
-                       overwrite = F) {
-  
-
-  
-  return(sitesnap_p)
-}
 #------ split_sp_line----------------------------------------------------------
 # Original author: Miguel Porto
 # #From https://github.com/miguel-porto/fix-streams
@@ -1752,6 +1729,110 @@ snap_river_sites <- function(in_sites_path,
   return(out_snapped_sites_path) #Path to layer containing site points with attribute data
 }
 
+#------ subset_amber -----------------------------------------------------------
+# amber_path <- tar_read(amber_path)
+# in_hydromod_paths_dt <- tar_read(hydromod_paths_dt)
+# out_dir <- file.path(resdir, 'gis')
+# overwrite = T
+
+subset_amber <- function(amber_path, in_hydromod_paths_dt, out_dir,
+                         overwrite = T) {
+  amber_dt <- fread(amber_path)
+  
+  country_list <- in_hydromod_paths_dt$country
+  
+  amber_countries<- amber_dt[
+    grepl(paste(toupper(country_list), collapse='|'), 
+          Country),]
+  
+  amber_pts_path <- file.path(out_dir,
+                              'amber_sub_pts.gpkg')
+
+  create_sitepoints_raw(in_dt = amber_countries, 
+                        lon_col = 'Longitude_WGS84', lat_col = 'Latitude_WGS84',
+                        out_points_path = amber_pts_path) 
+  
+  amber_vec <- vect(amber_pts_path)
+  
+  amber_country_list <- lapply(country_list, function(in_country) {
+    amber_country_path <- file.path(out_dir, 
+                                    paste0(tolower(in_country), 
+                                           '_amber_pts.gpkg'))
+    if (!file.exists(amber_country_path) | overwrite) {
+      cat <- vect(in_hydromod_paths_dt[country==in_country, catchment_path])
+      
+      amber_proj <- terra::project(amber_vec, crs(cat))
+      
+      amber_proj %>%
+        .[ relate(cat, .,"intersects")[1,],] %>%
+        terra::writeVector(filename = amber_country_path,
+                           overwrite = T)
+      
+      return(amber_country_path)
+    }
+  }) %>% setNames(country_list)
+  
+  return(amber_country_list)
+}
+
+
+
+#------ snap_barriers ----------------------------------------------------------
+# drn <- 'France'
+# in_sites_path <- tar_read(barrier_points_gpkg_list)[[drn]]
+# in_network_path <- tar_read(network_ssnready_gpkg_list)[[drn]]
+# out_snapped_sites_path = NULL
+# overwrite = T
+# custom_proj = F
+
+snap_barrier_sites <- function(in_sites_path, 
+                             in_network_path,
+                             out_snapped_sites_path=NULL, 
+                             custom_proj = T,
+                             idcol = 'id',
+                             attri_to_join = 'cat',
+                             overwrite = F) {
+  
+  if (is.null(out_snapped_sites_path)) {
+    out_snapped_sites_path <- sub(
+      '[.](?=(shp|gpkg)$)', 
+      paste0('_snap', format(Sys.time(), "%Y%m%d"), '.'),
+      in_sites_path, perl=T)
+  }
+  
+  if (!file.exists(out_snapped_sites_path) | overwrite) {
+    #Iterate over every basin where there is a site
+    if (length(in_sites_path) > 1) {
+      sitesp <- do.call(rbind, lapply(in_sites_path, vect)) 
+    } else {
+      sitesp <- terra::vect(in_sites_path)
+    }
+    
+    #Read network
+    target <- terra::vect(in_network_path)
+
+    #Project sites to custom projection
+    sitesp_proj <- terra::project(sitesp, crs(target))
+    
+    sitesnap_p <- snap_points_inner(
+      in_pts = sitesp_proj,
+      in_target =  target,
+      sites_idcol = 'GUID',
+      attri_to_join= 'UID'
+    )
+    
+    #Reproject points to original proj
+    sitesnap_p <- terra::project(sitesnap_p, crs(sitesp))
+    
+    #Write it out
+    terra::writeVector(sitesnap_p,
+                       out_snapped_sites_path,
+                       overwrite=overwrite)
+  }
+  
+  return(out_snapped_sites_path) #Path to layer containing site points with attribute data
+}
+
 #------ compute_hydrostats_drn -------------------------------------------------
 # in_drn <- 'Hungary'
 # varname <-  'isflowing' #qsim
@@ -1842,6 +1923,9 @@ create_ssn <- function(in_network_path,
     topo_tolerance = 20,
     overwrite = overwrite
   )
+  
+  #Only keep barriers over 2 m and under 100 m snap from network
+  
   
   
 }
