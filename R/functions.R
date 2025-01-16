@@ -662,8 +662,9 @@ fix_sp_streams <- function(shp, from = "FROM_NODE", to = "TO_NODE", step = 10) {
         v2[j, ] <- tmp[dim(tmp)[1] - 1, ] - tmp[dim(tmp)[1], ] #Compute diff in lon and lat between the second to last and last nodes
       }
       ang <- atan2(v2[, 2], v2[, 1]) - atan2(v1[2], v1[1]) #Compute angle between source rivers and sink river
-      ang[ang > 0] <- ang[ang > 0] %% pi
-      ang[ang < 0] <- -((-ang[ang < 0]) %% pi)
+      ang <- (ang + pi) %% (2 * pi) - pi
+      # ang[ang > 0] <- ang[ang > 0] %% pi
+      # ang[ang < 0] <- -((-ang[ang < 0]) %% pi)
       names(ang) <- privers
       ang <- ang[order(abs(ang), decreasing = T)]
       
@@ -739,7 +740,6 @@ fix_sp_streams <- function(shp, from = "FROM_NODE", to = "TO_NODE", step = 10) {
   
   return(newshp)
 }
-
 
 #-------------- workflow functions ---------------------------------------------
 # path_list = tar_read(bio_data_paths)
@@ -1488,9 +1488,10 @@ direct_network <- function(rivnet_path, idcol,
 }
 
 #------ fix_complex_confluences ------------------------------------------------
-# in_country <- 'France'
+# in_country <- 'Croatia'
 # rivnet_path = tar_read(network_directed_gpkg_list)[[in_country]]
 # outdir = file.path(resdir, 'gis')
+# max_node_shift = 5
 
 #Network must be directed & topologically correct aside from the complex confluences
 fix_complex_confluences <- function(rivnet_path, max_node_shift = 5,
@@ -1510,7 +1511,8 @@ fix_complex_confluences <- function(rivnet_path, max_node_shift = 5,
   
   #Run fix streamlines from Miguel Porto
   rivnet_fixed <- fix_sp_streams(shp = as_Spatial(rivnet_fromto), 
-                                 from = "from", to = "to", 
+                                 from = "from",
+                                 to = "to", 
                                  step = max_node_shift) %>%
     .[, !(names(.) %in% c('from', 'to'))] %>%
     st_as_sf
@@ -1787,10 +1789,10 @@ compute_hydrostats_drn <- function(in_network_path,
 }
 
 #------ create_ssn -------------------------------------------------------------
-# in_country <- 'France'
-# in_network_path = tar_read(network_directed_gpkg_list)[[in_country]]
-# out_dir = 'results/ssn'
-# overwrite=T
+in_country <- 'Spain'
+in_network_path = tar_read(network_ssnready_gpkg_list)[[in_country]]
+out_dir = 'results/ssn'
+overwrite=T
 
 create_ssn <- function(in_network_path,
                        custom_proj,

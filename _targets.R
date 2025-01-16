@@ -131,9 +131,14 @@ list(
         save_gpkg = TRUE, 
         return_path = TRUE)
       
+      #Manual corrections
       if (in_country == 'Czech') {
         clean_net <- st_read(out_net_path) %>%
           .[!(.[['cat']] %in% c(40112, 40106, 40478)),]
+        st_write(clean_net, out_net_path, append=F)
+      } else if (in_country == 'Croatia') {
+        clean_net <- st_read(out_net_path) %>%
+          .[!(.[['UID']] %in% c(1102)),]
         st_write(clean_net, out_net_path, append=F)
       }
       
@@ -169,7 +174,8 @@ list(
         rivnet_path = network_directed_gpkg_list[[in_country]], 
         max_node_shift = 5,
         out_path= file.path(resdir, 'gis', 
-                            paste0(in_country, '_river_network_ssnready',
+                            paste0(tolower(in_country)
+                                   , '_river_network_ssnready',
                                    format(Sys.time(), "%Y%m%d"), '.gpkg'
                             ))
       )
@@ -206,57 +212,57 @@ list(
                        overwrite = T)
     })
   )
-  ,
-
-  #Read hydrological modeling data for flow intermittence and discharge
-  tarchetypes::tar_map(
-    values = hydro_combi,
-    tar_target(
-      hydromod_dt,
-      get_drn_hydromod(hydromod_path = hydromod_paths_dt[country==in_country,
-                                                         all_sims_path],
-                       varname = in_varname,
-                       selected_sims = 1:20)
-    ),
-
-    tar_target(
-      hydrostats,
-      compute_hydrostats_drn(
-        in_network_path = network_clean_gpkg_list[[in_country]],
-        in_sites_dt = sites_dt[country == in_country,],
-        varname = in_varname,
-        in_hydromod_drn = hydromod_dt)
-    )
-  )
-  ,
-
-  #Read metadata accompanying eDNA data
-  tar_target(
-    metadata_edna,
-    read_xlsx(metadata_edna_path,
-              sheet = 'metadataDNA') %>%
-      as.data.table %>%
-      setnames(tolower(names(.)))
-  ),
-
-  #Read pre-processed biological sampling data
-  tar_target(
-    bio_dt,
-    read_biodt(path_list = bio_data_paths,
-               in_metadata_edna = metadata_edna)
-  ),
-
-  #Compute local species richness
-  tar_target(
-    sprich,
-    lapply(bio_dt, function(dt) {
-      calc_sprich(in_biodt=dt,
-                  in_metacols=metacols)
-    }) %>%
-      rbindlist %>%
-      .[, running_id := paste0(site, '_', campaign)] %>%
-      merge(env_dt, by=c('site', 'campaign', 'running_id'))
-  )
+  #,
+  #
+  # #Read hydrological modeling data for flow intermittence and discharge
+  # tarchetypes::tar_map(
+  #   values = hydro_combi,
+  #   tar_target(
+  #     hydromod_dt,
+  #     get_drn_hydromod(hydromod_path = hydromod_paths_dt[country==in_country,
+  #                                                        all_sims_path],
+  #                      varname = in_varname,
+  #                      selected_sims = 1:20)
+  #   ),
+  # 
+  #   tar_target(
+  #     hydrostats,
+  #     compute_hydrostats_drn(
+  #       in_network_path = network_clean_gpkg_list[[in_country]],
+  #       in_sites_dt = sites_dt[country == in_country,],
+  #       varname = in_varname,
+  #       in_hydromod_drn = hydromod_dt)
+  #   )
+  # )
+  # ,
+  # 
+  # #Read metadata accompanying eDNA data
+  # tar_target(
+  #   metadata_edna,
+  #   read_xlsx(metadata_edna_path,
+  #             sheet = 'metadataDNA') %>%
+  #     as.data.table %>%
+  #     setnames(tolower(names(.)))
+  # ),
+  # 
+  # #Read pre-processed biological sampling data
+  # tar_target(
+  #   bio_dt,
+  #   read_biodt(path_list = bio_data_paths,
+  #              in_metadata_edna = metadata_edna)
+  # ),
+  # 
+  # #Compute local species richness
+  # tar_target(
+  #   sprich,
+  #   lapply(bio_dt, function(dt) {
+  #     calc_sprich(in_biodt=dt,
+  #                 in_metacols=metacols)
+  #   }) %>%
+  #     rbindlist %>%
+  #     .[, running_id := paste0(site, '_', campaign)] %>%
+  #     merge(env_dt, by=c('site', 'campaign', 'running_id'))
+  # )
   #,
 
 
