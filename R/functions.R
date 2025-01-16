@@ -1,4 +1,24 @@
 #-------------- utility functions ----------------------------------------------
+#------ download_unzip ---------------------------------------
+download_unzip <- function(url, out_dir, download_mode='wb', out_zip=NULL) {
+  # if (!dir.exists(out_dir)) {
+  #   dir.create(out_dir)
+  # }
+  
+  if (is.null(out_zip)) {
+    out_zip <- paste0(out_dir, '.zip')
+  }
+  
+  download.file(url = url,
+                mode = download_mode,
+                destfile = out_zip
+  )
+  
+  unzip(out_zip, exdir = out_dir)
+  
+  return(out_dir)
+}
+
 #------ hsaHydroYearSeasons ----------------------------------------------------
 # Compute a data.frame containing the hydrological year, and 
 # optionnally the days of the hydrological year and the season which
@@ -1789,10 +1809,10 @@ compute_hydrostats_drn <- function(in_network_path,
 }
 
 #------ create_ssn -------------------------------------------------------------
-in_country <- 'Spain'
-in_network_path = tar_read(network_ssnready_gpkg_list)[[in_country]]
-out_dir = 'results/ssn'
-overwrite=T
+# in_country <- 'Spain'
+# in_network_path = tar_read(network_ssnready_gpkg_list)[[in_country]]
+# out_dir = 'results/ssn'
+# overwrite=T
 
 create_ssn <- function(in_network_path,
                        custom_proj,

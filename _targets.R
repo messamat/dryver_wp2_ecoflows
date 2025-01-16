@@ -88,6 +88,21 @@ list(
   )
   ,
 
+  #------------------------------- Download data -------------------------------
+  #Download amber river barriers dataset
+  tar_target(
+    amber_path,
+    {
+    amber_dir_path <- download_unzip(
+      url =  "https://figshare.com/ndownloader/articles/12629051/versions/5",
+      out_dir = file.path('data', 'amber'), 
+      out_zip=NULL)
+    unzip(file.path(amber_dir_path, 'Fig1_AMBER_BARRIER_ATLAS_V1.zip'),
+          exdir = file.path('data', 'amber'))
+    return(file.path(amber_dir_path, 'AMBER_BARRIER_ATLAS_V1.csv'))
+    }
+  ),
+
   #------------------------------- Read in data ----------------------------------
   #Read local environmental data
   tar_target(
@@ -113,6 +128,10 @@ list(
                    overwrite = T)
   )
   ,
+  
+  #Subset amber river barrier dataset to only keep barriers on DRNs
+  
+  
   
   #Clean networks
   tar_target(
