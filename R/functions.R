@@ -951,9 +951,10 @@ subset_network <- function(in_hydromod_paths_dt, out_dir, overwrite=FALSE) {
   }
   
   in_hydromod_paths_dt[
-    , network_sub_path := file.path(out_dir, 
-                                    paste0(tolower(country), 
-                                           '_river_network_sub.gpkg'))]
+    , network_sub_path := file.path(
+      out_dir, 
+      paste0(tolower(country), '_river_network_sub_',
+             format(Sys.time(), "%Y%m%d"),'.gpkg'))]
   
   in_hydromod_paths_dt[, {
     if (!file.exists(network_sub_path) | overwrite) {
@@ -1148,7 +1149,9 @@ clean_network <- function(rivnet_path, idcol,
   
   out_path <- file.path(outdir,
                         paste0(tools::file_path_sans_ext(basename(rivnet_path)),
-                               '_clean.gpkg')
+                               '_clean',
+                               format(Sys.time(), "%Y%m%d"),
+                               '.gpkg')
   )
   
   if (save_gpkg) {
@@ -1267,7 +1270,9 @@ direct_network <- function(rivnet_path, idcol,
   #------------------ Write out results ------------------------------------------
   out_path <- file.path(outdir,
                         paste0(tools::file_path_sans_ext(basename(rivnet_path)),
-                               '_directed.gpkg')
+                               '_directed',
+                               format(Sys.time(), "%Y%m%d"),
+                               '.gpkg')
   )
   
   if (save_gpkg) {
@@ -1349,9 +1354,10 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
   setnames(setDT(in_sites_dt), 'country', 'country_sub')
   
   in_hydromod_paths_dt[
-    , sites_gpkg_path := file.path(out_dir, 
-                                  paste0(tolower(country), 
-                                         '_site_', geom, '.gpkg'))]
+    , sites_gpkg_path := file.path(
+      out_dir, 
+      paste0(tolower(country), '_site_', geom, 
+             format(Sys.time(), "%Y%m%d"), '.gpkg'))]
   
   if (geom == 'reaches') {
     #Create site reaches
@@ -1397,8 +1403,10 @@ snap_river_sites <- function(in_sites_path,
                              overwrite = F) {
   
   if (is.null(out_snapped_sites_path)) {
-    out_snapped_sites_path <- sub('[.](?=(shp|gpkg)$)', '_snap.',
-                                  in_sites_path, perl=T)
+    out_snapped_sites_path <- sub(
+      '[.](?=(shp|gpkg)$)', 
+      paste0('_snap', format(Sys.time(), "%Y%m%d"), '.'),
+      in_sites_path, perl=T)
   }
   
   if (!file.exists(out_snapped_sites_path) | overwrite) {
@@ -1534,6 +1542,7 @@ compute_hydrostats_drn <- function(in_network_path,
 # in_country <- 'France'
 # in_network_path = tar_read(network_directed_gpkg_list)[[in_country]]
 # out_dir = 'results/ssn'
+# overwrite=T
 
 create_ssn <- function(in_network_path,
                        custom_proj,
@@ -1548,7 +1557,12 @@ create_ssn <- function(in_network_path,
                             basename(in_network_path), perl=T)
   )
   
-  
+  #Read input network
+  net <- st_read(in_network_path) %>%
+    st_cast("LINESTRING") %>%
+    #Make sure that the geometry column is equally named regardless 
+    #of file format (see https://github.com/r-spatial/sf/issues/719)
+    st_set_geometry('geometry') 
   
   edges <- SSNbler::lines_to_lsn(
     streams = net,
