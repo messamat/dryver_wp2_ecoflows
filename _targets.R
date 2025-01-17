@@ -104,6 +104,21 @@ list(
   ),
 
   #------------------------------- Read in data ----------------------------------
+  #Read reach data
+  tar_target(
+    reaches_dt,
+    lapply(hydromod_paths_dt$country, function(in_country) {
+      hydromod_paths_dt[country==in_country, 
+                        fread(reaches_path, sep="\t", skip=1, 
+                              header=T, drop=c(17,18)) %>%
+                          .[-c(1,2,3),] %>%
+                          .[, lapply(.SD, as.numeric)]
+                        ] %>%
+        .[, country := in_country]
+    }) %>% rbindlist(use.names=T, fill=T)
+
+  ),
+
   #Read local environmental data
   tar_target(
     env_dt,
@@ -153,7 +168,7 @@ list(
         st_write(clean_net, out_net_path, append=F)
       } else if (in_country == 'Croatia') {
         clean_net <- st_read(out_net_path) %>%
-          .[!(.[['UID']] %in% c(1102)),]
+          .[!(.[['UID']] %in% c(1102, 2988)),]
         st_write(clean_net, out_net_path, append=F)
       }
       
@@ -224,6 +239,7 @@ list(
     lapply(names(site_points_gpkg_list), function(in_country) {
       snap_river_sites(in_sites_path = site_points_gpkg_list[[in_country]], 
                        in_network_path = network_ssnready_gpkg_list[[in_country]],
+                       custom_proj = F,
                        overwrite = T)
     }) %>% setNames(names(site_points_gpkg_list))
   ),
@@ -248,8 +264,8 @@ list(
                          overwrite = T)
     }) %>% setNames(names(site_points_gpkg_list))
   )
-  #,
-  #
+  # ,
+  # 
   # #Read hydrological modeling data for flow intermittence and discharge
   # tarchetypes::tar_map(
   #   values = hydro_combi,
@@ -264,7 +280,7 @@ list(
   #   tar_target(
   #     hydrostats,
   #     compute_hydrostats_drn(
-  #       in_network_path = network_clean_gpkg_list[[in_country]],
+  #       in_network_path = network_ssnready_gpkg_list[[in_country]],
   #       in_sites_dt = sites_dt[country == in_country,],
   #       varname = in_varname,
   #       in_hydromod_drn = hydromod_dt)

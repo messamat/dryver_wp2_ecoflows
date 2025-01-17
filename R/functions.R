@@ -775,6 +775,7 @@ define_hydromod_paths <- function(in_hydromod_dir) {
                                         "watershed_small_catchment.shp"),
              network_path = file.path(in_hydromod_dir, catchment,
                                       "river_network.shp"),
+             reaches_path = file.path(in_hydromod_dir, catchment, "reach.par"),
              sites_reachids = file.path(in_hydromod_dir, catchment,
                                         paste0(catchment, 
                                                '_sampling_sites_ReachIDs.csv')))]
@@ -1529,6 +1530,62 @@ fix_complex_confluences <- function(rivnet_path, max_node_shift = 5,
   return(out_path)
 }
 
+#------ compute_hydrostats_drn -------------------------------------------------
+# in_drn <- 'Hungary'
+# varname <-  'isflowing' #qsim
+# in_sites_dt <- tar_read(sites_dt)[country == in_drn,]
+# in_network_path <- tar_read(network_sub_gpkg_list)[[in_drn]]
+# in_hydromod_drn <- tar_read_raw((paste0('hydromod_dt_', in_drn, '_', varname)))
+
+compute_hydrostats_drn <- function(in_network_path,
+                                   in_sites_dt,
+                                   varname,
+                                   in_hydromod_drn) {
+  setDT(in_hydromod_drn$data_all)
+  setDT(in_hydromod_drn$dates_format) 
+  
+  #-------------------- Compute intermittence statistics -----------------------
+  if (varname == 'isflowing') {
+    #Import network shapefiles and get their length
+    network_v <- terra::vect(in_network_path)
+    network_v$reach_length <- terra::perim(network_v)
+    reach_dt <- as.data.table(network_v[, c('cat', 'reach_length')]) %>%
+      setnames('cat', 'reach_id') %>%
+      .[, list(reach_length = sum(reach_length)), by=reach_id]
+    remove(network_v)
+    
+    #Merge hydro data and reach length for computing network-wide statistics
+    #qdat[, unique(reach_id)[!(unique(reach_id) %in% reach_dt$reach_id)]] 
+    #Two IDs are not in the shapefile for Finland? maybe a hydrological unit not associated
+    intermod_dt <- merge(in_hydromod_drn$data_all, reach_dt, 
+                         by='reach_id', all.x=F, all.y=F) %>%
+      merge(in_hydromod_drn$dates_format[, .(date, month, hy, doy)],
+            by='date', all.x=T, all.y=F)
+    
+    q_stats <- compute_hydrostats_intermittence(
+      in_hydromod_dt = intermod_dt,
+      in_sites_dt = in_sites_dt)
+  }
+  
+  #-------------------- Compute discharge statistics ---------------------------
+  if (varname == 'qsim') {
+    #Keep only hydrological data for sampled reaches
+    hydromod_dt_sites <- in_hydromod_drn$data_all[
+      reach_id %in% unique(in_sites_dt$reach_id),] %>%
+      setorderv(c('reach_id', 'date')) %>%
+      merge(in_hydromod_drn$dates_format[, .(date, month, hy, doy)],
+            by='date', all.x=T, all.y=F)
+    
+    q_stats <- compute_hydrostats_q(in_hydromod_dt = hydromod_dt_sites) %>%
+      merge(in_sites_dt[, .(id, reach_id)], .,
+            by = 'reach_id', all.x = T, all.y = F,
+            allow.cartesian = T) %>%
+      setorderv(c('reach_id', 'date'))
+  }
+  
+  return(q_stats)
+}
+
 #------ format_sites_dt ----------------------------------------------------------
 # in_country <- 'Finland'
 # in_path <- tar_read(hydromod_paths_dt)[country == in_country, sites_reachids]
@@ -1646,7 +1703,8 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
 snap_river_sites <- function(in_sites_path, 
                              in_network_path,
                              out_snapped_sites_path=NULL, 
-                             custom_proj = T,
+                             custom_proj = F,
+                             proj_back = F,
                              overwrite = F) {
   
   if (is.null(out_snapped_sites_path)) {
@@ -1717,9 +1775,11 @@ snap_river_sites <- function(in_sites_path,
       }) %>%
       vect(.)
     
-    #Reproject points to WGS84
-    sitesnap_p <- terra::project(sitesnap_p, "+proj=longlat +datum=WGS84")
-    
+    if (proj_back) {
+      #Reproject points to original proj
+      sitesnap_p <- terra::project(sitesnap_p, sitesp)
+    }
+
     #Write it out
     terra::writeVector(sitesnap_p,
                        out_snapped_sites_path,
@@ -1833,70 +1893,19 @@ snap_barrier_sites <- function(in_sites_path,
   return(out_snapped_sites_path) #Path to layer containing site points with attribute data
 }
 
-#------ compute_hydrostats_drn -------------------------------------------------
-# in_drn <- 'Hungary'
-# varname <-  'isflowing' #qsim
-# in_sites_dt <- tar_read(sites_dt)[country == in_drn,]
-# in_network_path <- tar_read(network_sub_gpkg_list)[[in_drn]]
-# in_hydromod_drn <- tar_read_raw((paste0('hydromod_dt_', in_drn, '_', varname)))
-
-compute_hydrostats_drn <- function(in_network_path,
-                                   in_sites_dt,
-                                   varname,
-                                   in_hydromod_drn) {
-  setDT(in_hydromod_drn$data_all)
-  setDT(in_hydromod_drn$dates_format) 
-  
-  #-------------------- Compute intermittence statistics -----------------------
-  if (varname == 'isflowing') {
-    #Import network shapefiles and get their length
-    network_v <- terra::vect(in_network_path)
-    network_v$reach_length <- terra::perim(network_v)
-    reach_dt <- as.data.table(network_v[, c('cat', 'reach_length')]) %>%
-      setnames('cat', 'reach_id') %>%
-      .[, list(reach_length = sum(reach_length)), by=reach_id]
-    remove(network_v)
-    
-    #Merge hydro data and reach length for computing network-wide statistics
-    #qdat[, unique(reach_id)[!(unique(reach_id) %in% reach_dt$reach_id)]] 
-    #Two IDs are not in the shapefile for Finland? maybe a hydrological unit not associated
-    intermod_dt <- merge(in_hydromod_drn$data_all, reach_dt, 
-                         by='reach_id', all.x=F, all.y=F) %>%
-      merge(in_hydromod_drn$dates_format[, .(date, month, hy, doy)],
-            by='date', all.x=T, all.y=F)
-    
-    q_stats <- compute_hydrostats_intermittence(
-      in_hydromod_dt = intermod_dt,
-      in_sites_dt = in_sites_dt)
-  }
-  
-  #-------------------- Compute discharge statistics ---------------------------
-  if (varname == 'qsim') {
-    #Keep only hydrological data for sampled reaches
-    hydromod_dt_sites <- in_hydromod_drn$data_all[
-      reach_id %in% unique(in_sites_dt$reach_id),] %>%
-      setorderv(c('reach_id', 'date')) %>%
-      merge(in_hydromod_drn$dates_format[, .(date, month, hy, doy)],
-            by='date', all.x=T, all.y=F)
-    
-    q_stats <- compute_hydrostats_q(in_hydromod_dt = hydromod_dt_sites) %>%
-      merge(in_sites_dt[, .(id, reach_id)], .,
-            by = 'reach_id', all.x = T, all.y = F,
-            allow.cartesian = T) %>%
-      setorderv(c('reach_id', 'date'))
-  }
-  
-  return(q_stats)
-}
-
 #------ create_ssn -------------------------------------------------------------
 # in_country <- 'Spain'
 # in_network_path = tar_read(network_ssnready_gpkg_list)[[in_country]]
+# in_sites_path = tar_read(site_snapped_gpkg_list)[[in_country]]
+# in_barriers_path = tar_read(barrier_snapped_gpkg_list)[[in_country]]
+# in_hydromod <- tar_read_raw(paste0('hydromod_dt_', in_country, '_qsim'))
 # out_dir = 'results/ssn'
 # overwrite=T
 
 create_ssn <- function(in_network_path,
-                       custom_proj,
+                       in_sites_path,
+                       in_barriers_path,
+                       in_hydrostats,
                        out_dir,
                        overwrite = T) {
   if (!dir.exists(out_dir)) {
@@ -1904,18 +1913,24 @@ create_ssn <- function(in_network_path,
   }
   
   lsn_path <- file.path(out_dir,
-                        sub('[.](?=(shp|gpkg)$)', '_lsn.',
-                            basename(in_network_path), perl=T)
-  )
+                        tools::file_path_sans_ext(
+                          sub('[.](?=(shp|gpkg)$)', '_lsn.',
+                              basename(in_network_path), perl=T)
+                        ))
   
   #Read input network
   net <- st_read(in_network_path) %>%
     st_cast("LINESTRING") %>%
     #Make sure that the geometry column is equally named regardless 
     #of file format (see https://github.com/r-spatial/sf/issues/719)
-    st_set_geometry('geometry') 
+    st_set_geometry('geometry') %>%
+    merge(in_hydromod$data_all[date < as.Date('2021-10-01', '%Y-%m-%d'),  #Link q data
+                               list(mean_qsim = mean(qsim, na.rm=T)), 
+                               by=reach_id],
+          by.x = 'cat', by.y = 'reach_id')
   
-  edges <- SSNbler::lines_to_lsn(
+  #Build landscape network
+  edges_lsn <- SSNbler::lines_to_lsn(
     streams = net,
     lsn_path = lsn_path,
     check_topology = TRUE,
@@ -1924,14 +1939,62 @@ create_ssn <- function(in_network_path,
     overwrite = overwrite
   )
   
+  #Incorporate sites into the landscape network
+  sites_lsn <- sites_to_lsn(
+    sites = st_read(in_sites_path),
+    edges =  edges_lsn,
+    lsn_path = lsn_path,
+    file_name = "sites",
+    snap_tolerance = 5,
+    save_local = TRUE,
+    overwrite = TRUE
+  )
+  
+  #Incorporate barriers into the landscape network
   #Only keep barriers over 2 m and under 100 m snap from network
+  barriers_lsn <- read_sf(in_barriers_path) %>%
+    filter((!is.na(Height) & Height > 2) & snap_dist_m < 100) %>%
+    sites_to_lsn(
+      edges =  edges_lsn,
+      lsn_path = lsn_path,
+      file_name = "barriers",
+      snap_tolerance = 5,
+      save_local = TRUE,
+      overwrite = TRUE
+    )
   
+  #Calculate upstream distance
+  edges_lsn <- updist_edges(
+    edges =  edges_lsn,
+    save_local = TRUE,
+    lsn_path = lsn_path,
+    calc_length = TRUE
+  )
   
+  site_list <- updist_sites(
+    sites = list(
+      sites = sites_lsn,
+      barriers = barriers_lsn
+    ),
+    edges = edges_lsn,
+    length_col = "Length",
+    save_local = TRUE,
+    lsn_path = lsn_path
+  )
+  
+  # ggplot() +
+  #   geom_sf(data = edges_lsn, aes(color = upDist)) +
+  #   geom_sf(data = site_list$sites, aes(color = upDist)) +
+  #   geom_sf(data = site_list$barriers, color='red') +
+  #   coord_sf(datum = st_crs(edges)) +
+  #   scale_color_viridis_c()
   
 }
 #------ compute_connectivity ---------------------------------------------------
 # load("data/data_annika\\STconMEGAmatrix_annika\\Final_STconmat_MegaMat.RData")
 # check <- Final_STconmat_MegaMat
+
+
 
 
 ###################### OLD #####################################################
