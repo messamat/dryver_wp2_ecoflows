@@ -1,11 +1,11 @@
 #Small changes to implement before next run
-  #L22 functions: capitalize S in spain
-  #L56 and L158 functions: catch metacols regardless of capitalization
-  #Standardize country names across all input datasets
-  #Standardize metacols across all input datasets
-  #site names in "data/wp1/Results_present_period_final/data/Genal/Genal_sampling_sites_ReachIDs.csv" are incorrect
-  #update readxl
-  #Need to know how sites were snapped to network "C:\DRYvER_wp2\WP2 - Predicting biodiversity changes in DRNs\Coordinates\Shapefiles with sites moved to the river network\Croatia_near_coords.shp"
+#L22 functions: capitalize S in spain
+#L56 and L158 functions: catch metacols regardless of capitalization
+#Standardize country names across all input datasets
+#Standardize metacols across all input datasets
+#site names in "data/wp1/Results_present_period_final/data/Genal/Genal_sampling_sites_ReachIDs.csv" are incorrect
+#update readxl
+#Need to know how sites were snapped to network "C:\DRYvER_wp2\WP2 - Predicting biodiversity changes in DRNs\Coordinates\Shapefiles with sites moved to the river network\Croatia_near_coords.shp"
 #3s flow acc for Europe: https://data.hydrosheds.org/file/hydrosheds-v1-acc/eu_acc_3s.zip
 
 #Make sure that biological data are standardized by area to get densities
@@ -48,26 +48,26 @@ list(
     file.path(rootdir, 'data', 'data_annika', "ENV_all_NAs_as_blank.csv"),
     format='file'
   ),
-
+  
   tar_target(
     env_data_path_common,
     file.path(bio_dir,"_Environmental data", "ENV_all_1622023.csv"),
     format='file'
   ),
-
+  
   #Path to modeled hydrological data
   tar_target(
     hydromod_paths_dt,
     define_hydromod_paths(in_hydromod_dir = hydromod_present_dir)
   ),
-
+  
   #Path to metadata accompanying eDNA data
   tar_target(
     metadata_edna_path,
     file.path(bio_dir, '_Microbes data', 'metadata DRYvER eDNA updated.xlsx'),
     format='file'
   ),
-
+  
   #Paths to pre-processed biological sampling data
   tar_target(
     bio_data_paths,
@@ -87,22 +87,22 @@ list(
     #, format='file'
   )
   ,
-
+  
   #------------------------------- Download data -------------------------------
   #Download amber river barriers dataset
   tar_target(
     amber_path,
     {
-    amber_dir_path <- download_unzip(
-      url =  "https://figshare.com/ndownloader/articles/12629051/versions/5",
-      out_dir = file.path('data', 'amber'), 
-      out_zip=NULL)
-    unzip(file.path(amber_dir_path, 'Fig1_AMBER_BARRIER_ATLAS_V1.zip'),
-          exdir = file.path('data', 'amber'))
-    return(file.path(amber_dir_path, 'AMBER_BARRIER_ATLAS_V1.csv'))
+      amber_dir_path <- download_unzip(
+        url =  "https://figshare.com/ndownloader/articles/12629051/versions/5",
+        out_dir = file.path('data', 'amber'), 
+        out_zip=NULL)
+      unzip(file.path(amber_dir_path, 'Fig1_AMBER_BARRIER_ATLAS_V1.zip'),
+            exdir = file.path('data', 'amber'))
+      return(file.path(amber_dir_path, 'AMBER_BARRIER_ATLAS_V1.csv'))
     }
   ),
-
+  
   #------------------------------- Read in data ----------------------------------
   #Read reach data
   tar_target(
@@ -112,13 +112,16 @@ list(
                         fread(reaches_path, sep="\t", skip=1, 
                               header=T, drop=c(17,18)) %>%
                           .[-c(1,2,3),] %>%
-                          .[, lapply(.SD, as.numeric)]
-                        ] %>%
+                          .[ID != '# end of reach.par',] %>%
+                          .[, lapply(.SD, as.numeric)] %>%
+                          setnames(gsub('[-]', '_', names(.)))
+      ] %>%
         .[, country := in_country]
-    }) %>% rbindlist(use.names=T, fill=T)
-
+    }) %>% rbindlist(use.names=T, fill=T) 
+    #Reach that flows to 9999 is outlet in Czech, Finland, France, and Hungary
+    #Reach that flows to 0 is outlet in Spain and Croatia
   ),
-
+  
   #Read local environmental data
   tar_target(
     env_dt,
@@ -150,7 +153,7 @@ list(
     lapply(names(network_sub_gpkg_list), function(in_country) {
       #Set size of simplifying radius to remove loops. See function
       clustering_dist_list <- list(Croatia=50, Czech=60, Finland=50, 
-                              France=50, Hungary=50, Spain=40)
+                                   France=50, Hungary=50, Spain=40)
       
       out_net_path <- clean_network(
         rivnet_path = network_sub_gpkg_list[[in_country]],
@@ -212,25 +215,36 @@ list(
     }) %>% setNames(names(network_directed_gpkg_list))
   )
   ,
-
+  
+  #Compute strahler stream order
+  tar_target(
+    network_strahler,
+    lapply(names(network_ssnready_gpkg_list), function(in_country) {
+      assign_strahler_order(
+        rivnet_path = network_ssnready_gpkg_list[[in_country]], 
+        idcol = 'UID')
+    }) %>% setNames(names(network_ssnready_gpkg_list))
+  )
+  ,
+  
   #Create shapefile of sampling site-reaches
   tar_target(
     site_reaches_gpkg_list,
     create_sites_gpkg(in_hydromod_paths_dt = hydromod_paths_dt,
-                     in_sites_dt = sites_dt,
-                     out_dir = file.path('results', 'gis'),
-                     geom= 'reaches',
-                     overwrite = T)
+                      in_sites_dt = sites_dt,
+                      out_dir = file.path('results', 'gis'),
+                      geom= 'reaches',
+                      overwrite = T)
   )
   ,
   
   tar_target(
     site_points_gpkg_list,
     create_sites_gpkg(in_hydromod_paths_dt = hydromod_paths_dt,
-                     in_sites_dt = sites_dt,
-                     out_dir = file.path('results', 'gis'),
-                     geom = 'points',
-                     overwrite = T)
+                      in_sites_dt = sites_dt,
+                      out_dir = file.path('results', 'gis'),
+                      geom = 'points',
+                      overwrite = T)
   )
   ,
   
@@ -316,8 +330,8 @@ list(
   #     merge(env_dt, by=c('site', 'campaign', 'running_id'))
   # )
   #,
-
-
+  
+  
   # #Read intermittence data (90 days)
   # tar_target(
   #   interm90_dt,
@@ -326,7 +340,7 @@ list(
   # ),
   #
   #
-
+  
   #
   # #Merge species richness with local environmental and intermittence data
   # tar_target(

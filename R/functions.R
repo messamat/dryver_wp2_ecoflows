@@ -608,7 +608,7 @@ split_sp_line <- function(line, n, length, debug = F) {
   return(pieces)
 }
 
-#------ fix_sp_streams ---------------------------------------------------------
+#------ fix_confluences_inner ---------------------------------------------------------
 # Fixes complex confluences in stream networks
 # Original author: Miguel Porto (only cosmetic changes were performed)
 # From https://github.com/miguel-porto/fix-streams/blob/master/fix-streams.r
@@ -622,7 +622,7 @@ split_sp_line <- function(line, n, length, debug = F) {
 # correctedshp=fix.streams(rios,step=10)
 # writeOGR(correctedshp,"streams_corrected.shp","streams_corrected","ESRI Shapefile")
 
-fix_sp_streams <- function(shp, from = "FROM_NODE", to = "TO_NODE", step = 10) {
+fix_confluences_inner <- function(shp, from = "FROM_NODE", to = "TO_NODE", step = 10) {
   # step is the desired length (in map units) by which the river sinks are adjusted (separated) downstream.
   pieces <- list()
   probrivers <- list()
@@ -1508,12 +1508,15 @@ fix_complex_confluences <- function(rivnet_path, max_node_shift = 5,
   rivnet_fromto <- merge(rivnet, net_fromto, by='UID', all.x=T)
   
   #Run fix streamlines from Miguel Porto
-  rivnet_fixed <- fix_sp_streams(shp = as_Spatial(rivnet_fromto), 
-                                 from = "from",
-                                 to = "to", 
-                                 step = max_node_shift) %>%
+  rivnet_fixed <- fix_confluences_inner(shp = as_Spatial(rivnet_fromto), 
+                                        from = "from",
+                                        to = "to", 
+                                        step = max_node_shift) %>%
     .[, !(names(.) %in% c('from', 'to'))] %>%
     st_as_sf
+  
+  rivnet_fixed[is.na(rivnet_fixed$UID),]$UID <- max(rivnet_fixed$UID, na.rm=T) + 
+    seq_len(sum(is.na(rivnet_fixed$UID)))
   
   #------------------ Write out results ------------------------------------------
   if (is.null(out_path)) {
@@ -1524,12 +1527,65 @@ fix_complex_confluences <- function(rivnet_path, max_node_shift = 5,
                                  '.gpkg')
     )
   }
-
+  
   st_write(rivnet_fixed, out_path, append=F)
-
+  
   return(out_path)
 }
 
+#------ assign_strahler_order --------------------------------------------------
+assign_strahler_order <- function(rivnet_path, idcol) {
+  rivnet <- st_read(rivnet_path)
+  
+  #Compute from-to fields
+  net_fromto <- as_sfnetwork(rivnet) %>%
+    activate(edges) %>%
+    as.data.table %>%
+    .[, c('from', 'to', idcol), with=F] %>%
+    merge(.[, list(nsource = .N), by=to], 
+          by.x='from', by.y='to', all.x=T) %>%
+    .[is.na(nsource), nsource := 0]
+  
+  #Join to spatial network
+  rivnet_fromto <- merge(rivnet, net_fromto, by=idcol)
+  
+  #Convert to data.table for speed and syntax
+  rivnet_fromto_dt <- as.data.table(rivnet_fromto)
+  
+  #Assign strahler 1 to lines with no source line
+  rivnet_fromto_dt[nsource == 0, strahler := 1]
+  
+  # Compute Strahler order iteratively
+  while (any(is.na(rivnet_fromto_dt$strahler))) {
+    # Identify lines whose sources' Strahler orders are all assigned
+    rivnet_fromto_dt <-  merge(rivnet_fromto_dt, rivnet_fromto_dt[, .(to, strahler)], 
+                               by.x='from', by.y='to', suffixes = c('_down', '_up'),
+                               all.x=T)
+    rivnet_fromto_dt[is.na(strahler_down) & !is.na(strahler_up) & nsource == 1,
+                     strahler_down := strahler_up]
+    
+    rivnet_fromto_dt[is.na(strahler_down) & nsource == 2 & !is.na(strahler_up),
+                     eligible := (.N==2), by=idcol]
+    
+    rivnet_fromto_dt[eligible & !is.na(eligible), 
+                     n_u := length(unique(strahler_up)), 
+                     by = idcol]
+    rivnet_fromto_dt[eligible & !is.na(eligible) & n_u == 1,
+                     strahler_down := strahler_up +1,
+                     by = idcol]
+    rivnet_fromto_dt[eligible & !is.na(eligible) & n_u == 2,
+                     strahler_down := max(strahler_up),
+                     by = idcol]
+    
+    setnames(rivnet_fromto_dt, 'strahler_down', 'strahler')
+    
+    rivnet_fromto_dt <- rivnet_fromto_dt[!duplicated(get(idcol)), 
+                                         -c('strahler_up', 'eligible', 'n_u'), 
+                                         with=F]
+  }
+  
+  return(rivnet_fromto_dt[, c(idcol, 'from', 'to', 'strahler'), with=F])
+}
 #------ compute_hydrostats_drn -------------------------------------------------
 # in_drn <- 'Hungary'
 # varname <-  'isflowing' #qsim
