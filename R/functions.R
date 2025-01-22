@@ -622,7 +622,8 @@ split_sp_line <- function(line, n, length, debug = F) {
 # correctedshp=fix.streams(rios,step=10)
 # writeOGR(correctedshp,"streams_corrected.shp","streams_corrected","ESRI Shapefile")
 
-fix_confluences_inner <- function(shp, from = "FROM_NODE", to = "TO_NODE", step = 10) {
+fix_confluences_inner <- function(shp, from = "FROM_NODE", to = "TO_NODE", 
+                                  step = 10, fields_to_keep=NULL) {
   # step is the desired length (in map units) by which the river sinks are adjusted (separated) downstream.
   pieces <- list()
   probrivers <- list()
@@ -694,6 +695,12 @@ fix_confluences_inner <- function(shp, from = "FROM_NODE", to = "TO_NODE", step 
         newdata[1, from] <- newnodes[j]
         newdata[1, to] <- newnodes[j + 1]
         rownames(newdata) <- rid
+        
+        #Re-assign kept data 
+        if (!is.null(fields_to_keep)) {
+          newdata[[fields_to_keep]] <- mto[[fields_to_keep]]
+        }
+        
         pieces <- c(pieces, 
                     list(sp::SpatialLinesDataFrame(piece, newdata, match = F))) # save pieces for later use
         
@@ -1172,7 +1179,7 @@ subset_network <- function(in_hydromod_paths_dt, out_dir, overwrite=FALSE) {
 }
 
 #------ clean_network ------------------------------
-# in_country <- 'Czech'
+# in_country <- 'Croatia'
 # rivnet_path <- tar_read(network_sub_gpkg_list)[[in_country]]
 # idcol <- 'cat'
 # node_clustering_dist = 50
@@ -1511,7 +1518,8 @@ fix_complex_confluences <- function(rivnet_path, max_node_shift = 5,
   rivnet_fixed <- fix_confluences_inner(shp = as_Spatial(rivnet_fromto), 
                                         from = "from",
                                         to = "to", 
-                                        step = max_node_shift) %>%
+                                        step = max_node_shift,
+                                        fields_to_keep = 'cat') %>%
     .[, !(names(.) %in% c('from', 'to'))] %>%
     st_as_sf
   
