@@ -18,7 +18,7 @@
 #outputs to the shapefile.
 
 #Parameters
-in_country <- 'Spain'
+in_country <- 'Croatia'
 rivnet_path <- tar_read(network_ssnready_gpkg_list)[[in_country]]
 strahler_dt <- tar_read(network_strahler)[[in_country]] 
 in_reaches_dt <- tar_read(reaches_dt)[country==in_country,] 
@@ -78,7 +78,7 @@ in_reaches_dt <- in_reaches_dt[, .(ID, to_reach, length)] %>%
 #Read network and join with hydromod data
 rivnet <- st_read(rivnet_path) %>%
   merge(strahler_dt, by='UID') %>%
-  merge(in_reaches_dt, by.x='cat', by.y='ID_hydromod')
+  merge(in_reaches_dt, by.x='cat', by.y='ID_hydromod', all.x=T)
 
 #Remove pseudonodes to define full segments between confluences
 rivnet_fullseg <- as_sfnetwork(rivnet) %>%
@@ -276,7 +276,16 @@ for (i in 1:3) {
   
 }
 
-#Check
+#---------- Check results ------------------------------------------------------
+#Compare with reaches data from hydrological model
+to_reach_shpcor <- rivnet_inters_dt[, .(from, cat_cor)] %>%
+  setnames(c('to', 'to_reach_shpcor'))
+rivnet_inters_dt <- merge(rivnet_inters_dt, to_reach_shpcor, by='to', all.x=T)
+
+rivnet_inters_dt[, hydromod_shpcor_matc := (to_reach_hydromod == to_reach_shpcor)]
+
+
+#Export results to gpkg
 write_sf(merge(rivnet_fullseg_inters_nopseudo, 
                rivnet_inters_dt[, .(cat_cor, UID)],
                by='UID')[, c('UID', 'cat', 'strahler', 'UID_fullseg', 'cat_cor')],
