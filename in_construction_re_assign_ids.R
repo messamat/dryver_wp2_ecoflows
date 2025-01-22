@@ -21,7 +21,7 @@
 in_country <- 'Croatia'
 rivnet_path <- tar_read(network_ssnready_gpkg_list)[[in_country]]
 strahler_dt <- tar_read(network_strahler)[[in_country]] 
-in_reaches_dt <- tar_read(reaches_dt)[country==in_country,] 
+in_reaches_hydromod_dt <- tar_read(reaches_dt)[country==in_country,] 
 
 #Helper functions
 #For those segments where only one cat remains, assign cat to the entire segment
@@ -71,14 +71,9 @@ get_nearby_cat <- function(in_dt, source_direction, strahler_list = seq(1,15)) {
 
 #---------------------------- FUNCTION -----------------------------------------
 #---------- Prepare data -------------------------------------------------------
-#Format hydromod reaches data
-in_reaches_dt <- in_reaches_dt[, .(ID, to_reach, length)] %>%
-  setnames(c('ID_hydromod', 'to_reach_hydromod', 'length_hydromod'))
-
 #Read network and join with hydromod data
 rivnet <- st_read(rivnet_path) %>%
-  merge(strahler_dt, by='UID') %>%
-  merge(in_reaches_dt, by.x='cat', by.y='ID_hydromod', all.x=T)
+  merge(strahler_dt, by='UID') 
 
 #Remove pseudonodes to define full segments between confluences
 rivnet_fullseg <- as_sfnetwork(rivnet) %>%
@@ -276,17 +271,39 @@ for (i in 1:3) {
   
 }
 
+
+#---------- Merge back with spatial data ---------------------------------------
+#Merge processed attributes with pre-formatted spatial network
+rivnet_catcor <- merge(
+  rivnet_fullseg_inters_nopseudo, 
+  rivnet_inters_dt[, .(UID, cat_cor, cat_copy)],
+  by='UID') 
+
+#Remove pseudo-nodes among segments sections of the same cat_cor
+rivnet_catcor_smooth <- as_sfnetwork(rivnet_catcor) %>%
+  activate(edges) %>%
+  convert(to_spatial_smooth, 
+          require_equal = c("cat_cor", "UID_fullseg"),
+          summarise_attributes = "first") %>%
+  st_as_sf()
+
 #---------- Check results ------------------------------------------------------
 #Compare with reaches data from hydrological model
-to_reach_shpcor <- rivnet_inters_dt[, .(from, cat_cor)] %>%
+#Format hydromod reaches data
+in_reaches_dt <- in_reaches_hydromod_dt[, .(ID, to_reach, length)] %>%
+  setnames(c('ID_hydromod', 'to_reach_hydromod', 'length_hydromod'))
+#Merge data
+to_reach_shpcor <- as.data.table(rivnet_catcor_smooth)[, .(from, cat_cor)] %>%
   setnames(c('to', 'to_reach_shpcor'))
-rivnet_inters_dt <- merge(rivnet_inters_dt, to_reach_shpcor, by='to', all.x=T)
 
-rivnet_inters_dt[, hydromod_shpcor_matc := (to_reach_hydromod == to_reach_shpcor)]
+rivnet_inters_check_dt <- merge(as.data.table(rivnet_catcor_smooth), 
+                          to_reach_shpcor, by='to', all.x=T) %>%
+  merge(in_reaches_dt, by.x='cat_cor', by.y='ID_hydromod', all.x=T)
+
+rivnet_inters_check_dt[, hydromod_shpcor_matc := (to_reach_hydromod == to_reach_shpcor)]
 
 
+#---------- Write out results ------------------------------------------------------
 #Export results to gpkg
-write_sf(merge(rivnet_fullseg_inters_nopseudo, 
-               rivnet_inters_dt[, .(cat_cor, UID)],
-               by='UID')[, c('UID', 'cat', 'strahler', 'UID_fullseg', 'cat_cor')],
+write_sf(rivnet_catcor[, c('UID', 'cat', 'strahler', 'UID_fullseg', 'cat_cor')],
          file.path(resdir, 'scratch.gdb'), layer=paste0('test_', in_country))
