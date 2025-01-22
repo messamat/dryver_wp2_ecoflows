@@ -18,13 +18,14 @@
 #outputs to the shapefile.
 
 #Parameters
-in_country <- 'Croatia'
+in_country <- 'Spain'
 rivnet_path <- tar_read(network_ssnready_gpkg_list)[[in_country]]
 strahler_dt <- tar_read(network_strahler)[[in_country]] 
 in_reaches_dt <- tar_read(reaches_dt)[country==in_country,] 
 
 #Helper functions
 #For those segments where only one cat remains, assign cat to the entire segment
+#at least a given proportion of the length of the full segment
 assign_singlecat_to_seg <- function(net_dt, length_threshold = 1/3) {
   # Identify segments with only one remaining section
   #with a cat (length_uid_fullsegper == 1) and where the actual length of that
@@ -40,6 +41,32 @@ assign_singlecat_to_seg <- function(net_dt, length_threshold = 1/3) {
   #Assign those cat_cor to all sections within those segments
   net_dt[is.na(cat_cor), 
          cat_cor := cat_toassign[.SD, on = 'UID_fullseg', cat_cor]]
+}
+
+#For segment sections with cat==NAs and cat_cor==NA, 
+#get cat_cor from upstream section in the same segment
+get_nearby_cat <- function(in_dt, source_direction, strahler_list = seq(1,15)) {
+  if (source_direction == 'upstream') {
+    source_col <- 'to' #Column of section to get cat_cor from
+    sink_col <- 'from' #Column of section to assign cat_cor to
+  } else if (source_direction == 'downstream') {
+    source_col <- 'from' #Column of section to get cat_cor from
+    sink_col <- 'to' #Column of section to assign cat_cor to
+  }
+  
+  sections_tofill <- rivnet_inters_dt[
+    , which(is.na(cat) &  is.na(cat_cor) & (strahler %in% strahler_list))]
+  
+  cat_cor_toassign <- rivnet_inters_dt[
+    !is.na(cat_cor) & 
+      (strahler %in% strahler_list) & 
+      (get(source_col) %in% rivnet_inters_dt[sections_tofill, unique(get(sink_col))]), 
+    c(source_col, 'UID_fullseg', 'cat_cor'), with=F] %>%
+    setnames(source_col, sink_col)
+  
+  rivnet_inters_dt[sections_tofill,
+                   cat_cor := cat_cor_toassign[
+                     .SD, on=c(sink_col, 'UID_fullseg'), cat_cor]]
 }
 
 #---------------------------- FUNCTION -----------------------------------------
@@ -131,16 +158,9 @@ cats_assigned <- rivnet_inters_dt[!is.na(cat_cor), unique(cat_cor)]
 #For cats that are already assigned, remove their "cat" from other segments
 rivnet_inters_dt[cat %in% cats_assigned & is.na(cat_cor), cat := NA]
 
-#For segment section with cat==NAs in first order streams, assign cat_cor of
-#upstream segment
-cat_cor_toassign <- rivnet_inters_dt[
-  !is.na(cat_cor) & (strahler == 1) & 
-    (to %in% rivnet_inters_dt[is.na(cat) & strahler == 1, unique(from)]), 
-  .(to, UID_fullseg, cat_cor)] %>%
-  setnames('to', 'from')
-rivnet_inters_dt[is.na(cat) & strahler == 1,
-                 cat_cor := cat_cor_toassign[
-                   .SD, on=c('from', 'UID_fullseg'), cat_cor]]
+#For segment sections with cat==NAs and cat_cor==NA in first order streams, 
+#get cat_cor from upstream segment in same segment
+get_nearby_cat(rivnet_inters_dt, source_direction = 'upstream', strahler_list = 1) 
 
 #Re-compute length_uid_fullsegper, excluding segment sections whose initial
 #cat was assigned elsewhere
@@ -158,11 +178,10 @@ rivnet_inters_dt[cat %in% cats_assigned & is.na(cat_cor), cat := NA]
 #Computer number of full segments that a cat overlaps
 rivnet_inters_dt[, n_seg_overlap := length(unique(UID_fullseg)), by=cat]
 
-#For second order segments where the cat is only represented by that segment,
-#keep that cat for this section of the segment
+#For first and second order segments where the cat is now only represented 
+#by that segment, keep that cat for this section of the segment
 rivnet_inters_dt[n_seg_overlap == 1 & strahler <= 2 & is.na(cat_cor), 
                  cat_cor := cat]
-
 cats_assigned <- rivnet_inters_dt[!is.na(cat_cor), unique(cat_cor)]
 
 #For cats that are already assigned, remove their "cat" from other segments
@@ -170,14 +189,7 @@ rivnet_inters_dt[cat %in% cats_assigned & is.na(cat_cor), cat := NA]
 
 #For segment section with cat==NAs in first order streams, assign cat_cor of
 #upstream segment
-cat_cor_toassign <- rivnet_inters_dt[
-  !is.na(cat_cor) & (strahler == 1) & 
-    (to %in% rivnet_inters_dt[is.na(cat) & strahler == 1, unique(from)]), 
-  .(to, UID_fullseg, cat_cor)] %>%
-  setnames('to', 'from')
-rivnet_inters_dt[is.na(cat) & strahler == 1,
-                 cat_cor := cat_cor_toassign[
-                   .SD, on=c('from', 'UID_fullseg'), cat_cor]]
+get_nearby_cat(rivnet_inters_dt, source_direction = 'upstream', strahler_list = 1) 
 
 #Re-compute length_uid_fullsegper, excluding segment sections whose initial
 #cat was assigned elsewhere
@@ -195,7 +207,6 @@ rivnet_inters_dt[cat %in% cats_assigned & is.na(cat_cor), cat := NA]
 #For sections that represent over 75% of the total length of that cat, assign cat_cor
 rivnet_inters_dt[length_uid_catper>0.7 & is.na(cat_cor), cat_cor := cat]
 
-
 #For cats that are already assigned, remove their "cat" from other segments
 rivnet_inters_dt[cat %in% cats_assigned & is.na(cat_cor), cat := NA]
 
@@ -212,11 +223,11 @@ cats_assigned <- rivnet_inters_dt[!is.na(cat_cor), unique(cat_cor)]
 #For cats that are already assigned, remove their "cat" from other segments
 rivnet_inters_dt[cat %in% cats_assigned & is.na(cat_cor), cat := NA]
 
-#For segment sections in strahler==1 & n_seg_overlap > 2, cat := NA
+#For segment sections in strahler==1 & n_seg_overlap > 2, cat := NA 
 rivnet_inters_dt[strahler == 1 & n_seg_overlap > 2 & is.na(cat_cor), 
                  cat := NA] 
 
-#if only representative of cat, assign cat_cor
+#if main representative of cat, assign cat_cor
 rivnet_inters_dt[!is.na(cat_cor), cat := cat_cor]
 rivnet_inters_dt[, length_cat := sum(length_uid), by=cat]
 rivnet_inters_dt[, length_uid_catper := length_uid/length_cat, by=cat]
@@ -231,6 +242,9 @@ rivnet_inters_dt[cat %in% cats_assigned & is.na(cat_cor), cat := NA]
 rivnet_inters_dt[!is.na(cat_cor), 
                  length_uid_fullsegper := length_uid/sum(length_uid),
                  by=UID_fullseg]
+
+##For those segments where only one cat remains, assign cat to the entire segment
+#regardless of the proportion of the segment it represents
 cat_cor_toassign <-  rivnet_inters_dt[
   is.na(cat_cor) & length_uid_fullsegper == 1,
   .(UID_fullseg, cat)] %>%
@@ -239,8 +253,9 @@ rivnet_inters_dt[is.na(cat_cor),
                  cat_cor := cat_cor_toassign[.SD, on='UID_fullseg', 
                                                    cat_cor]]
 
-#For the remaining segments with all NAs, 
+#For the remaining segments where all cats are NAs (have been assigned elsewhere), 
 #assign the cat of the section representing the highest percent of the segment
+#These are usually near loops that have been removed 
 rivnet_inters_dt[is.na(cat_cor), NAlength := sum(length_uid),
                  by=UID_fullseg]
 rivnet_inters_dt[(NAlength==length_fullseg), 
@@ -250,32 +265,19 @@ rivnet_inters_dt[(NAlength==length_fullseg),
 #For all remaining sections, remove their "cat" 
 rivnet_inters_dt[is.na(cat_cor), cat := NA]
 
-for (i in 1:2) {
+for (i in 1:3) {
   #For segment section with cat==NAs and cat_cor==NA, 
   #assign cat_cor of upstream segment of same strahler order
-  cat_cor_toassign <- rivnet_inters_dt[
-    !is.na(cat_cor) &
-      (from %in% rivnet_inters_dt[is.na(cat) & is.na(cat_cor), unique(to)]), 
-    .(from, UID_fullseg, cat_cor, strahler)] %>%
-    setnames('from', 'to')
-  rivnet_inters_dt[is.na(cat) & is.na(cat_cor),
-                   cat_cor := cat_cor_toassign[
-                     .SD, on=c('to', 'UID_fullseg'), cat_cor]]
+  get_nearby_cat(rivnet_inters_dt, source_direction = 'upstream')
   
   #For is.na(cat) & is.na(cat_cor), 
   #assign downstream cat_cor of same UID_fullseg
-  cat_cor_toassign <- rivnet_inters_dt[
-    !is.na(cat_cor) &
-      (to %in% rivnet_inters_dt[is.na(cat) & is.na(cat_cor), unique(from)]), 
-    .(to, UID_fullseg, cat_cor, strahler)] %>%
-    setnames('to', 'from')
-  rivnet_inters_dt[is.na(cat) & is.na(cat_cor),
-                   cat_cor := cat_cor_toassign[
-                     .SD, on=c('from', 'UID_fullseg'), cat_cor]]
+  get_nearby_cat(rivnet_inters_dt, source_direction = 'downstream') 
+  
 }
 
 #Check
 write_sf(merge(rivnet_fullseg_inters_nopseudo, 
                rivnet_inters_dt[, .(cat_cor, UID)],
                by='UID')[, c('UID', 'cat', 'strahler', 'UID_fullseg', 'cat_cor')],
-         file.path(resdir, 'scratch.gdb'), layer='test_1')
+         file.path(resdir, 'scratch.gdb'), layer=paste0('test_', in_country))
