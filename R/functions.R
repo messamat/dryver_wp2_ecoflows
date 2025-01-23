@@ -1542,58 +1542,81 @@ fix_complex_confluences <- function(rivnet_path, max_node_shift = 5,
 }
 
 #------ assign_strahler_order --------------------------------------------------
-assign_strahler_order <- function(rivnet_path, idcol) {
-  rivnet <- st_read(rivnet_path)
-  
-  #Compute from-to fields
-  net_fromto <- as_sfnetwork(rivnet) %>%
-    activate(edges) %>%
-    as.data.table %>%
-    .[, c('from', 'to', idcol), with=F] %>%
-    merge(.[, list(nsource = .N), by=to], 
-          by.x='from', by.y='to', all.x=T) %>%
-    .[is.na(nsource), nsource := 0]
-  
-  #Join to spatial network
-  rivnet_fromto <- merge(rivnet, net_fromto, by=idcol)
-  
-  #Convert to data.table for speed and syntax
-  rivnet_fromto_dt <- as.data.table(rivnet_fromto)
+assign_strahler_order <- function(in_rivnet, idcol, verbose = F) {
+  if (is.character(in_rivnet)) {
+    rivnet <- st_read(rivnet_path)
+    
+    #Compute from-to fields
+    net_fromto <- as_sfnetwork(rivnet) %>%
+      activate(edges) %>%
+      as.data.table %>%
+      .[, c('from', 'to', idcol), with=F] %>%
+      merge(.[, list(nsource = .N), by=to], 
+            by.x='from', by.y='to', all.x=T) %>%
+      .[is.na(nsource), nsource := 0]
+    
+    #Join to spatial network
+    rivnet_fromto <- merge(rivnet, net_fromto, by=idcol)
+    
+    #Convert to data.table for speed and syntax
+    rivnet_fromto_dt <- as.data.table(rivnet_fromto)
+    
+  } else if (is.data.table(in_rivnet)) {
+    rivnet_fromto_dt <- merge(in_rivnet,
+                              in_rivnet[, list(nsource = .N), by=to], 
+                              by.x='from', by.y='to', all.x=T) %>%
+      .[is.na(nsource), nsource := 0]
+  }
   
   #Assign strahler 1 to lines with no source line
   rivnet_fromto_dt[nsource == 0, strahler := 1]
   
   # Compute Strahler order iteratively
-  while (any(is.na(rivnet_fromto_dt$strahler))) {
+  while (sum(is.na(rivnet_fromto_dt$strahler)) > 417) {
+  #while (any(is.na(rivnet_fromto_dt$strahler))) {
+    if (verbose) { print(sum(is.na(rivnet_fromto_dt$strahler)))}
     # Identify lines whose sources' Strahler orders are all assigned
     rivnet_fromto_dt <-  merge(rivnet_fromto_dt, rivnet_fromto_dt[, .(to, strahler)], 
                                by.x='from', by.y='to', suffixes = c('_down', '_up'),
                                all.x=T)
+   
+    #Extend strahler order downstream for consecutive sections on the same segment 
+    #(only one source section)
     rivnet_fromto_dt[is.na(strahler_down) & !is.na(strahler_up) & nsource == 1,
                      strahler_down := strahler_up]
     
-    rivnet_fromto_dt[is.na(strahler_down) & nsource == 2 & !is.na(strahler_up),
-                     eligible := (.N==2), by=idcol]
+    #Flag as eligible those segments for which all upstream segments have
+    #a strahler order
+    rivnet_fromto_dt[is.na(strahler_down) & nsource >= 2 & !is.na(strahler_up),
+                     eligible := ((.N>=2) & .N==nsource), by=idcol]
     
+    #Identify max upstream strahler and number of upstream sections with that strahler order
     rivnet_fromto_dt[eligible & !is.na(eligible), 
-                     n_u := length(unique(strahler_up)), 
-                     by = idcol]
-    rivnet_fromto_dt[eligible & !is.na(eligible) & n_u == 1,
-                     strahler_down := strahler_up +1,
-                     by = idcol]
-    rivnet_fromto_dt[eligible & !is.na(eligible) & n_u == 2,
-                     strahler_down := max(strahler_up),
-                     by = idcol]
+                     max_strahler_u := max(strahler_up),
+                     by=idcol]
+    rivnet_fromto_dt[eligible & !is.na(eligible),
+                    n_max_strahler_u := .SD[strahler_up==max_strahler_u, .N],
+                    by=idcol]
     
+    rivnet_fromto_dt[eligible & !is.na(eligible),
+                     strahler_down := fifelse(
+                       n_max_strahler_u >= 2,
+                       max_strahler_u + 1,
+                       max_strahler_u),
+                     by = idcol]
+
     setnames(rivnet_fromto_dt, 'strahler_down', 'strahler')
     
-    rivnet_fromto_dt <- rivnet_fromto_dt[!duplicated(get(idcol)), 
-                                         -c('strahler_up', 'eligible', 'n_u'), 
-                                         with=F]
+    rivnet_fromto_dt <- rivnet_fromto_dt[
+      !duplicated(get(idcol)), 
+      -c('strahler_up', 'eligible', 'max_strahler_u', 'n_max_strahler_u'), 
+      with=F]
   }
   
-  return(rivnet_fromto_dt[, c(idcol, 'from', 'to', 'strahler'), with=F])
+  return(rivnet_fromto_dt[
+    , c(idcol, 'from', 'to', 'strahler', 'nsource'), with=F])
 }
+
 #------ compute_hydrostats_drn -------------------------------------------------
 # in_drn <- 'Hungary'
 # varname <-  'isflowing' #qsim
@@ -1707,7 +1730,7 @@ format_site_dt <- function(in_path, in_country) {
 # in_hydromod_paths_dt = tar_read(hydromod_paths_dt)
 # in_sites_dt = tar_read(sites_dt)
 # out_dir = file.path('results', 'gis')
-# geom = 'points'
+# geom = 'reaches'
 # overwrite = TRUE
 
 create_sites_gpkg <- function(in_hydromod_paths_dt,
