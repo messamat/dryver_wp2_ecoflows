@@ -221,7 +221,7 @@ list(
     network_strahler,
     lapply(names(network_ssnready_gpkg_list), function(in_country) {
       assign_strahler_order(
-        rivnet_path = network_ssnready_gpkg_list[[in_country]], 
+        in_rivnet = network_ssnready_gpkg_list[[in_country]], 
         idcol = 'UID')
     }) %>% setNames(names(network_ssnready_gpkg_list))
   )

@@ -1542,9 +1542,13 @@ fix_complex_confluences <- function(rivnet_path, max_node_shift = 5,
 }
 
 #------ assign_strahler_order --------------------------------------------------
+# in_country <- 'Croatia'
+# in_rivnet = network_ssnready_gpkg_list[[in_country]]
+# idcol = 'UID'
+
 assign_strahler_order <- function(in_rivnet, idcol, verbose = F) {
   if (is.character(in_rivnet)) {
-    rivnet <- st_read(rivnet_path)
+    rivnet <- st_read(in_rivnet)
     
     #Compute from-to fields
     net_fromto <- as_sfnetwork(rivnet) %>%
@@ -1572,8 +1576,8 @@ assign_strahler_order <- function(in_rivnet, idcol, verbose = F) {
   rivnet_fromto_dt[nsource == 0, strahler := 1]
   
   # Compute Strahler order iteratively
-  while (sum(is.na(rivnet_fromto_dt$strahler)) > 417) {
-  #while (any(is.na(rivnet_fromto_dt$strahler))) {
+  #while (sum(is.na(rivnet_fromto_dt$strahler)) > 417) {
+  while (any(is.na(rivnet_fromto_dt$strahler))) {
     if (verbose) { print(sum(is.na(rivnet_fromto_dt$strahler)))}
     # Identify lines whose sources' Strahler orders are all assigned
     rivnet_fromto_dt <-  merge(rivnet_fromto_dt, rivnet_fromto_dt[, .(to, strahler)], 
