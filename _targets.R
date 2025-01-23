@@ -227,6 +227,19 @@ list(
   )
   ,
   
+  #Re-assign correct IDs to match with hydrological data
+  tar_target(
+    network_reided,
+    lapply(names(network_ssnready_gpkg_list), function(in_country) {
+      reassign_netids(rivnet_path = network_ssnready_gpkg_list[[in_country]], 
+                      strahler_dt = network_strahler[[in_country]], 
+                      in_reaches_hydromod_dt = reaches_dt[country==in_country,], 
+                      outdir = file.path(resdir, 'gis')
+      )
+    }) %>% setNames(names(network_ssnready_gpkg_list))
+  )
+  ,
+
   #Create shapefile of sampling site-reaches
   tar_target(
     site_reaches_gpkg_list,
