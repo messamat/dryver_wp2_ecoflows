@@ -69,10 +69,14 @@ get_nearby_cat <- function(in_dt, source_direction, strahler_list = seq(1,15)) {
                      .SD, on=c(sink_col, 'UID_fullseg'), cat_cor]]
 }
 
+
 #---------------------------- FUNCTION -----------------------------------------
 #---------- Prepare data -------------------------------------------------------
 #Read network and join with hydromod data
 rivnet <- st_read(rivnet_path) %>%
+  #Make sure that the geometry column is equally named regardless 
+  #of file format (see https://github.com/r-spatial/sf/issues/719)
+  st_set_geometry('geometry') %>%
   merge(strahler_dt, by='UID') 
 
 #Remove pseudonodes to define full segments between confluences
@@ -124,6 +128,21 @@ rivnet_inters_dt[, length_uid_fullsegper := length_uid/length_fullseg]
 #Computer number of full segments that a cat overlaps
 rivnet_inters_dt[, n_seg_overlap := length(unique(UID_fullseg)), by=cat]
 
+#Format network data from hydrological model
+reaches_hydromod_format <- in_reaches_hydromod_dt[
+  , .(ID, to_reach, length, strahler)] %>%
+  setnames(c('ID_hydromod', 'to_reach_hydromod', 
+             'length_hydromod', 'strahler_hydromod')) %>%
+  .[, `:=`(from = ID_hydromod, to = to_reach_hydromod)] %>%
+  merge( #Compute actual strahler order
+    assign_strahler_order(in_rivnet = reaches_hydromod_format, 
+                          idcol = 'ID_hydromod', verbose = F),
+    by = 'ID_hydromod'
+  ) %>%
+  setnames('strahler', 'strahler_calc')
+
+ggplot(reaches_hydromod_format, aes(x=strahler_calc, y=strahler_hydromod)) +
+  geom_point()
 
 #---------- Assign correct cat -------------------------------------------------
 #For first order segments where the cat is only represented by that segment,
@@ -257,6 +276,11 @@ rivnet_inters_dt[(NAlength==length_fullseg),
                  cat_cor := fifelse(length_uid == max(length_uid), cat_copy, NA), 
                  by=UID_fullseg]
 
+#Remove cats that are not supposed to be downstream of any other cat
+#when there are sections of the correct stream order on that segment
+
+
+
 #For all remaining sections, remove their "cat" 
 rivnet_inters_dt[is.na(cat_cor), cat := NA]
 
@@ -268,16 +292,15 @@ for (i in 1:3) {
   #For is.na(cat) & is.na(cat_cor), 
   #assign downstream cat_cor of same UID_fullseg
   get_nearby_cat(rivnet_inters_dt, source_direction = 'downstream') 
-  
 }
-
 
 #---------- Merge back with spatial data ---------------------------------------
 #Merge processed attributes with pre-formatted spatial network
 rivnet_catcor <- merge(
   rivnet_fullseg_inters_nopseudo, 
   rivnet_inters_dt[, .(UID, cat_cor, cat_copy)],
-  by='UID') 
+  by='UID') %>%
+  .[, c('UID', 'cat_cor', 'cat_copy', 'strahler', 'UID_fullseg', 'geometry')]
 
 #Remove pseudo-nodes among segments sections of the same cat_cor
 rivnet_catcor_smooth <- as_sfnetwork(rivnet_catcor) %>%
@@ -285,25 +308,23 @@ rivnet_catcor_smooth <- as_sfnetwork(rivnet_catcor) %>%
   convert(to_spatial_smooth, 
           require_equal = c("cat_cor", "UID_fullseg"),
           summarise_attributes = "first") %>%
-  st_as_sf()
+  st_as_sf() %>%
+  mutate(length_uid = st_length(.))
 
 #---------- Check results ------------------------------------------------------
-#Compare with reaches data from hydrological model
-#Format hydromod reaches data
-in_reaches_dt <- in_reaches_hydromod_dt[, .(ID, to_reach, length)] %>%
-  setnames(c('ID_hydromod', 'to_reach_hydromod', 'length_hydromod'))
 #Merge data
 to_reach_shpcor <- as.data.table(rivnet_catcor_smooth)[, .(from, cat_cor)] %>%
   setnames(c('to', 'to_reach_shpcor'))
 
-rivnet_inters_check_dt <- merge(as.data.table(rivnet_catcor_smooth), 
+rivnet_inters_check <- merge(rivnet_catcor_smooth, 
                           to_reach_shpcor, by='to', all.x=T) %>%
-  merge(in_reaches_dt, by.x='cat_cor', by.y='ID_hydromod', all.x=T)
-
-rivnet_inters_check_dt[, hydromod_shpcor_matc := (to_reach_hydromod == to_reach_shpcor)]
+  merge(in_reaches_dt, by.x='cat_cor', by.y='ID_hydromod', all.x=T) %>%
+  mutate(hydromod_shpcor_match = (to_reach_hydromod == to_reach_shpcor))
 
 
 #---------- Write out results ------------------------------------------------------
 #Export results to gpkg
-write_sf(rivnet_catcor[, c('UID', 'cat', 'strahler', 'UID_fullseg', 'cat_cor')],
-         file.path(resdir, 'scratch.gdb'), layer=paste0('test_', in_country))
+write_sf(rivnet_inters_check[, c('UID', 'strahler', 'UID_fullseg', 'cat_cor', 
+                                 'to_reach_shpcor', 'to_reach_hydromod',
+                                 'hydromod_shpcor_match')],
+         file.path(resdir, 'scratch.gdb'), layer=paste0('test4_', in_country))
