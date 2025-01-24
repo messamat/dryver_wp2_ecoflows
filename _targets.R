@@ -231,11 +231,47 @@ list(
   tar_target(
     network_reided,
     lapply(names(network_ssnready_gpkg_list), function(in_country) {
-      reassign_netids(rivnet_path = network_ssnready_gpkg_list[[in_country]], 
-                      strahler_dt = network_strahler[[in_country]], 
-                      in_reaches_hydromod_dt = reaches_dt[country==in_country,], 
-                      outdir = file.path(resdir, 'gis')
+      out_net_path <- reassign_netids(
+        rivnet_path = network_ssnready_gpkg_list[[in_country]], 
+        strahler_dt = network_strahler[[in_country]], 
+        in_reaches_hydromod_dt = reaches_dt[country==in_country,], 
+        outdir = file.path(resdir, 'gis')
       )
+      
+      #Manual corrections
+      out_net_path <- tar_read(network_reided)[[in_country]]
+      reassigned_net <- st_read(out_net_path)
+      
+      #### CHECKING ##################
+      as.data.table(reassigned_net)[cat_cor==2908,]
+      
+      in_reaches_hydromod_dt = tar_read(reaches_dt)[country==in_country,]
+      in_reaches_hydromod_dt [ID==2908,]
+      
+      if (in_country == 'Croatia') {
+        reassigned_net <- reassigned_net %>%
+          filter(!(UID %in% c(651, 489, 90))) %>% #cat_cor 9001, 2082, and 2480, respectively) %>%
+          mutate(
+            cat_cor = case_match(
+              UID,
+              103 ~ 1176,  #UID 103 (catcor 1832) -> catcor 1776
+              116 ~ 1832, #UID 116 (catcor 1836) -> catcor 1832
+              31 ~ 1788, #UID 31 (catcor 1792) -> catcor 1788
+              1045 ~ 2898, #UID 1045 (cat_cor 2908) -> catcor 289
+              .default = cat_cor
+            )
+          )
+      } else if (in_country == 'Czech') {
+      } else if (in_country == 'Finland') {
+      } else if (in_country == 'France') {
+      } else if (in_country == 'Hungary') {
+      } else if (in_country == 'Spain') {
+      }
+
+      st_write(clean_net, out_net_path, append=F)
+      
+      return(out_net_path)
+      
     }) %>% setNames(names(network_ssnready_gpkg_list))
   )
   ,

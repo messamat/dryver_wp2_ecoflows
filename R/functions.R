@@ -1779,7 +1779,7 @@ reassign_netids <- function(rivnet_path, strahler_dt,
     setnames(c('strahler', 'nsource'),
              c('strahler_hydromod_recalc', 'nsource_hydromod'))
   
-  #---------- Assign correct cat -------------------------------------------------
+  #---------- Initial assignment of correct cat -------------------------------------------------
   #For first order segments where the cat is only represented by that segment,
   #keep that cat for this section of the segment (see cat==2938 for Croatia)
   rivnet_inters_dt[n_seg_overlap == 1 & strahler == 1, 
