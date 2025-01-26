@@ -4,13 +4,11 @@
 #Standardize country names across all input datasets
 #Standardize metacols across all input datasets
 #site names in "data/wp1/Results_present_period_final/data/Genal/Genal_sampling_sites_ReachIDs.csv" are incorrect
-#update readxl
 #Need to know how sites were snapped to network "C:\DRYvER_wp2\WP2 - Predicting biodiversity changes in DRNs\Coordinates\Shapefiles with sites moved to the river network\Croatia_near_coords.shp"
 #3s flow acc for Europe: https://data.hydrosheds.org/file/hydrosheds-v1-acc/eu_acc_3s.zip
 
 #Make sure that biological data are standardized by area to get densities
 #Get ancillary catchment data
-
 
 library(rprojroot)
 rootdir <- rprojroot::find_root(has_dir('R'))
@@ -171,10 +169,18 @@ list(
         st_write(clean_net, out_net_path, append=F)
       } else if (in_country == 'Croatia') {
         clean_net <- st_read(out_net_path) %>%
-          .[!(.[['UID']] %in% c(1102, 2988)),]
+          .[!(.[['UID']] %in% c(1102, 2988)),] 
+        #Change startpoint of disconnected line where there is a site 
+        #(startpoint, because the line dir is reversed)
+        line_to_edit <- clean_net[clean_net$UID==651,]$geom
+        clean_net[clean_net$UID==651,]$geom <- st_sfc(st_linestring(
+          rbind(
+            c(X=596968.793, Y=4899716.907),
+            st_coordinates(line_to_edit)[-1, c('X', 'Y')]
+          )))
+
         st_write(clean_net, out_net_path, append=F)
       }
-      
       return(out_net_path)
     }) %>% setNames(names(network_sub_gpkg_list)) 
   )
@@ -201,14 +207,14 @@ list(
   
   
   tar_target(
-    network_ssnready_gpkg_list,
+    network_nocomplexconf_gpkg_list,
     lapply(names(network_directed_gpkg_list), function(in_country) {
       fix_complex_confluences(
         rivnet_path = network_directed_gpkg_list[[in_country]], 
         max_node_shift = 5,
         out_path= file.path(resdir, 'gis', 
                             paste0(tolower(in_country)
-                                   , '_river_network_ssnready',
+                                   , '_river_network_nocomplexconf',
                                    format(Sys.time(), "%Y%m%d"), '.gpkg'
                             ))
       )
@@ -219,60 +225,27 @@ list(
   #Compute strahler stream order
   tar_target(
     network_strahler,
-    lapply(names(network_ssnready_gpkg_list), function(in_country) {
+    lapply(names(network_nocomplexconf_gpkg_list), function(in_country) {
       assign_strahler_order(
-        in_rivnet = network_ssnready_gpkg_list[[in_country]], 
+        in_rivnet = network_nocomplexconf_gpkg_list[[in_country]], 
         idcol = 'UID')
-    }) %>% setNames(names(network_ssnready_gpkg_list))
+    }) %>% setNames(names(network_nocomplexconf_gpkg_list))
   )
   ,
   
   #Re-assign correct IDs to match with hydrological data
   tar_target(
-    network_reided,
-    lapply(names(network_ssnready_gpkg_list), function(in_country) {
+    network_ssnready_gpkg_list,
+    lapply(names(network_nocomplexconf_gpkg_list), function(in_country) {
       out_net_path <- reassign_netids(
-        rivnet_path = network_ssnready_gpkg_list[[in_country]], 
+        rivnet_path = network_nocomplexconf_gpkg_list[[in_country]], 
         strahler_dt = network_strahler[[in_country]], 
         in_reaches_hydromod_dt = reaches_dt[country==in_country,], 
-        outdir = file.path(resdir, 'gis')
+        outdir = file.path(resdir, 'gis'),
+        country = in_country
       )
-      
-      #Manual corrections
-      out_net_path <- tar_read(network_reided)[[in_country]]
-      reassigned_net <- st_read(out_net_path)
-      
-      #### CHECKING ##################
-      as.data.table(reassigned_net)[cat_cor==2908,]
-      
-      in_reaches_hydromod_dt = tar_read(reaches_dt)[country==in_country,]
-      in_reaches_hydromod_dt [ID==2908,]
-      
-      if (in_country == 'Croatia') {
-        reassigned_net <- reassigned_net %>%
-          filter(!(UID %in% c(651, 489, 90))) %>% #cat_cor 9001, 2082, and 2480, respectively) %>%
-          mutate(
-            cat_cor = case_match(
-              UID,
-              103 ~ 1176,  #UID 103 (catcor 1832) -> catcor 1776
-              116 ~ 1832, #UID 116 (catcor 1836) -> catcor 1832
-              31 ~ 1788, #UID 31 (catcor 1792) -> catcor 1788
-              1045 ~ 2898, #UID 1045 (cat_cor 2908) -> catcor 289
-              .default = cat_cor
-            )
-          )
-      } else if (in_country == 'Czech') {
-      } else if (in_country == 'Finland') {
-      } else if (in_country == 'France') {
-      } else if (in_country == 'Hungary') {
-      } else if (in_country == 'Spain') {
-      }
-
-      st_write(clean_net, out_net_path, append=F)
-      
       return(out_net_path)
-      
-    }) %>% setNames(names(network_ssnready_gpkg_list))
+    }) %>% setNames(names(network_nocomplexconf_gpkg_list))
   )
   ,
 
@@ -283,6 +256,7 @@ list(
                       in_sites_dt = sites_dt,
                       out_dir = file.path('results', 'gis'),
                       geom= 'reaches',
+                      in_network_path_list = network_ssnready_gpkg_list,
                       overwrite = T)
   )
   ,
@@ -297,6 +271,7 @@ list(
   )
   ,
   
+  #Snap sites to corresponding reach in network
   tar_target(
     site_snapped_gpkg_list,
     lapply(names(site_points_gpkg_list), function(in_country) {

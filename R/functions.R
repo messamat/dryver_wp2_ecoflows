@@ -1694,7 +1694,7 @@ get_nearby_cat <- function(in_dt, source_direction,
 #Remove pseudo-nodes among segments sections provided equal attributes
 #Re-compute from-to and length_uid
 remove_pseudonodes <- function(in_net, equal_cols = FALSE, 
-                               summarise_attributes='first') {
+                               summarise_attributes ='first') {
   out_net <- as_sfnetwork(in_net) %>%
     activate(edges) %>%
     convert(to_spatial_smooth, 
@@ -1712,7 +1712,8 @@ remove_pseudonodes <- function(in_net, equal_cols = FALSE,
 # in_reaches_hydromod_dt <- tar_read(reaches_dt)[country==in_country,]
 
 reassign_netids <- function(rivnet_path, strahler_dt, 
-                            in_reaches_hydromod_dt, outdir) {
+                            in_reaches_hydromod_dt, outdir,
+                            country = NULL) {
   #---------- Prepare data -------------------------------------------------------
   #Read network and join with hydromod data
   rivnet <- st_read(rivnet_path) %>%
@@ -1977,7 +1978,7 @@ reassign_netids <- function(rivnet_path, strahler_dt,
       as.data.table
   }
   
-  #---------- Check results ------------------------------------------------------
+  #---------- Check results and correct based on hydrological model topology --------
   #Compare downstream segment cat
   to_reach_shpcor <-  rivnet_catcor_hydromod[
     , .(from, cat_cor)] %>%
@@ -2032,6 +2033,70 @@ reassign_netids <- function(rivnet_path, strahler_dt,
           by.x='cat_cor', by.y='ID_hydromod', all.x=T) %>%
     .[, hydromod_shpcor_match := (to_reach_hydromod == to_reach_shpcor)]
   
+  #---------- Implement a few manual corrections  ---------------------------------
+  if (country == 'Croatia') {
+    rivnet_catcor_manual <- rivnet_catcor_hydromod %>%
+      filter(!(UID %in% c(489, 90))) %>% #cat_cor 2082, and 2480, respectively) %>%
+      mutate(cat_cor = case_match(
+        UID,
+        103 ~ 1176,  #UID 103 (catcor 1832) -> catcor 1776
+        116 ~ 1832, #UID 116 (catcor 1836) -> catcor 1832
+        31 ~ 1788, #UID 31 (catcor 1792) -> catcor 1788
+        1045 ~ 2898, #UID 1045 (cat_cor 2908) -> catcor 289
+        .default = cat_cor
+      )
+      )
+  } else if (country == 'Czech') {
+    rivnet_catcor_manual <- rivnet_catcor_hydromod %>%
+      mutate(cat_cor = case_match(
+        UID,
+        298 ~ 40232, #UID 298 (catcor 40126) -> catcor 1776
+        158 ~ 40258, #UID 158 (40260) -> catcor 40258
+        .default = cat_cor
+      )
+      )
+  } else if (country == 'Finland') {
+    rivnet_catcor_manual <- rivnet_catcor_hydromod %>%
+      mutate(cat_cor = case_match(
+        UID,
+        538 ~ 1049400, #UID 538 (catcor 1051800) -> catcor 1049400
+        392 ~ 1069001, #UID 392 (catcor 1086800) -> catcor 1069001
+        397 ~ 1069001, #UID 397 (catcor 1086600) -> catcor 1069001 
+        .default = cat_cor
+      )
+      )
+  } else if (country == 'France') {
+    rivnet_catcor_manual <- rivnet_catcor_hydromod %>%
+      filter(!(UID %in% c(529, 630, 642, 991))) %>% #2489000, 2475800, 2476200, 2475800
+      mutate(cat_cor = case_match(
+        UID,
+        205 ~ 2422600, #UID 205  (catcor 2497800) -> catcor 2422600
+        693 ~ 2444000, #UID 693 (catcor 2465400) -> catcor 2444000  
+        805 ~ 2467600, #UID 805 (catcor 2467800) -> catcor 2467600
+        500 ~ 2485400, #UID 500 (catcor 2485600) -> catcor 2485400
+        .default = cat_cor
+      )
+      )
+  } else if (country == 'Hungary') {
+    rivnet_catcor_manual <- rivnet_catcor_hydromod %>%
+      mutate(cat_cor = case_match(
+        UID,
+        51 ~ 650800,  #UID 51 (catcor 651000) -> catcor 650800
+        331 ~ 652001,  #UID 331 (catcor 652200) -> catcor 652001
+        379 ~ 673000,  #UID 379 (catcor 673400) -> catcor 673000
+        .default = cat_cor
+      )
+      )
+  } else if (country == 'Spain') {
+    rivnet_catcor_manual <- rivnet_catcor_hydromod 
+    rivnet_catcor_manual[rivnet_catcor_manual$UID == 25, 'cat_cor'] <- 5426 #UID 25 (catcor 5428) -> catcor 5426
+  }
+  
+  #Re-compute from-to
+  rivnet_catcor_manual_fromto <- st_as_sf(rivnet_catcor_manual) %>%
+    as_sfnetwork %>%
+    activate(edges) %>%
+    as.data.table
   
   #---------- Write out results ------------------------------------------------------
   out_path <- file.path(outdir,
@@ -2042,10 +2107,9 @@ reassign_netids <- function(rivnet_path, strahler_dt,
   )
   
   #Export results to gpkg
-  write_sf(st_as_sf(rivnet_catcor_hydromod)[
-    , c('UID', 'strahler', 'UID_fullseg', 'cat_cor', 
-        'to_reach_shpcor', 'to_reach_hydromod',
-        'hydromod_shpcor_match')],
+  write_sf(st_as_sf(rivnet_catcor_manual)[
+    , c('UID', 'strahler', 'UID_fullseg', 'cat_cor', 'from', 'to',
+        'to_reach_shpcor', 'to_reach_hydromod', 'hydromod_shpcor_match')],
     out_path)
   
   return(out_path)
@@ -2120,7 +2184,8 @@ format_site_dt <- function(in_path, in_country) {
   if (in_country == 'Croatia') {
     sites_dt[, id := sub('BUT', '', id) %>%
                str_pad(width=2, side='left', pad = 0) %>%
-               paste0('BUT', .)]
+               paste0('BUT', .)] %>%
+      .[id=='BUT19', reach_id := 2868]] #Noticed after correcting the network topology
   } 
   
   if (in_country == 'Czech') {
@@ -2170,6 +2235,7 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
                              in_sites_dt,
                              out_dir, 
                              geom,
+                             in_network_path_list = NULL,
                              overwrite = FALSE) {
   if (!dir.exists(out_dir)) {
     dir.create(out_dir)
@@ -2183,14 +2249,14 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
       paste0(tolower(country), '_site_', geom, 
              format(Sys.time(), "%Y%m%d"), '.gpkg'))]
   
-  if (geom == 'reaches') {
+  if (geom == 'reaches' & is.character(in_network_path_list)) {
     #Create site reaches
     in_hydromod_paths_dt[, {
       if (!file.exists(sites_gpkg_path) | overwrite) {
-        terra::vect(network_path) %>%
-          aggregate(by='cat') %>%
+        terra::vect(in_network_path_list[[country]]) %>%
+          aggregate(by='cat_cor') %>%
           merge(in_sites_dt[country_sub==country,],
-                by.x='cat', by.y='reach_id', all.x=F) %>%
+                by.x='cat_cor', by.y='reach_id', all.x=F) %>%
           terra::writeVector(filename = sites_gpkg_path, 
                              overwrite = T)
       }
@@ -2213,12 +2279,15 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
 
 
 #------ snap_sites -------------------------------------------------------------
-# drn <- 'France'
+# drn <- 'Croatia'
 # in_sites_path <- tar_read(site_points_gpkg_list)[[drn]]
-# in_network_path <- tar_read(network_sub_gpkg_list)[[drn]]
+# in_network_path <- tar_read(network_ssnready_gpkg_list)[[drn]]
 # out_snapped_sites_path = NULL
 # overwrite = T
-# custom_proj = T
+# custom_proj = F
+
+#Note that BUT12 is located several 100 m from 
+#the corresponding reach in the corrected network
 
 snap_river_sites <- function(in_sites_path, 
                              in_network_path,
@@ -2235,7 +2304,6 @@ snap_river_sites <- function(in_sites_path,
   }
   
   if (!file.exists(out_snapped_sites_path) | overwrite) {
-    #Iterate over every basin where there is a site
     if (length(in_sites_path) > 1) {
       sitesp <- do.call(rbind, lapply(in_sites_path, vect)) 
     } else {
@@ -2281,14 +2349,15 @@ snap_river_sites <- function(in_sites_path,
     sitesnap_p <- lapply(
       sitesp_proj$id, 
       function(in_pt_id) {
+        #print(in_pt_id)
         pt <- unique(sitesp_proj[sitesp_proj$id == in_pt_id,])
-        tar <- target_proj[target_proj$cat == pt$reach_id,]
+        tar <- target_proj[target_proj$cat_cor == pt$reach_id,]
         
         if (!is.empty(tar) && nrow(pt) > 0) {
           out_p <- snap_points_inner(in_pts = pt,
                                      in_target = tar,
                                      sites_idcol = 'id',
-                                     attri_to_join = 'cat'
+                                     attri_to_join = 'cat_cor'
           )
         }
         return(out_p)
@@ -2339,12 +2408,12 @@ subset_amber <- function(amber_path, in_hydromod_paths_dt, out_dir,
                                     paste0(tolower(in_country), 
                                            '_amber_pts.gpkg'))
     if (!file.exists(amber_country_path) | overwrite) {
-      cat <- vect(in_hydromod_paths_dt[country==in_country, catchment_path])
+      catchment_vec <- vect(in_hydromod_paths_dt[country==in_country, catchment_path])
       
-      amber_proj <- terra::project(amber_vec, crs(cat))
+      amber_proj <- terra::project(amber_vec, crs(catchment_vec))
       
       amber_proj %>%
-        .[ relate(cat, .,"intersects")[1,],] %>%
+        .[ relate(catchment_vec, .,"intersects")[1,],] %>%
         terra::writeVector(filename = amber_country_path,
                            overwrite = T)
       
@@ -2370,7 +2439,7 @@ snap_barrier_sites <- function(in_sites_path,
                              out_snapped_sites_path=NULL, 
                              custom_proj = T,
                              idcol = 'id',
-                             attri_to_join = 'cat',
+                             attri_to_join = 'cat_cor',
                              overwrite = F) {
   
   if (is.null(out_snapped_sites_path)) {
@@ -2447,7 +2516,7 @@ create_ssn <- function(in_network_path,
     merge(in_hydromod$data_all[date < as.Date('2021-10-01', '%Y-%m-%d'),  #Link q data
                                list(mean_qsim = mean(qsim, na.rm=T)), 
                                by=reach_id],
-          by.x = 'cat', by.y = 'reach_id')
+          by.x = 'cat_cor', by.y = 'reach_id')
   
   #Build landscape network
   edges_lsn <- SSNbler::lines_to_lsn(
