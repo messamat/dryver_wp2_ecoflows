@@ -1707,7 +1707,7 @@ remove_pseudonodes <- function(in_net, equal_cols = FALSE,
 
 #Parameters
 # in_country <- 'Spain'
-# rivnet_path <- tar_read(network_ssnready_gpkg_list)[[in_country]]
+# rivnet_path <- tar_read(network_nocomplexconf_gpkg_list)[[in_country]]
 # strahler_dt <- tar_read(network_strahler)[[in_country]]
 # in_reaches_hydromod_dt <- tar_read(reaches_dt)[country==in_country,]
 
@@ -2015,24 +2015,6 @@ reassign_netids <- function(rivnet_path, strahler_dt,
                          , cat_cor := double_downstream_mismatch_correct[.SD, on=c('cat_cor', 'from'), 
                                                                          to_reach_hydromod]]
   
-  #Re-compute from-to
-  rivnet_catcor_hydromod <- st_as_sf(rivnet_catcor_hydromod) %>%
-    as_sfnetwork %>%
-    activate(edges) %>%
-    as.data.table
-  
-  #re-assign downstream segment cat
-  to_reach_shpcor_dt <-  rivnet_catcor_hydromod[
-    , .(from, cat_cor)] %>%
-    setnames(c('to', 'to_reach_shpcor'))
-  
-  rivnet_catcor_hydromod <- merge(
-    rivnet_catcor_hydromod[, -c('to_reach_shpcor', 'to_reach_hydromod'), with=F], 
-    to_reach_shpcor_dt, by='to', all.x=T) %>%
-    merge(reaches_hydromod_format[, .(ID_hydromod, to_reach_hydromod)],
-          by.x='cat_cor', by.y='ID_hydromod', all.x=T) %>%
-    .[, hydromod_shpcor_match := (to_reach_hydromod == to_reach_shpcor)]
-  
   #---------- Implement a few manual corrections  ---------------------------------
   if (country == 'Croatia') {
     rivnet_catcor_manual <- rivnet_catcor_hydromod %>%
@@ -2092,12 +2074,26 @@ reassign_netids <- function(rivnet_path, strahler_dt,
     rivnet_catcor_manual[rivnet_catcor_manual$UID == 25, 'cat_cor'] <- 5426 #UID 25 (catcor 5428) -> catcor 5426
   }
   
-  #Re-compute from-to
-  rivnet_catcor_manual_fromto <- st_as_sf(rivnet_catcor_manual) %>%
-    as_sfnetwork %>%
-    activate(edges) %>%
-    as.data.table
   
+  #------ Final processing -------------------------------------------------------
+  #Remove pseudo-nodes among segments sections of the same cat_cor
+  #re-compute length uid, and re-assign from-to
+  out_rivnet<- remove_pseudonodes(
+    in_net = st_as_sf(rivnet_catcor_manual), 
+    equal_cols = c("cat_cor", "UID_fullseg"))
+  
+  #re-assign downstream segment cat
+  to_reach_shpcor_dt <-  as.data.table(out_rivnet)[
+    , .(from, cat_cor)] %>%
+    setnames(c('to', 'to_reach_shpcor'))
+  
+  out_rivnet <- merge(
+    as.data.table(out_rivnet)[, -c('to_reach_shpcor', 'to_reach_hydromod'), with=F], 
+    to_reach_shpcor_dt, by='to', all.x=T) %>%
+    merge(reaches_hydromod_format[, .(ID_hydromod, to_reach_hydromod)],
+          by.x='cat_cor', by.y='ID_hydromod', all.x=T) %>%
+    .[, hydromod_shpcor_match := (to_reach_hydromod == to_reach_shpcor)]
+
   #---------- Write out results ------------------------------------------------------
   out_path <- file.path(outdir,
                         paste0(tools::file_path_sans_ext(basename(rivnet_path)),
@@ -2108,7 +2104,7 @@ reassign_netids <- function(rivnet_path, strahler_dt,
   
   #Export results to gpkg
   write_sf(st_as_sf(rivnet_catcor_manual)[
-    , c('UID', 'strahler', 'UID_fullseg', 'cat_cor', 'from', 'to',
+    , c('UID', 'strahler','length_uid', 'UID_fullseg', 'cat_cor', 'from', 'to',
         'to_reach_shpcor', 'to_reach_hydromod', 'hydromod_shpcor_match')],
     out_path)
   
@@ -2185,7 +2181,7 @@ format_site_dt <- function(in_path, in_country) {
     sites_dt[, id := sub('BUT', '', id) %>%
                str_pad(width=2, side='left', pad = 0) %>%
                paste0('BUT', .)] %>%
-      .[id=='BUT19', reach_id := 2868]] #Noticed after correcting the network topology
+      .[id=='BUT19', reach_id := 2868] #Noticed after correcting the network topology
   } 
   
   if (in_country == 'Czech') {
@@ -2230,6 +2226,7 @@ format_site_dt <- function(in_path, in_country) {
 # out_dir = file.path('results', 'gis')
 # geom = 'reaches'
 # overwrite = TRUE
+# in_network_path_list = tar_read(network_ssnready_gpkg_list)
 
 create_sites_gpkg <- function(in_hydromod_paths_dt,
                              in_sites_dt,
@@ -2483,7 +2480,7 @@ snap_barrier_sites <- function(in_sites_path,
 }
 
 #------ create_ssn -------------------------------------------------------------
-# in_country <- 'Spain'
+# in_country <- 'Croatia'
 # in_network_path = tar_read(network_ssnready_gpkg_list)[[in_country]]
 # in_sites_path = tar_read(site_snapped_gpkg_list)[[in_country]]
 # in_barriers_path = tar_read(barrier_snapped_gpkg_list)[[in_country]]
@@ -2571,11 +2568,12 @@ create_ssn <- function(in_network_path,
     lsn_path = lsn_path
   )
   
+  
   # ggplot() +
   #   geom_sf(data = edges_lsn, aes(color = upDist)) +
   #   geom_sf(data = site_list$sites, aes(color = upDist)) +
   #   geom_sf(data = site_list$barriers, color='red') +
-  #   coord_sf(datum = st_crs(edges)) +
+  #   coord_sf(datum = st_crs(edges_lsn)) +
   #   scale_color_viridis_c()
   
 }

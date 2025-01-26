@@ -255,7 +255,7 @@ list(
     create_sites_gpkg(in_hydromod_paths_dt = hydromod_paths_dt,
                       in_sites_dt = sites_dt,
                       out_dir = file.path('results', 'gis'),
-                      geom= 'reaches',
+                      geom = 'reaches',
                       in_network_path_list = network_ssnready_gpkg_list,
                       overwrite = T)
   )
