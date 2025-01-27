@@ -1,6 +1,7 @@
 pkg_vec <- list(
   'dbscan',
   'ggnewscale',
+  'ggnetwork',
   'ggplot2',
   'gridExtra',
   'lmerTest', 

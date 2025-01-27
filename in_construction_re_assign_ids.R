@@ -300,8 +300,9 @@ rivnet_inters_check_dt <- merge(as.data.table(rivnet_catcor_smooth),
                           to_reach_shpcor, by='to', all.x=T) %>%
   merge(in_reaches_dt, by.x='cat_cor', by.y='ID_hydromod', all.x=T)
 
-rivnet_inters_check_dt[, hydromod_shpcor_matc := (to_reach_hydromod == to_reach_shpcor)]
+rivnet_inters_check_dt[, hydromod_shpcor_match := (to_reach_hydromod == to_reach_shpcor)]
 
+rivnet_inters_check_dt[(hydromod_shpcor_match==FALSE), .N]
 
 #---------- Write out results ------------------------------------------------------
 #Export results to gpkg
