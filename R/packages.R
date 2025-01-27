@@ -1,5 +1,6 @@
 pkg_vec <- list(
   'dbscan',
+  'dplyr',
   'ggnewscale',
   'ggnetwork',
   'ggplot2',

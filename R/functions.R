@@ -1542,57 +1542,573 @@ fix_complex_confluences <- function(rivnet_path, max_node_shift = 5,
 }
 
 #------ assign_strahler_order --------------------------------------------------
-assign_strahler_order <- function(rivnet_path, idcol) {
-  rivnet <- st_read(rivnet_path)
-  
-  #Compute from-to fields
-  net_fromto <- as_sfnetwork(rivnet) %>%
-    activate(edges) %>%
-    as.data.table %>%
-    .[, c('from', 'to', idcol), with=F] %>%
-    merge(.[, list(nsource = .N), by=to], 
-          by.x='from', by.y='to', all.x=T) %>%
-    .[is.na(nsource), nsource := 0]
-  
-  #Join to spatial network
-  rivnet_fromto <- merge(rivnet, net_fromto, by=idcol)
-  
-  #Convert to data.table for speed and syntax
-  rivnet_fromto_dt <- as.data.table(rivnet_fromto)
+# in_country <- 'Croatia'
+# in_rivnet = network_ssnready_gpkg_list[[in_country]]
+# idcol = 'UID'
+
+assign_strahler_order <- function(in_rivnet, idcol, verbose = F) {
+  if (is.character(in_rivnet)) {
+    rivnet <- st_read(in_rivnet)
+    
+    #Compute from-to fields
+    net_fromto <- as_sfnetwork(rivnet) %>%
+      activate(edges) %>%
+      as.data.table %>%
+      .[, c('from', 'to', idcol), with=F] %>%
+      merge(.[, list(nsource = .N), by=to], 
+            by.x='from', by.y='to', all.x=T) %>%
+      .[is.na(nsource), nsource := 0]
+    
+    #Join to spatial network
+    rivnet_fromto <- merge(rivnet, net_fromto, by=idcol)
+    
+    #Convert to data.table for speed and syntax
+    rivnet_fromto_dt <- as.data.table(rivnet_fromto)
+    
+  } else if (is.data.table(in_rivnet)) {
+    rivnet_fromto_dt <- merge(in_rivnet,
+                              in_rivnet[, list(nsource = .N), by=to], 
+                              by.x='from', by.y='to', all.x=T) %>%
+      .[is.na(nsource), nsource := 0]
+  }
   
   #Assign strahler 1 to lines with no source line
   rivnet_fromto_dt[nsource == 0, strahler := 1]
   
   # Compute Strahler order iteratively
+  #while (sum(is.na(rivnet_fromto_dt$strahler)) > 417) {
   while (any(is.na(rivnet_fromto_dt$strahler))) {
+    if (verbose) { print(sum(is.na(rivnet_fromto_dt$strahler)))}
     # Identify lines whose sources' Strahler orders are all assigned
     rivnet_fromto_dt <-  merge(rivnet_fromto_dt, rivnet_fromto_dt[, .(to, strahler)], 
                                by.x='from', by.y='to', suffixes = c('_down', '_up'),
                                all.x=T)
+   
+    #Extend strahler order downstream for consecutive sections on the same segment 
+    #(only one source section)
     rivnet_fromto_dt[is.na(strahler_down) & !is.na(strahler_up) & nsource == 1,
                      strahler_down := strahler_up]
     
-    rivnet_fromto_dt[is.na(strahler_down) & nsource == 2 & !is.na(strahler_up),
-                     eligible := (.N==2), by=idcol]
+    #Flag as eligible those segments for which all upstream segments have
+    #a strahler order
+    rivnet_fromto_dt[is.na(strahler_down) & nsource >= 2 & !is.na(strahler_up),
+                     eligible := ((.N>=2) & .N==nsource), by=idcol]
     
+    #Identify max upstream strahler and number of upstream sections with that strahler order
     rivnet_fromto_dt[eligible & !is.na(eligible), 
-                     n_u := length(unique(strahler_up)), 
-                     by = idcol]
-    rivnet_fromto_dt[eligible & !is.na(eligible) & n_u == 1,
-                     strahler_down := strahler_up +1,
-                     by = idcol]
-    rivnet_fromto_dt[eligible & !is.na(eligible) & n_u == 2,
-                     strahler_down := max(strahler_up),
-                     by = idcol]
+                     max_strahler_u := max(strahler_up),
+                     by=idcol]
+    rivnet_fromto_dt[eligible & !is.na(eligible),
+                    n_max_strahler_u := .SD[strahler_up==max_strahler_u, .N],
+                    by=idcol]
     
+    rivnet_fromto_dt[eligible & !is.na(eligible),
+                     strahler_down := fifelse(
+                       n_max_strahler_u >= 2,
+                       max_strahler_u + 1,
+                       max_strahler_u),
+                     by = idcol]
+
     setnames(rivnet_fromto_dt, 'strahler_down', 'strahler')
     
-    rivnet_fromto_dt <- rivnet_fromto_dt[!duplicated(get(idcol)), 
-                                         -c('strahler_up', 'eligible', 'n_u'), 
-                                         with=F]
+    rivnet_fromto_dt <- rivnet_fromto_dt[
+      !duplicated(get(idcol)), 
+      -c('strahler_up', 'eligible', 'max_strahler_u', 'n_max_strahler_u'), 
+      with=F]
   }
   
-  return(rivnet_fromto_dt[, c(idcol, 'from', 'to', 'strahler'), with=F])
+  return(rivnet_fromto_dt[
+    , c(idcol, 'from', 'to', 'strahler', 'nsource'), with=F])
+}
+
+#------ reassign_netids --------------------------------------------------
+#Problem: 'cat' or 'reach_id' in the shapefile, associated with lines across 
+#confluences. Makes it impossible to correctly use network hydrology data.
+
+#There are three spatial units in this code:
+#Segment sections: uniquely identified by UID, these are the individual lines
+#                 contained in the shapefile generated by WP1 after hydrological
+#                 modeling.
+#Segments: uniquely identifed by UID_fullseg, representing lines extending between 
+#           two confluences. They often contain multiple sections.
+#Cat: uniquely identified by cat (or reach_id), these are unique reaches as modeled
+#     by the hydrological model, but not well represented/assigned to segment
+#     sections  in the shapefile. Some may be omitted by the shapefile, 
+#     many span multiple segment sections and even multiple segments across 
+#     confluences and Strahler stream order.
+
+#The goal of this function is to re-assign a topologically/hydrologically
+#logical cat to each segment section to be able to join the hydrological model 
+#outputs to the shapefile.
+
+#Helper functions
+#For those segments where only one cat remains, assign cat to the entire segment
+#at least a given proportion of the length of the full segment
+assign_singlecat_to_seg <- function(net_dt, length_threshold = 1/3) {
+  # Identify segments with only one remaining section
+  #with a cat (length_uid_fullsegper == 1) and where the actual length of that
+  #section is at least a given proportion of the length of the full segment
+  #including all sections.
+  cat_toassign <- net_dt[
+    is.na(cat_cor) & (length_uid_fullsegper == 1) &
+      (length_uid / length_fullseg > length_threshold),
+    .(UID_fullseg, cat)
+  ] %>%
+    setnames('cat', 'cat_cor')
+  
+  #Assign those cat_cor to all sections within those segments
+  net_dt[is.na(cat_cor), 
+         cat_cor := cat_toassign[.SD, on = 'UID_fullseg', cat_cor]]
+}
+
+#For segment sections with cat==NAs and cat_cor==NA, 
+#get cat_cor from upstream section in the same segment
+get_nearby_cat <- function(in_dt, source_direction, 
+                           strahler_list = seq(1,15)) {
+  if (source_direction == 'upstream') {
+    source_col <- 'to' #Column of section to get cat_cor from
+    sink_col <- 'from' #Column of section to assign cat_cor to
+  } else if (source_direction == 'downstream') {
+    source_col <- 'from' #Column of section to get cat_cor from
+    sink_col <- 'to' #Column of section to assign cat_cor to
+  }
+  
+  # Identify sections to fill
+  sections_tofill <- in_dt[
+    , which(is.na(cat) & is.na(cat_cor) & (strahler %in% strahler_list))]
+  
+  # Prepare cat_cor values to assign
+  cat_cor_toassign <- in_dt[
+    !is.na(cat_cor) & 
+      (strahler %in% strahler_list) & 
+      (get(source_col) %in% in_dt[sections_tofill, unique(get(sink_col))]), 
+    c(source_col, 'UID_fullseg', 'cat_cor'), with=F] %>%
+    setnames(source_col, sink_col)
+  
+  # Assign cat_cor to sections_tofill using a join
+  in_dt[sections_tofill,
+        cat_cor := cat_cor_toassign[
+          .SD, on=c(sink_col, 'UID_fullseg'), cat_cor]]
+}
+
+#Remove pseudo-nodes among segments sections provided equal attributes
+#Re-compute from-to and length_uid
+remove_pseudonodes <- function(in_net, equal_cols = FALSE, 
+                               summarise_attributes ='first') {
+  out_net <- as_sfnetwork(in_net) %>%
+    activate(edges) %>%
+    convert(to_spatial_smooth, 
+            require_equal = equal_cols,
+            summarise_attributes = summarise_attributes) %>%
+    st_as_sf() %>%
+    mutate(length_uid = as.numeric(st_length(.)))
+  out_net
+}
+
+#Parameters
+# in_country <- 'Spain'
+# rivnet_path <- tar_read(network_nocomplexconf_gpkg_list)[[in_country]]
+# strahler_dt <- tar_read(network_strahler)[[in_country]]
+# in_reaches_hydromod_dt <- tar_read(reaches_dt)[country==in_country,]
+
+reassign_netids <- function(rivnet_path, strahler_dt, 
+                            in_reaches_hydromod_dt, outdir,
+                            country = NULL) {
+  #---------- Prepare data -------------------------------------------------------
+  #Read network and join with hydromod data
+  rivnet <- st_read(rivnet_path) %>%
+    #Make sure that the geometry column is equally named regardless 
+    #of file format (see https://github.com/r-spatial/sf/issues/719)
+    st_set_geometry('geometry') %>%
+    merge(strahler_dt, by='UID') 
+  
+  #Remove pseudonodes to define full segments between confluences
+  rivnet_fullseg <- as_sfnetwork(rivnet) %>%
+    activate("edges") %>%
+    convert(to_spatial_smooth) %>%
+    st_as_sf() 
+  
+  #Give these full segments between confluences a separate ID: UID_fullseg
+  rivnet_fullseg$UID_fullseg <- seq_len(nrow(rivnet_fullseg))
+  
+  #Intersect with original network to check length of overlap for each 'cat'
+  rivnet_fullseg_inters <- st_intersection(
+    rivnet, rivnet_fullseg[, c('geometry', 'UID_fullseg')]) %>%
+    .[st_geometry_type(.) != 'POINT',] %>%
+    st_cast('MULTILINESTRING') %>%
+    st_cast('LINESTRING')
+  
+  #Remove pseudo-nodes among segments sections of the same cat
+  #and compute length of segment sections (UID)
+  rivnet_fullseg_inters_nopseudo <- remove_pseudonodes(
+    in_net = rivnet_fullseg_inters, 
+    equal_cols = c("cat", "UID_fullseg"), 
+    summarise_attributes='first')
+  
+  #Create data.table to work with
+  rivnet_inters_dt <- as.data.table(rivnet_fullseg_inters_nopseudo) 
+  
+  #Back up cat before editing it
+  rivnet_inters_dt[, cat_copy := cat]
+  
+  #Compute other lengths
+  rivnet_inters_dt[, length_cat := sum(length_uid), by=cat]
+  rivnet_inters_dt[, length_fullseg := sum(length_uid), by=UID_fullseg]
+  
+  #Compute the percentage length of that cat ("hydromod" reach) that is 
+  #represented by that segment section (identified by UID)
+  rivnet_inters_dt[, length_uid_catper := length_uid/length_cat]
+  #Check whether this is the largest segment section for that cat 
+  rivnet_inters_dt[, length_uid_catmax := (length_uid == max(length_uid)), by=cat]
+  #Compute the percentage length of that full segment that is represented by
+  #that segment section (identified by UID)
+  rivnet_inters_dt[, length_uid_fullsegper := length_uid/length_fullseg]
+  
+  #Computer number of full segments that a cat overlaps
+  rivnet_inters_dt[, n_seg_overlap := length(unique(UID_fullseg)), by=cat]
+  
+  #Format network data from hydrological model
+  reaches_hydromod_format <- in_reaches_hydromod_dt[
+    , .(ID, to_reach, length, strahler)] %>%
+    setnames(c('ID_hydromod', 'to_reach_hydromod', 
+               'length_hydromod', 'strahler_hydromod')) %>%
+    .[, `:=`(from = ID_hydromod, to = to_reach_hydromod)] %>%
+    merge( #Compute actual strahler order
+      assign_strahler_order(in_rivnet = ., idcol = 'ID_hydromod', verbose = F),
+      by = 'ID_hydromod'
+    ) %>%
+    setnames(c('strahler', 'nsource'),
+             c('strahler_hydromod_recalc', 'nsource_hydromod'))
+  
+  #---------- Initial assignment of correct cat -------------------------------------------------
+  #For first order segments where the cat is only represented by that segment,
+  #keep that cat for this section of the segment (see cat==2938 for Croatia)
+  rivnet_inters_dt[n_seg_overlap == 1 & strahler == 1, 
+                   cat_cor := cat]
+  cats_assigned <- rivnet_inters_dt[!is.na(cat_cor), unique(cat_cor)]
+  
+  #For full segments that only have one cat associated with them, confirm cat
+  rivnet_inters_dt[length_uid == length_fullseg, 
+                   cat_cor := cat]
+  cats_assigned <- rivnet_inters_dt[!is.na(cat_cor), unique(cat_cor)]
+  
+  #For cats that are already assigned, remove their "cat" from other segments
+  rivnet_inters_dt[cat %in% cats_assigned & is.na(cat_cor), cat := NA]
+  
+  #Re-compute length_uid_fullsegper, excluding segment sections whose initial
+  #cat was assigned elsewhere
+  rivnet_inters_dt[!is.na(cat), 
+                   length_uid_fullsegper := length_uid/sum(length_uid),
+                   by=UID_fullseg]
+  
+  #For those segments where only one cat remains, assign cat to the entire segment
+  assign_singlecat_to_seg(rivnet_inters_dt)
+  cats_assigned <- rivnet_inters_dt[!is.na(cat_cor), unique(cat_cor)]
+  
+  #For cats that are already assigned, remove their "cat" from other segments
+  rivnet_inters_dt[cat %in% cats_assigned & is.na(cat_cor), cat := NA]
+  
+  #For segment sections with cat==NAs and cat_cor==NA in first order streams, 
+  #get cat_cor from upstream segment in same segment
+  get_nearby_cat(rivnet_inters_dt, 
+                 source_direction = 'upstream', 
+                 strahler_list = 1) 
+  
+  #Re-compute length_uid_fullsegper, excluding segment sections whose initial
+  #cat was assigned elsewhere
+  rivnet_inters_dt[!is.na(cat), 
+                   length_uid_fullsegper := length_uid/sum(length_uid),
+                   by=UID_fullseg]
+  
+  #For those segments where only one cat remains, assign cat to the entire segment
+  assign_singlecat_to_seg(rivnet_inters_dt)
+  cats_assigned <- rivnet_inters_dt[!is.na(cat_cor), unique(cat_cor)]
+  
+  #For cats that are already assigned, remove their "cat" from other segments
+  rivnet_inters_dt[cat %in% cats_assigned & is.na(cat_cor), cat := NA]
+  
+  #Computer number of full segments that a cat overlaps
+  rivnet_inters_dt[, n_seg_overlap := length(unique(UID_fullseg)), by=cat]
+  
+  #For first and second order segments where the cat is now only represented 
+  #by that segment, keep that cat for this section of the segment
+  rivnet_inters_dt[n_seg_overlap == 1 & strahler <= 2 & is.na(cat_cor), 
+                   cat_cor := cat]
+  cats_assigned <- rivnet_inters_dt[!is.na(cat_cor), unique(cat_cor)]
+  
+  #For cats that are already assigned, remove their "cat" from other segments
+  rivnet_inters_dt[cat %in% cats_assigned & is.na(cat_cor), cat := NA]
+  
+  #For segment section with cat==NAs in first order streams, assign cat_cor of
+  #upstream segment
+  get_nearby_cat(rivnet_inters_dt, 
+                 source_direction = 'upstream', 
+                 strahler_list = 1) 
+  
+  #Re-compute length_uid_fullsegper, excluding segment sections whose initial
+  #cat was assigned elsewhere
+  rivnet_inters_dt[!is.na(cat), 
+                   length_uid_fullsegper := length_uid/sum(length_uid),
+                   by=UID_fullseg]
+  
+  #For those segments where only one cat remains, assign cat to the entire segment
+  assign_singlecat_to_seg(rivnet_inters_dt)
+  cats_assigned <- rivnet_inters_dt[!is.na(cat_cor), unique(cat_cor)]
+  
+  #For cats that are already assigned, remove their "cat" from other segments
+  rivnet_inters_dt[cat %in% cats_assigned & is.na(cat_cor), cat := NA]
+  
+  #For sections that represent over 75% of the total length of that cat, assign cat_cor
+  rivnet_inters_dt[length_uid_catper>0.7 & is.na(cat_cor), cat_cor := cat]
+  
+  #For cats that are already assigned, remove their "cat" from other segments
+  rivnet_inters_dt[cat %in% cats_assigned & is.na(cat_cor), cat := NA]
+  
+  #Re-compute length_uid_fullsegper, excluding segment sections whose initial
+  #cat was assigned elsewhere
+  rivnet_inters_dt[!is.na(cat), 
+                   length_uid_fullsegper := length_uid/sum(length_uid),
+                   by=UID_fullseg]
+  
+  #For those segments where only one cat remains, assign cat to the entire segment
+  assign_singlecat_to_seg(rivnet_inters_dt)
+  cats_assigned <- rivnet_inters_dt[!is.na(cat_cor), unique(cat_cor)]
+  
+  #For cats that are already assigned, remove their "cat" from other segments
+  rivnet_inters_dt[cat %in% cats_assigned & is.na(cat_cor), cat := NA]
+  
+  #For segment sections in strahler==1 & n_seg_overlap > 2, cat := NA 
+  rivnet_inters_dt[strahler == 1 & n_seg_overlap > 2 & is.na(cat_cor), 
+                   cat := NA] 
+  
+  #if main representative of cat, assign cat_cor
+  rivnet_inters_dt[!is.na(cat_cor), cat := cat_cor]
+  rivnet_inters_dt[, length_cat := sum(length_uid), by=cat]
+  rivnet_inters_dt[, length_uid_catper := length_uid/length_cat, by=cat]
+  rivnet_inters_dt[length_uid_catper > 0.7 & is.na(cat_cor), cat_cor := cat]
+  
+  #For cats that are already assigned, remove their "cat" from other segments
+  cats_assigned <- rivnet_inters_dt[!is.na(cat_cor), unique(cat_cor)]
+  rivnet_inters_dt[cat %in% cats_assigned & is.na(cat_cor), cat := NA]
+  
+  #Re-compute length_uid_fullsegper, excluding segment sections whose initial
+  #cat was assigned elsewhere
+  rivnet_inters_dt[!is.na(cat_cor), 
+                   length_uid_fullsegper := length_uid/sum(length_uid),
+                   by=UID_fullseg]
+  
+  ##For those segments where only one cat remains, assign cat to the entire segment
+  #regardless of the proportion of the segment it represents
+  cat_cor_toassign <-  rivnet_inters_dt[
+    is.na(cat_cor) & length_uid_fullsegper == 1,
+    .(UID_fullseg, cat)] %>%
+    setnames('cat', 'cat_cor')
+  rivnet_inters_dt[is.na(cat_cor), 
+                   cat_cor := cat_cor_toassign[.SD, on='UID_fullseg', 
+                                               cat_cor]]
+  
+  #For the remaining segments where all cats are NAs (have been assigned elsewhere), 
+  #assign the cat of the section representing the highest percent of the segment
+  #These are usually near loops that have been removed 
+  rivnet_inters_dt[is.na(cat_cor), NAlength := sum(length_uid),
+                   by=UID_fullseg]
+  rivnet_inters_dt[(NAlength==length_fullseg), 
+                   cat_cor := fifelse(length_uid == max(length_uid), cat_copy, NA), 
+                   by=UID_fullseg]
+  
+  #For all remaining sections, remove their "cat" 
+  rivnet_inters_dt[is.na(cat_cor), cat := NA]
+  
+  for (i in 1:3) {
+    #For segment section with cat==NAs and cat_cor==NA, 
+    #assign cat_cor of upstream segment of same strahler order
+    get_nearby_cat(rivnet_inters_dt, source_direction = 'upstream')
+    
+    #For is.na(cat) & is.na(cat_cor), 
+    #assign downstream cat_cor of same UID_fullseg
+    get_nearby_cat(rivnet_inters_dt, source_direction = 'downstream') 
+  }
+  
+  #---------- Merge back with spatial data and remove pseudo nodes ---------------
+  #Merge processed attributes with pre-formatted spatial network
+  rivnet_catcor <- merge(
+    rivnet_fullseg_inters_nopseudo, 
+    rivnet_inters_dt[, .(UID, cat_cor, cat_copy)],
+    by='UID') %>%
+    .[, c('UID', 'cat_cor', 'cat_copy', 'strahler', 
+          'nsource', 'UID_fullseg', 'geometry')]
+  
+  #Remove pseudo-nodes among segments sections of the same cat_cor
+  #re-compute length uid
+  rivnet_catcor_smooth <- remove_pseudonodes(
+    in_net = rivnet_catcor, 
+    equal_cols = c("cat_cor", "UID_fullseg"))
+  
+  
+  #---------- Adjust results based on topology from hydrological model network ---
+  #Merge with hydrological model network topology data
+  rivnet_catcor_hydromod <- merge(
+    rivnet_catcor_smooth,
+    reaches_hydromod_format[
+      , .(ID_hydromod, to_reach_hydromod, length_hydromod, 
+          strahler_hydromod_recalc, nsource_hydromod)],
+    by.x = 'cat_cor', by.y = 'ID_hydromod',
+    all.x = T
+  ) %>%
+    as.data.table
+  
+  if (rivnet_catcor_hydromod[is.na(cat_cor), .N] == 0) {
+    #Remove cats that are not supposed to be downstream of any other cat
+    #when there are sections of the correct stream order on that segment
+    rivnet_catcor_hydromod[, n_cats_fullseg := length(unique(cat_cor)),
+                           by=UID_fullseg]
+    
+    rivnet_catcor_hydromod[n_cats_fullseg > 1 & 
+                             nsource_hydromod == 0 & nsource > 0,
+                           `:=`(cat = NA, cat_cor  = NA)]
+    
+    #assign cat_cor of upstream segment of same strahler order
+    for (i in 1:3) {
+      get_nearby_cat(in_dt=rivnet_catcor_hydromod, source_direction = 'upstream')
+    }
+    get_nearby_cat(in_dt=rivnet_catcor_hydromod, source_direction = 'downstream')
+    
+    rivnet_catcor_hydromod <- st_as_sf(rivnet_catcor_hydromod) %>%
+      remove_pseudonodes(equal_cols = c("cat_cor", "UID_fullseg")) %>%
+      as.data.table
+  }
+  
+  #---------- Check results and correct based on hydrological model topology --------
+  #Compare downstream segment cat
+  to_reach_shpcor <-  rivnet_catcor_hydromod[
+    , .(from, cat_cor)] %>%
+    setnames(c('to', 'to_reach_shpcor'))
+  
+  rivnet_catcor_hydromod <- merge(rivnet_catcor_hydromod, 
+                                  to_reach_shpcor, by='to', all.x=T) %>%
+    .[, hydromod_shpcor_match := (to_reach_hydromod == to_reach_shpcor)]
+  
+  #If two upstream sections both should point to the same reach but do not
+  #correct if downstream cat is in network topology but missing in shapefile
+  #or if the assigned cat_cor is duplicated
+  dupli_catcor <- rivnet_catcor_hydromod[, .N, by=cat_cor][N>=2,]$cat_cor
+  missing_catcor <- reaches_hydromod_format[
+    !(ID_hydromod %in% unique(rivnet_catcor_hydromod$cat_cor)),]$ID_hydromod
+  
+  #Remove first-order sections with no upstream sections whose downstream cat_cor
+  #and strahler order does not match network topology from hydrological model
+  rivnet_catcor_hydromod <- rivnet_catcor_hydromod[
+    !(hydromod_shpcor_match==FALSE & nsource == 0 & strahler_hydromod_recalc>1),]
+  
+  #Identify pairs of reaches that are both upstream of the wrong reach
+  double_downstream_mismatch_correct <- rivnet_catcor_hydromod[
+    (to_reach_hydromod != to_reach_shpcor),
+    list(n1=.N, to, to_reach_shpcor), by=to_reach_hydromod] %>%
+    .[n1>=2, list(n2=.N, to_reach_hydromod, to_reach_shpcor), by=to] %>%
+    .[n2>=2 & ((to_reach_hydromod %in% missing_catcor) |
+                 (to_reach_shpcor %in% dupli_catcor)),] %>%
+    unique %>%
+    setnames(c('to_reach_shpcor', 'to'), c('cat_cor', 'from'))
+  
+  rivnet_catcor_hydromod[from %in% double_downstream_mismatch_correct$from &
+                           cat_cor %in% double_downstream_mismatch_correct$cat_cor
+                         , cat_cor := double_downstream_mismatch_correct[.SD, on=c('cat_cor', 'from'), 
+                                                                         to_reach_hydromod]]
+  
+  #---------- Implement a few manual corrections  ---------------------------------
+  if (country == 'Croatia') {
+    rivnet_catcor_manual <- rivnet_catcor_hydromod %>%
+      filter(!(UID %in% c(489, 90))) %>% #cat_cor 2082, and 2480, respectively) %>%
+      mutate(cat_cor = case_match(
+        UID,
+        103 ~ 1176,  #UID 103 (catcor 1832) -> catcor 1776
+        116 ~ 1832, #UID 116 (catcor 1836) -> catcor 1832
+        31 ~ 1788, #UID 31 (catcor 1792) -> catcor 1788
+        1045 ~ 2898, #UID 1045 (cat_cor 2908) -> catcor 289
+        .default = cat_cor
+      )
+      )
+  } else if (country == 'Czech') {
+    rivnet_catcor_manual <- rivnet_catcor_hydromod %>%
+      mutate(cat_cor = case_match(
+        UID,
+        298 ~ 40232, #UID 298 (catcor 40126) -> catcor 1776
+        158 ~ 40258, #UID 158 (40260) -> catcor 40258
+        .default = cat_cor
+      )
+      )
+  } else if (country == 'Finland') {
+    rivnet_catcor_manual <- rivnet_catcor_hydromod %>%
+      mutate(cat_cor = case_match(
+        UID,
+        538 ~ 1049400, #UID 538 (catcor 1051800) -> catcor 1049400
+        392 ~ 1069001, #UID 392 (catcor 1086800) -> catcor 1069001
+        397 ~ 1069001, #UID 397 (catcor 1086600) -> catcor 1069001 
+        .default = cat_cor
+      )
+      )
+  } else if (country == 'France') {
+    rivnet_catcor_manual <- rivnet_catcor_hydromod %>%
+      filter(!(UID %in% c(529, 630, 642, 991))) %>% #2489000, 2475800, 2476200, 2475800
+      mutate(cat_cor = case_match(
+        UID,
+        205 ~ 2422600, #UID 205  (catcor 2497800) -> catcor 2422600
+        693 ~ 2444000, #UID 693 (catcor 2465400) -> catcor 2444000  
+        805 ~ 2467600, #UID 805 (catcor 2467800) -> catcor 2467600
+        500 ~ 2485400, #UID 500 (catcor 2485600) -> catcor 2485400
+        .default = cat_cor
+      )
+      )
+  } else if (country == 'Hungary') {
+    rivnet_catcor_manual <- rivnet_catcor_hydromod %>%
+      mutate(cat_cor = case_match(
+        UID,
+        51 ~ 650800,  #UID 51 (catcor 651000) -> catcor 650800
+        331 ~ 652001,  #UID 331 (catcor 652200) -> catcor 652001
+        379 ~ 673000,  #UID 379 (catcor 673400) -> catcor 673000
+        .default = cat_cor
+      )
+      )
+  } else if (country == 'Spain') {
+    rivnet_catcor_manual <- rivnet_catcor_hydromod 
+    rivnet_catcor_manual[rivnet_catcor_manual$UID == 25, 'cat_cor'] <- 5426 #UID 25 (catcor 5428) -> catcor 5426
+  }
+  
+  
+  #------ Final processing -------------------------------------------------------
+  #Remove pseudo-nodes among segments sections of the same cat_cor
+  #re-compute length uid, and re-assign from-to
+  out_rivnet<- remove_pseudonodes(
+    in_net = st_as_sf(rivnet_catcor_manual), 
+    equal_cols = c("cat_cor", "UID_fullseg"))
+  
+  #re-assign downstream segment cat
+  to_reach_shpcor_dt <-  as.data.table(out_rivnet)[
+    , .(from, cat_cor)] %>%
+    setnames(c('to', 'to_reach_shpcor'))
+  
+  out_rivnet <- merge(
+    as.data.table(out_rivnet)[, -c('to_reach_shpcor', 'to_reach_hydromod'), with=F], 
+    to_reach_shpcor_dt, by='to', all.x=T) %>%
+    merge(reaches_hydromod_format[, .(ID_hydromod, to_reach_hydromod)],
+          by.x='cat_cor', by.y='ID_hydromod', all.x=T) %>%
+    .[, hydromod_shpcor_match := (to_reach_hydromod == to_reach_shpcor)]
+
+  #---------- Write out results ------------------------------------------------------
+  out_path <- file.path(outdir,
+                        paste0(tools::file_path_sans_ext(basename(rivnet_path)),
+                               '_reided',
+                               format(Sys.time(), "%Y%m%d"),
+                               '.gpkg')
+  )
+  
+  #Export results to gpkg
+  write_sf(st_as_sf(rivnet_catcor_manual)[
+    , c('UID', 'strahler','length_uid', 'UID_fullseg', 'cat_cor', 'from', 'to',
+        'to_reach_shpcor', 'to_reach_hydromod', 'hydromod_shpcor_match')],
+    out_path)
+  
+  return(out_path)
 }
 #------ compute_hydrostats_drn -------------------------------------------------
 # in_drn <- 'Hungary'
@@ -1664,7 +2180,8 @@ format_site_dt <- function(in_path, in_country) {
   if (in_country == 'Croatia') {
     sites_dt[, id := sub('BUT', '', id) %>%
                str_pad(width=2, side='left', pad = 0) %>%
-               paste0('BUT', .)]
+               paste0('BUT', .)] %>%
+      .[id=='BUT19', reach_id := 2868] #Noticed after correcting the network topology
   } 
   
   if (in_country == 'Czech') {
@@ -1707,13 +2224,15 @@ format_site_dt <- function(in_path, in_country) {
 # in_hydromod_paths_dt = tar_read(hydromod_paths_dt)
 # in_sites_dt = tar_read(sites_dt)
 # out_dir = file.path('results', 'gis')
-# geom = 'points'
+# geom = 'reaches'
 # overwrite = TRUE
+# in_network_path_list = tar_read(network_ssnready_gpkg_list)
 
 create_sites_gpkg <- function(in_hydromod_paths_dt,
                              in_sites_dt,
                              out_dir, 
                              geom,
+                             in_network_path_list = NULL,
                              overwrite = FALSE) {
   if (!dir.exists(out_dir)) {
     dir.create(out_dir)
@@ -1727,14 +2246,14 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
       paste0(tolower(country), '_site_', geom, 
              format(Sys.time(), "%Y%m%d"), '.gpkg'))]
   
-  if (geom == 'reaches') {
+  if (geom == 'reaches' & is.character(in_network_path_list)) {
     #Create site reaches
     in_hydromod_paths_dt[, {
       if (!file.exists(sites_gpkg_path) | overwrite) {
-        terra::vect(network_path) %>%
-          aggregate(by='cat') %>%
+        terra::vect(in_network_path_list[[country]]) %>%
+          aggregate(by='cat_cor') %>%
           merge(in_sites_dt[country_sub==country,],
-                by.x='cat', by.y='reach_id', all.x=F) %>%
+                by.x='cat_cor', by.y='reach_id', all.x=F) %>%
           terra::writeVector(filename = sites_gpkg_path, 
                              overwrite = T)
       }
@@ -1757,12 +2276,15 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
 
 
 #------ snap_sites -------------------------------------------------------------
-# drn <- 'France'
+# drn <- 'Croatia'
 # in_sites_path <- tar_read(site_points_gpkg_list)[[drn]]
-# in_network_path <- tar_read(network_sub_gpkg_list)[[drn]]
+# in_network_path <- tar_read(network_ssnready_gpkg_list)[[drn]]
 # out_snapped_sites_path = NULL
 # overwrite = T
-# custom_proj = T
+# custom_proj = F
+
+#Note that BUT12 is located several 100 m from 
+#the corresponding reach in the corrected network
 
 snap_river_sites <- function(in_sites_path, 
                              in_network_path,
@@ -1779,7 +2301,6 @@ snap_river_sites <- function(in_sites_path,
   }
   
   if (!file.exists(out_snapped_sites_path) | overwrite) {
-    #Iterate over every basin where there is a site
     if (length(in_sites_path) > 1) {
       sitesp <- do.call(rbind, lapply(in_sites_path, vect)) 
     } else {
@@ -1825,14 +2346,15 @@ snap_river_sites <- function(in_sites_path,
     sitesnap_p <- lapply(
       sitesp_proj$id, 
       function(in_pt_id) {
+        #print(in_pt_id)
         pt <- unique(sitesp_proj[sitesp_proj$id == in_pt_id,])
-        tar <- target_proj[target_proj$cat == pt$reach_id,]
+        tar <- target_proj[target_proj$cat_cor == pt$reach_id,]
         
         if (!is.empty(tar) && nrow(pt) > 0) {
           out_p <- snap_points_inner(in_pts = pt,
                                      in_target = tar,
                                      sites_idcol = 'id',
-                                     attri_to_join = 'cat'
+                                     attri_to_join = 'cat_cor'
           )
         }
         return(out_p)
@@ -1883,12 +2405,12 @@ subset_amber <- function(amber_path, in_hydromod_paths_dt, out_dir,
                                     paste0(tolower(in_country), 
                                            '_amber_pts.gpkg'))
     if (!file.exists(amber_country_path) | overwrite) {
-      cat <- vect(in_hydromod_paths_dt[country==in_country, catchment_path])
+      catchment_vec <- vect(in_hydromod_paths_dt[country==in_country, catchment_path])
       
-      amber_proj <- terra::project(amber_vec, crs(cat))
+      amber_proj <- terra::project(amber_vec, crs(catchment_vec))
       
       amber_proj %>%
-        .[ relate(cat, .,"intersects")[1,],] %>%
+        .[ relate(catchment_vec, .,"intersects")[1,],] %>%
         terra::writeVector(filename = amber_country_path,
                            overwrite = T)
       
@@ -1914,7 +2436,7 @@ snap_barrier_sites <- function(in_sites_path,
                              out_snapped_sites_path=NULL, 
                              custom_proj = T,
                              idcol = 'id',
-                             attri_to_join = 'cat',
+                             attri_to_join = 'cat_cor',
                              overwrite = F) {
   
   if (is.null(out_snapped_sites_path)) {
@@ -1958,7 +2480,7 @@ snap_barrier_sites <- function(in_sites_path,
 }
 
 #------ create_ssn -------------------------------------------------------------
-# in_country <- 'Spain'
+# in_country <- 'Croatia'
 # in_network_path = tar_read(network_ssnready_gpkg_list)[[in_country]]
 # in_sites_path = tar_read(site_snapped_gpkg_list)[[in_country]]
 # in_barriers_path = tar_read(barrier_snapped_gpkg_list)[[in_country]]
@@ -1991,7 +2513,7 @@ create_ssn <- function(in_network_path,
     merge(in_hydromod$data_all[date < as.Date('2021-10-01', '%Y-%m-%d'),  #Link q data
                                list(mean_qsim = mean(qsim, na.rm=T)), 
                                by=reach_id],
-          by.x = 'cat', by.y = 'reach_id')
+          by.x = 'cat_cor', by.y = 'reach_id')
   
   #Build landscape network
   edges_lsn <- SSNbler::lines_to_lsn(
@@ -2046,11 +2568,12 @@ create_ssn <- function(in_network_path,
     lsn_path = lsn_path
   )
   
+  
   # ggplot() +
   #   geom_sf(data = edges_lsn, aes(color = upDist)) +
   #   geom_sf(data = site_list$sites, aes(color = upDist)) +
   #   geom_sf(data = site_list$barriers, color='red') +
-  #   coord_sf(datum = st_crs(edges)) +
+  #   coord_sf(datum = st_crs(edges_lsn)) +
   #   scale_color_viridis_c()
   
 }
