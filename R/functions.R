@@ -2486,6 +2486,7 @@ snap_barrier_sites <- function(in_sites_path,
 # in_barriers_path = tar_read(barrier_snapped_gpkg_list)[[in_country]]
 # in_hydromod <- tar_read_raw(paste0('hydromod_dt_', in_country, '_qsim'))
 # out_dir = 'results/ssn'
+# out_ssn_name = paste0(in_country, '_drn')
 # overwrite=T
 
 create_ssn <- function(in_network_path,
@@ -2493,6 +2494,7 @@ create_ssn <- function(in_network_path,
                        in_barriers_path,
                        in_hydrostats,
                        out_dir,
+                       out_ssn_name,
                        overwrite = T) {
   if (!dir.exists(out_dir)) {
     dir.create(out_dir)
@@ -2513,7 +2515,7 @@ create_ssn <- function(in_network_path,
     merge(in_hydromod$data_all[date < as.Date('2021-10-01', '%Y-%m-%d'),  #Link q data
                                list(mean_qsim = mean(qsim, na.rm=T)), 
                                by=reach_id],
-          by.x = 'cat_cor', by.y = 'reach_id')
+          by.x = 'cat_cor', by.y = 'reach_id') 
   
   #Build landscape network
   edges_lsn <- SSNbler::lines_to_lsn(
@@ -2536,11 +2538,15 @@ create_ssn <- function(in_network_path,
     overwrite = TRUE
   )
   
+  sites_list <- list(sites = sites_lsn)
+  
   #Incorporate barriers into the landscape network
   #Only keep barriers over 2 m and under 100 m snap from network
-  barriers_lsn <- read_sf(in_barriers_path) %>%
-    filter((!is.na(Height) & Height > 2) & snap_dist_m < 100) %>%
-    sites_to_lsn(
+  barriers_sf_sub <- read_sf(in_barriers_path) %>%
+    filter((!is.na(Height) & Height > 2) & snap_dist_m < 100)
+  
+  if (nrow(barriers_sf_sub) > 0) {
+    barriers_lsn <- sites_to_lsn(
       edges =  edges_lsn,
       lsn_path = lsn_path,
       file_name = "barriers",
@@ -2548,7 +2554,10 @@ create_ssn <- function(in_network_path,
       save_local = TRUE,
       overwrite = TRUE
     )
-  
+    
+    sites_list$barriers <- barriers_lsn
+  }
+
   #Calculate upstream distance
   edges_lsn <- updist_edges(
     edges =  edges_lsn,
@@ -2557,17 +2566,51 @@ create_ssn <- function(in_network_path,
     calc_length = TRUE
   )
   
-  site_list <- updist_sites(
-    sites = list(
-      sites = sites_lsn,
-      barriers = barriers_lsn
-    ),
+  sites_list_lsn <- updist_sites(
+    sites = sites_list,
     edges = edges_lsn,
     length_col = "Length",
     save_local = TRUE,
     lsn_path = lsn_path
   )
   
+  #Compute segment Proportional Influence (PI) and Additive Function Values (AFVs)
+  if (min(net$mean_qsim) > 0) {
+    edges_lsn$mean_qsim_sqrt <- sqrt(edges_lsn$mean_qsim)
+
+    edges_lsn <- afv_edges(
+      edges = edges_lsn,
+      infl_col = "mean_qsim_sqrt",
+      segpi_col = "pi_qsqrt",
+      afv_col = "afv_qsqrt",
+      lsn_path = lsn_path
+    )
+    
+    sites_list_lsn <- afv_sites(
+      sites = sites_list_lsn,
+      edges = edges_lsn,
+      afv_col = "afv_qsqrt",
+      save_local = TRUE,
+      lsn_path = lsn_path
+    )
+    
+  } else {
+    stop("Trying to use mean discharge to compute Additive Function Values (AFVs),
+         but there are 0s in the discharge column.")
+  }
+  
+  
+  #Assemble the SSN
+  ssn_assemble(
+    edges = edges_lsn,
+    lsn_path = lsn_path,
+    obs_sites = sites_list_lsn$sites,
+    ssn_path = paste0(out_dir, out_ssn_name),
+    import = TRUE,
+    check = TRUE,
+    afv_col = "afv_qsqrt",
+    overwrite = TRUE
+  )
   
   # ggplot() +
   #   geom_sf(data = edges_lsn, aes(color = upDist)) +
