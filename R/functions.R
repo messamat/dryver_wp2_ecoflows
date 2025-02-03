@@ -1713,7 +1713,7 @@ remove_pseudonodes <- function(in_net, equal_cols = FALSE,
 
 reassign_netids <- function(rivnet_path, strahler_dt, 
                             in_reaches_hydromod_dt, outdir,
-                            country = NULL) {
+                            country = NULL, in_ext='gpkg') {
   #---------- Prepare data -------------------------------------------------------
   #Read network and join with hydromod data
   rivnet <- st_read(rivnet_path) %>%
@@ -2099,11 +2099,11 @@ reassign_netids <- function(rivnet_path, strahler_dt,
                         paste0(tools::file_path_sans_ext(basename(rivnet_path)),
                                '_reided',
                                format(Sys.time(), "%Y%m%d"),
-                               '.gpkg')
+                               '.', in_ext)
   )
   
   #Export results to gpkg
-  write_sf(st_as_sf(rivnet_catcor_manual)[
+  write_sf(st_as_sf(out_rivnet)[
     , c('UID', 'strahler','length_uid', 'UID_fullseg', 'cat_cor', 'from', 'to',
         'to_reach_shpcor', 'to_reach_hydromod', 'hydromod_shpcor_match')],
     out_path)
@@ -2601,7 +2601,7 @@ create_ssn <- function(in_network_path,
   
   
   #Assemble the SSN
-  ssn_assemble(
+  out_ssn <- ssn_assemble(
     edges = edges_lsn,
     lsn_path = lsn_path,
     obs_sites = sites_list_lsn$sites,
@@ -2613,11 +2613,23 @@ create_ssn <- function(in_network_path,
   )
   
   # ggplot() +
-  #   geom_sf(data = edges_lsn, aes(color = upDist)) +
-  #   geom_sf(data = site_list$sites, aes(color = upDist)) +
-  #   geom_sf(data = site_list$barriers, color='red') +
-  #   coord_sf(datum = st_crs(edges_lsn)) +
-  #   scale_color_viridis_c()
+  #   geom_sf(
+  #     data = out_ssn$edges,
+  #     color = "medium blue",
+  #     aes(linewidth = mean_qsim_sqrt)
+  #   ) +
+  #   scale_linewidth(range = c(0.1, 2.5)) +
+  #   geom_sf(
+  #     data = out_ssn$obs,
+  #     size = 1.7,
+  #     aes(color = id)
+  #   ) +
+  #   coord_sf(datum = st_crs(out_ssn$edges)) +
+  #   labs(color = "ID", linewidth = "sqrt(Q average)") +
+  #   theme(
+  #     legend.text = element_text(size = 6),
+  #     legend.title = element_text(size = 8)
+  #   )
   
 }
 #------ compute_connectivity ---------------------------------------------------

@@ -169,7 +169,7 @@ list(
         st_write(clean_net, out_net_path, append=F)
       } else if (in_country == 'Croatia') {
         clean_net <- st_read(out_net_path) %>%
-          .[!(.[['UID']] %in% c(1102, 2988)),] 
+          .[!(.[['UID']] %in% c(1102, 2988, 457, 458, 462, 464)),] 
         #Change startpoint of disconnected line where there is a site 
         #(startpoint, because the line dir is reversed)
         line_to_edit <- clean_net[clean_net$UID==651,]$geom
@@ -190,7 +190,7 @@ list(
     network_directed_gpkg_list,
     lapply(names(network_clean_gpkg_list), function(in_country) {
       #Set size of simplifying radius to remove loops. See function
-      outlet_uid_list <- list(Croatia = 458, Czech = 4, Finland = 682,
+      outlet_uid_list <- list(Croatia = 463, Czech = 4, Finland = 682,
                               France = 1, Hungary = 5, Spain = 86)
       
       out_net_path <- direct_network(
@@ -246,6 +246,27 @@ list(
       )
       return(out_net_path)
     }) %>% setNames(names(network_nocomplexconf_gpkg_list))
+  )
+  ,
+  
+  #Copy gpkg to shapefiles for sharing
+  tar_target(
+    network_ssnready_shp_list,
+    lapply(network_ssnready_gpkg_list, function(path) {
+      old_cols <- c('UID', 'strahler', 'length_uid', 'cat_cor', 'from', 'to',
+                    'to_reach_shpcor', 'to_reach_hydromod', 
+                    'hydromod_shpcor_match', 'geom')
+      new_cols <- c('UID', 'strahler', 'length_m', 'cat', 'from', 'to',
+                    'to_cat_shp', 'to_cat_mod', 'mod_match', 'geom')
+      lyr <- st_read(path)[,old_cols]
+      names(lyr) <- new_cols
+      lyr$UID <- seq_along(lyr$UID)
+      lyr$strahler <- as.integer(lyr$strahler)
+      lyr$cat <- as.integer(lyr$cat)
+      lyr$to_cat_shp <- as.integer(lyr$to_cat_shp)
+      lyr$to_cat_mod <- as.integer(lyr$to_cat_mod)
+      write_sf(lyr, paste0(tools::file_path_sans_ext(path), '.shp'))
+    })
   )
   ,
 
