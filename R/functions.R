@@ -2678,12 +2678,11 @@ merge_alphadat <- function(in_sprich, in_hydrostats_comb) {
                           by=c('date', 'site')) %>%
       merge(in_hydrostats_qsim, by=c('date', 'site'))
     
-    return(sprich_hydro)  
+    return(sprich_hydro_drn)  
   }) %>% rbindlist
+  
  return(sprich_hydro)
 }
-
-
 
 
 
@@ -2786,42 +2785,6 @@ plot_alpha_cor <- function(in_alphadat_merged, out_dir, facet_wrap=F) {
 }
 
 ###################### OLD #####################################################
-#------ format_envinterm -------------------------------------------------------
-# in_env_dt <- tar_read(env_dt)
-# in_interm90_dt <- tar_read(interm90_dt)
-# in_sprich = tar_read(sprich)
-
-merge_alphadat <- function(in_env_dt, in_interm90_dt, in_sprich) {
-  #Compute mean 90-day drying duration and event length
-  interm90_mean <- in_interm90_dt[
-    , list(TotDur90 = mean(TotDur, na.rm=T),
-           TotLeng90 = mean(TotLeng, na.rm=T)),
-    by=Sites] %>%
-    setnames('Sites', 'site')
-  
-  #Average environmental variables
-  env_mean <- in_env_dt[
-    , list(discharge = mean(discharge_l_s, na.rm=T),
-           moss = mean(moss_cover, na.rm=T),
-           particlesize = mean(particle_size, na.rm=T)),
-    by=.(DRN, site, stream_type)]
-  
-  #data.table::setnames(in_sprich, 'Site', 'site') #not working for some reason 
-  #SET_STRING_ELT() can only be applied to a 'character vector', not a 'char'
-  in_sprich[, `:=`(site = Site,
-                   Site = NULL)]
-  
-  merged_dat <- merge(in_sprich, interm90_mean, by= 'site', all.x=T) %>%
-    merge(env_mean, by='site', all.x=T) %>%
-    .[site != 'BUK52',] %>% #Missing intermittence indicators according to Annika?
-    .[DRN == 'Czech Republic', DRN := 'Czech'] %>%
-    setnames('DRN', 'Country')
-  
-  return(merged_dat)
-}
-
-
-
 
 #------ compute_null_model_inner -----------------------------------------------
 compute_null_model_inner <- function(in_dt, 
