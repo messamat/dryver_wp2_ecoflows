@@ -2114,13 +2114,14 @@ reassign_netids <- function(rivnet_path, strahler_dt,
 # in_drn <- 'Hungary'
 # varname <-  'isflowing' #qsim
 # in_sites_dt <- tar_read(sites_dt)[country == in_drn,]
-# in_network_path <- tar_read(network_sub_gpkg_list)[[in_drn]]
+# in_network_path <- tar_read(network_ssnready_gpkg_list)[[in_drn]]
 # in_hydromod_drn <- tar_read_raw((paste0('hydromod_dt_', in_drn, '_', varname)))
 
 compute_hydrostats_drn <- function(in_network_path,
                                    in_sites_dt,
                                    varname,
-                                   in_hydromod_drn) {
+                                   in_hydromod_drn,
+                                   in_network_idcol = 'cat_cor') {
   setDT(in_hydromod_drn$data_all)
   setDT(in_hydromod_drn$dates_format) 
   
@@ -2129,8 +2130,8 @@ compute_hydrostats_drn <- function(in_network_path,
     #Import network shapefiles and get their length
     network_v <- terra::vect(in_network_path)
     network_v$reach_length <- terra::perim(network_v)
-    reach_dt <- as.data.table(network_v[, c('cat', 'reach_length')]) %>%
-      setnames('cat', 'reach_id') %>%
+    reach_dt <- as.data.table(network_v[, c(in_network_idcol, 'reach_length')]) %>%
+      setnames(in_network_idcol, 'reach_id') %>%
       .[, list(reach_length = sum(reach_length)), by=reach_id]
     remove(network_v)
     
@@ -2233,6 +2234,7 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
                              out_dir, 
                              geom,
                              in_network_path_list = NULL,
+                             in_network_idcol = 'cat_cor',
                              overwrite = FALSE) {
   if (!dir.exists(out_dir)) {
     dir.create(out_dir)
@@ -2251,9 +2253,9 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
     in_hydromod_paths_dt[, {
       if (!file.exists(sites_gpkg_path) | overwrite) {
         terra::vect(in_network_path_list[[country]]) %>%
-          aggregate(by='cat_cor') %>%
+          aggregate(by=in_network_idcol) %>%
           merge(in_sites_dt[country_sub==country,],
-                by.x='cat_cor', by.y='reach_id', all.x=F) %>%
+                by.x=in_network_idcol, by.y='reach_id', all.x=F) %>%
           terra::writeVector(filename = sites_gpkg_path, 
                              overwrite = T)
       }
@@ -2282,16 +2284,17 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
 # out_snapped_sites_path = NULL
 # overwrite = T
 # custom_proj = F
-
-#Note that BUT12 is located several 100 m from 
-#the corresponding reach in the corrected network
+# in_sites_idcol = 'reach_id'
+# in_network_idcol = 'cat_cor'
 
 snap_river_sites <- function(in_sites_path, 
                              in_network_path,
                              out_snapped_sites_path=NULL, 
                              custom_proj = F,
                              proj_back = F,
-                             overwrite = F) {
+                             overwrite = F,
+                             in_sites_idcol = 'reach_id',
+                             in_network_idcol = 'cat_cor') {
   
   if (is.null(out_snapped_sites_path)) {
     out_snapped_sites_path <- sub(
@@ -2348,13 +2351,14 @@ snap_river_sites <- function(in_sites_path,
       function(in_pt_id) {
         #print(in_pt_id)
         pt <- unique(sitesp_proj[sitesp_proj$id == in_pt_id,])
-        tar <- target_proj[target_proj$cat_cor == pt$reach_id,]
+        tar <- target_proj[
+          target_proj[[in_network_idcol]] == pt[[in_sites_idcol]][[1]],]
         
         if (!is.empty(tar) && nrow(pt) > 0) {
           out_p <- snap_points_inner(in_pts = pt,
                                      in_target = tar,
                                      sites_idcol = 'id',
-                                     attri_to_join = 'cat_cor'
+                                     attri_to_join = in_network_idcol
           )
         }
         return(out_p)
@@ -2484,7 +2488,6 @@ snap_barrier_sites <- function(in_sites_path,
 # in_network_path = tar_read(network_ssnready_gpkg_list)[[in_country]]
 # in_sites_path = tar_read(site_snapped_gpkg_list)[[in_country]]
 # in_barriers_path = tar_read(barrier_snapped_gpkg_list)[[in_country]]
-# in_hydromod <- tar_read_raw(paste0('hydromod_dt_', in_country, '_qsim'))
 # out_dir = 'results/ssn'
 # out_ssn_name = paste0(in_country, '_drn')
 # overwrite=T
@@ -2492,10 +2495,11 @@ snap_barrier_sites <- function(in_sites_path,
 create_ssn <- function(in_network_path,
                        in_sites_path,
                        in_barriers_path,
-                       in_hydrostats,
+                       in_hydromod,
                        out_dir,
                        out_ssn_name,
                        overwrite = T) {
+  
   if (!dir.exists(out_dir)) {
     dir.create(out_dir)
   }
@@ -2528,7 +2532,7 @@ create_ssn <- function(in_network_path,
   )
   
   #Incorporate sites into the landscape network
-  sites_lsn <- sites_to_lsn(
+  sites_lsn <- SSNbler::sites_to_lsn(
     sites = st_read(in_sites_path),
     edges =  edges_lsn,
     lsn_path = lsn_path,
@@ -2547,6 +2551,7 @@ create_ssn <- function(in_network_path,
   
   if (nrow(barriers_sf_sub) > 0) {
     barriers_lsn <- sites_to_lsn(
+      sites = barriers_sf_sub,
       edges =  edges_lsn,
       lsn_path = lsn_path,
       file_name = "barriers",
@@ -2601,11 +2606,13 @@ create_ssn <- function(in_network_path,
   
   
   #Assemble the SSN
+  out_ssn_path <- paste0(out_dir, out_ssn_name)
+  
   out_ssn <- ssn_assemble(
     edges = edges_lsn,
     lsn_path = lsn_path,
     obs_sites = sites_list_lsn$sites,
-    ssn_path = paste0(out_dir, out_ssn_name),
+    ssn_path = out_ssn_path,
     import = TRUE,
     check = TRUE,
     afv_col = "afv_qsqrt",
@@ -2631,6 +2638,10 @@ create_ssn <- function(in_network_path,
   #     legend.title = element_text(size = 8)
   #   )
   
+  return(list(
+    path = out_ssn_path,
+    ssn = out_ssn)
+  )
 }
 #------ compute_connectivity ---------------------------------------------------
 # load("data/data_annika\\STconMEGAmatrix_annika\\Final_STconmat_MegaMat.RData")
@@ -2795,7 +2806,6 @@ compute_null_model_inner <- function(in_dt,
   }
   oecosimu_out <- oecosimu(comm = com, nestfun = foo, method = method, 
                            thin = thin, nsimul = nsimul, groups = site_factorID)
-  
   
   #Format null model outputs
   oecosimu_dt <- as.data.table(oecosimu_out$oecosimu)[
