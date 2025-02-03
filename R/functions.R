@@ -1022,6 +1022,9 @@ read_envdt <- function(in_env_data_path_annika,
   #skim(env_dt_merged)
   #skim(env_dt_merged[state_of_flow == 'F',])
   
+  #Convert dates from character to Date format
+  env_dt_merged[, date :=  as.Date(date, format='%d.%m.%Y')]
+  
   return(env_dt_merged)
 }
 #------ read_biodt -------------------------------------------------------------
@@ -1031,6 +1034,7 @@ read_envdt <- function(in_env_data_path_annika,
 read_biodt <- function(path_list, in_metadata_edna) {
   #Read and name all data tables
   dt_list <- mapply(function(in_path, in_name) {
+    print(in_path)
     fread(in_path) %>% 
       .[, organism := in_name] %>%
       setnames(tolower(names(.)))},
@@ -1066,20 +1070,22 @@ read_biodt <- function(path_list, in_metadata_edna) {
   
   dt_list$bac_biof_nopools <- dt_list$bac_biof %>%
     .[habitat!='pool',] %>%
-    .[, habitat := NULL]
+    .[, `:=`(habitat = NULL,
+             organism = 'bac_biof_nopools')]
   dt_list$bac_biof[, habitat := NULL]
   
   
   dt_list$bac_sedi_nopools <- dt_list$bac_sedi %>%
     .[habitat!='pool',] %>%
-    .[, habitat := NULL]
+    .[, `:=`(habitat = NULL,
+             organism = 'bac_sedi_nopools')]
   dt_list$bac_sedi[, habitat := NULL]
   
   return(dt_list)
 }
 
 #------ calc_sprich ------------------------------------------------------------
-# in_biodt <- tar_read(bio_dt)[[1]]
+# in_biodt <- tar_read(bio_dt)[['bac_sedi']]
 # in_metacols <- metacols
 
 calc_sprich <- function(in_biodt, in_metacols) {
@@ -2650,43 +2656,45 @@ create_ssn <- function(in_network_path,
 
 
 
-###################### OLD #####################################################
-#------ format_envinterm -------------------------------------------------------
-# in_env_dt <- tar_read(env_dt)
-# in_interm90_dt <- tar_read(interm90_dt)
-# in_sprich = tar_read(sprich)
+#------ merge_alphadat ---------------------------------------------------------
+# in_country <- 'Croatia'
+# in_sprich <- tar_read(sprich)
+# in_hydrostats_comb <- tar_read(hydrostats_comb)
 
-merge_alphadat <- function(in_env_dt, in_interm90_dt, in_sprich) {
-  #Compute mean 90-day drying duration and event length
-  interm90_mean <- in_interm90_dt[
-    , list(TotDur90 = mean(TotDur, na.rm=T),
-           TotLeng90 = mean(TotLeng, na.rm=T)),
-    by=Sites] %>%
-    setnames('Sites', 'site')
-  
-  #Average environmental variables
-  env_mean <- in_env_dt[
-    , list(discharge = mean(discharge_l_s, na.rm=T),
-           moss = mean(moss_cover, na.rm=T),
-           particlesize = mean(particle_size, na.rm=T)),
-    by=.(DRN, site, stream_type)]
-  
-  #data.table::setnames(in_sprich, 'Site', 'site') #not working for some reason 
-  #SET_STRING_ELT() can only be applied to a 'character vector', not a 'char'
-  in_sprich[, `:=`(site = Site,
-                   Site = NULL)]
-  
-  merged_dat <- merge(in_sprich, interm90_mean, by= 'site', all.x=T) %>%
-    merge(env_mean, by='site', all.x=T) %>%
-    .[site != 'BUK52',] %>% #Missing intermittence indicators according to Annika?
-    .[DRN == 'Czech Republic', DRN := 'Czech'] %>%
-    setnames('DRN', 'Country')
-  
-  return(merged_dat)
+merge_alphadat <- function(in_sprich, in_hydrostats_comb) {
+  sprich_hydro <- lapply(unique(in_sprich$drn), function(in_country) {
+    in_hydrostats_isflowing <- in_hydrostats_comb[[
+      paste0('hydrostats_', in_country, '_isflowing')]][['sites']] %>%
+      setDT %>%
+      setnames('id', 'site')
+    
+    in_hydrostats_qsim <- in_hydrostats_comb[[
+      paste0('hydrostats_', in_country, '_qsim')]] %>%
+      setDT %>%
+      setnames('id', 'site')
+    
+    sprich_hydro_drn <- merge(in_sprich[drn==in_country,],
+                          in_hydrostats_isflowing,
+                          by=c('date', 'site')) %>%
+      merge(in_hydrostats_qsim, by=c('date', 'site'))
+    
+    return(sprich_hydro)  
+  }) %>% rbindlist
+ return(sprich_hydro)
 }
 
 
 
+
+
+#------ model_SSN --------------------------------------------------------------
+# in_country <- 'Croatia'
+# in_ssn <- tar_read(ssn_list)[[in_country]]$ssn
+# SSN2::ssn_create_distmat(in_ssn, overwrite=TRUE)
+
+
+
+# merge_
 #------ plot_alpha_cor --------------------------------------------------------
 # tar_load(alphadat_merged)
 
@@ -2776,6 +2784,44 @@ plot_alpha_cor <- function(in_alphadat_merged, out_dir, facet_wrap=F) {
     discharge = plotlist_discharge
   ))
 }
+
+###################### OLD #####################################################
+#------ format_envinterm -------------------------------------------------------
+# in_env_dt <- tar_read(env_dt)
+# in_interm90_dt <- tar_read(interm90_dt)
+# in_sprich = tar_read(sprich)
+
+merge_alphadat <- function(in_env_dt, in_interm90_dt, in_sprich) {
+  #Compute mean 90-day drying duration and event length
+  interm90_mean <- in_interm90_dt[
+    , list(TotDur90 = mean(TotDur, na.rm=T),
+           TotLeng90 = mean(TotLeng, na.rm=T)),
+    by=Sites] %>%
+    setnames('Sites', 'site')
+  
+  #Average environmental variables
+  env_mean <- in_env_dt[
+    , list(discharge = mean(discharge_l_s, na.rm=T),
+           moss = mean(moss_cover, na.rm=T),
+           particlesize = mean(particle_size, na.rm=T)),
+    by=.(DRN, site, stream_type)]
+  
+  #data.table::setnames(in_sprich, 'Site', 'site') #not working for some reason 
+  #SET_STRING_ELT() can only be applied to a 'character vector', not a 'char'
+  in_sprich[, `:=`(site = Site,
+                   Site = NULL)]
+  
+  merged_dat <- merge(in_sprich, interm90_mean, by= 'site', all.x=T) %>%
+    merge(env_mean, by='site', all.x=T) %>%
+    .[site != 'BUK52',] %>% #Missing intermittence indicators according to Annika?
+    .[DRN == 'Czech Republic', DRN := 'Czech'] %>%
+    setnames('DRN', 'Country')
+  
+  return(merged_dat)
+}
+
+
+
 
 #------ compute_null_model_inner -----------------------------------------------
 compute_null_model_inner <- function(in_dt, 

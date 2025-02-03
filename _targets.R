@@ -404,8 +404,31 @@ analysis_targets <- list(
     }) %>%
       rbindlist %>%
       .[, running_id := paste0(site, '_', campaign)] %>%
-      merge(env_dt, by=c('site', 'campaign', 'running_id'))
+      merge(env_dt, by=c('site', 'campaign', 'running_id')) 
   )
+  ,
+  
+  tar_target(
+    alphadat_merged,
+    merge_alphadat(in_sprich = sprich,
+                   in_hydrostats_comb = hydrostats_comb)
+  )
+  #,
+  #
+  # tar_target(
+  #   alpha_cor_plots_wrap,
+  #   plot_alpha_cor(alphadat_merged,
+  #                  out_dir = file.path(resdir, 'Null_models'),
+  #                  facet_wrap = TRUE)
+  # )
+  # ,
+  # 
+  # tar_target(
+  #   alpha_cor_plots_all,
+  #   plot_alpha_cor(alphadat_merged,
+  #                  out_dir = file.path(resdir, 'Null_models'),
+  #                  facet_wrap = FALSE)
+  # )
 )
 
 list(preformatting_targets, mapped_hydrotargets, 
@@ -415,14 +438,8 @@ list(preformatting_targets, mapped_hydrotargets,
 
 #,
 #
-# #Merge all site-based data 
-# tar_target(
-#   alphadat_merged,
-#   merge_alphadat(in_env_dt = env_dt,
-#                  in_interm90_dt = interm90_dt,
-#                  in_sprich = sprich)
-# )
-# ,
+#Merge all site-based data
+
 
 
 
@@ -436,21 +453,7 @@ list(preformatting_targets, mapped_hydrotargets,
 # )
 # ,
 #
-# tar_target(
-#   alpha_cor_plots_wrap,
-#   plot_alpha_cor(alphadat_merged,
-#                  out_dir = file.path(resdir, 'Null_models'),
-#                  facet_wrap = TRUE)
-# )
-# ,
-#
-# tar_target(
-#   alpha_cor_plots_all,
-#   plot_alpha_cor(alphadat_merged,
-#                  out_dir = file.path(resdir, 'Null_models'),
-#                  facet_wrap = FALSE)
-# )
-# ,
+
 #
 # tar_target(
 #   lmer_S_int,
