@@ -170,15 +170,10 @@ preformatting_targets <- list(
         st_write(clean_net, out_net_path, append=F)
       } else if (in_country == 'Croatia') {
         clean_net <- st_read(out_net_path) %>%
-          .[!(.[['UID']] %in% c(1102, 2988, 457, 458, 462, 464)),] 
-        #Change startpoint of disconnected line where there is a site 
-        #(startpoint, because the line dir is reversed)
-        line_to_edit <- clean_net[clean_net$UID==651,]$geom
-        clean_net[clean_net$UID==651,]$geom <- st_sfc(st_linestring(
-          rbind(
-            c(X=596968.793, Y=4899716.907),
-            st_coordinates(line_to_edit)[-1, c('X', 'Y')]
-          )))
+          .[!(.[['UID']] %in% c(1102, 2988, 457, 458, 462, 464)),] %>%
+          #Change startpoint of disconnected line where there is a site 
+          #to match downstream line (startpoint, because the line dir is reversed)
+          manual_clean_croatia
         
         st_write(clean_net, out_net_path, append=F)
       }
@@ -383,17 +378,14 @@ combined_hydrotargets <- list(
 analysis_targets <- list(
   #Create Spatial Stream Network (SSN) objects
   tar_target(
-    ssn_list,
-    lapply(names(network_ssnready_gpkg_list), function(in_country) {
-      create_ssn(in_network_path = network_ssnready_gpkg_list[[in_country]],
-                 in_sites_path = site_snapped_gpkg_list[[in_country]],
-                 in_barriers_path = barrier_snapped_gpkg_list[[in_country]],
-                 in_hydromod = hydromod_comb[[
-                   paste0('hydromod_dt_', in_country, '_qsim')]],
+    ssn_eu,
+    create_ssn_europe(in_network_path = network_ssnready_gpkg_list,
+                 in_sites_path = site_snapped_gpkg_list,
+                 in_barriers_path = barrier_snapped_gpkg_list,
+                 in_hydromod = hydromod_comb,
                  out_dir = file.path(resdir, 'ssn'),
-                 out_ssn_name = paste0(in_country, '_drn'),
+                 out_ssn_name = 'ssn_eu',
                  overwrite = T)
-    }) %>% setNames(names(network_ssnready_gpkg_list))
   ),
   
   tar_target(

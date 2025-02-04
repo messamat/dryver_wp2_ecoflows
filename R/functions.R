@@ -1380,6 +1380,33 @@ clean_network <- function(rivnet_path, idcol,
 
 
 
+#------ manual_clean_croatia ---------------------------------------------------
+manual_clean_croatia <- function(in_net) {
+  line_to_edit <- in_net[in_net$UID==651,]$geom 
+  in_net[in_net$UID==651,]$geom <- st_sfc(st_linestring(
+    rbind(
+      c(X=596968.793, Y=4899716.907),
+      st_coordinates(line_to_edit)[-1, c('X', 'Y')]
+    )),
+    crs = st_crs(in_net)) %>%
+    st_reverse()
+  
+  in_net <- st_snap(in_net, in_net, tolerance = 0.005)
+  
+  #Split connected line at intersection
+  line_to_split <- in_net[in_net$UID==622,]
+  sink_parts <- st_collection_extract(
+    st_split(line_to_split$geom, 
+             st_sfc(st_point(c(X=596968.793, Y=4899716.907)), 
+                    crs = st_crs(in_net))
+    ),"LINESTRING")
+  in_net[in_net$UID==622,]$geom <- sink_parts[1,]
+  line_to_split$UID <- max(in_net$UID) + 1
+  line_to_split$geom <- sink_parts[2,]
+  out_net <- rbind(in_net, line_to_split)
+  
+  return(out_net)
+}
 #------ direct_network -----------------------------------------
 # Define helper functions
 get_endpoint <- function(line) st_coordinates(line)[nrow(st_coordinates(line)), ]
@@ -1712,7 +1739,7 @@ remove_pseudonodes <- function(in_net, equal_cols = FALSE,
 }
 
 #Parameters
-# in_country <- 'Spain'
+# in_country <- 'Croatia'
 # rivnet_path <- tar_read(network_nocomplexconf_gpkg_list)[[in_country]]
 # strahler_dt <- tar_read(network_strahler)[[in_country]]
 # in_reaches_hydromod_dt <- tar_read(reaches_dt)[country==in_country,]
@@ -1939,8 +1966,8 @@ reassign_netids <- function(rivnet_path, strahler_dt,
   #Merge processed attributes with pre-formatted spatial network
   rivnet_catcor <- merge(
     rivnet_fullseg_inters_nopseudo, 
-    rivnet_inters_dt[, .(UID, cat_cor, cat_copy)],
-    by='UID') %>%
+    rivnet_inters_dt[, .(UID, cat_cor, cat_copy, length_uid)],
+    by=c('UID', 'length_uid')) %>%
     .[, c('UID', 'cat_cor', 'cat_copy', 'strahler', 
           'nsource', 'UID_fullseg', 'geometry')]
   
@@ -1950,6 +1977,7 @@ reassign_netids <- function(rivnet_path, strahler_dt,
     in_net = rivnet_catcor, 
     equal_cols = c("cat_cor", "UID_fullseg"))
   
+  #st_write( rivnet_catcor_smooth[,c('from', 'to', 'UID', 'cat_cor', 'cat_copy', 'geometry')], 'results/rivnet_catcor_smooth.shp')
   
   #---------- Adjust results based on topology from hydrological model network ---
   #Merge with hydrological model network topology data
@@ -2027,10 +2055,10 @@ reassign_netids <- function(rivnet_path, strahler_dt,
       filter(!(UID %in% c(489, 90))) %>% #cat_cor 2082, and 2480, respectively) %>%
       mutate(cat_cor = case_match(
         UID,
-        103 ~ 1176,  #UID 103 (catcor 1832) -> catcor 1776
+        103 ~ 1776,  #UID 103 (catcor 1832) -> catcor 1776
         116 ~ 1832, #UID 116 (catcor 1836) -> catcor 1832
         31 ~ 1788, #UID 31 (catcor 1792) -> catcor 1788
-        1045 ~ 2898, #UID 1045 (cat_cor 2908) -> catcor 289
+        1045 ~ 2898, #UID 1045 (cat_cor 2908) -> catcor 2898
         .default = cat_cor
       )
       )
@@ -2038,7 +2066,7 @@ reassign_netids <- function(rivnet_path, strahler_dt,
     rivnet_catcor_manual <- rivnet_catcor_hydromod %>%
       mutate(cat_cor = case_match(
         UID,
-        298 ~ 40232, #UID 298 (catcor 40126) -> catcor 1776
+        298 ~ 40232, #UID 298 (catcor 40126) -> catcor 40232
         158 ~ 40258, #UID 158 (40260) -> catcor 40258
         .default = cat_cor
       )
@@ -2489,57 +2517,70 @@ snap_barrier_sites <- function(in_sites_path,
   return(out_snapped_sites_path) #Path to layer containing site points with attribute data
 }
 
-#------ create_ssn -------------------------------------------------------------
-# in_country <- 'Croatia'
-# in_network_path = tar_read(network_ssnready_gpkg_list)[[in_country]]
-# in_sites_path = tar_read(site_snapped_gpkg_list)[[in_country]]
-# in_barriers_path = tar_read(barrier_snapped_gpkg_list)[[in_country]]
+#------ create_ssn_europe ------------------------------------------------------
+# in_network_path = tar_read(network_ssnready_gpkg_list)
+# in_sites_path = tar_read(site_snapped_gpkg_list)
+# in_barriers_path = tar_read(barrier_snapped_gpkg_list)
+# in_hydromod = tar_read(hydromod_comb)
 # out_dir = 'results/ssn'
-# out_ssn_name = paste0(in_country, '_drn')
+# out_ssn_name = 'all_drns'
 # overwrite=T
 
-create_ssn <- function(in_network_path,
-                       in_sites_path,
-                       in_barriers_path,
-                       in_hydromod,
-                       out_dir,
-                       out_ssn_name,
-                       overwrite = T) {
+create_ssn_europe <- function(in_network_path,
+                              in_sites_path,
+                              in_barriers_path,
+                              in_hydromod,
+                              out_dir,
+                              out_ssn_name,
+                              overwrite = T) {
   
   if (!dir.exists(out_dir)) {
     dir.create(out_dir)
   }
   
   lsn_path <- file.path(out_dir,
-                        tools::file_path_sans_ext(
-                          sub('[.](?=(shp|gpkg)$)', '_lsn.',
-                              basename(in_network_path), perl=T)
-                        ))
+                        paste0(out_ssn_name, '_lsn')
+  )
   
+  #Build landscape network -----------------------------------------------------
   #Read input network
-  net <- st_read(in_network_path) %>%
-    st_cast("LINESTRING") %>%
-    #Make sure that the geometry column is equally named regardless 
-    #of file format (see https://github.com/r-spatial/sf/issues/719)
-    st_set_geometry('geometry') %>%
-    merge(in_hydromod$data_all[date < as.Date('2021-10-01', '%Y-%m-%d'),  #Link q data
-                               list(mean_qsim = mean(qsim, na.rm=T)), 
-                               by=reach_id],
-          by.x = 'cat_cor', by.y = 'reach_id') 
+  net_eu <- lapply(names(in_network_path), function(in_country) {
+    net_proj <- st_read(in_network_path[[in_country]]) %>%
+      st_cast("LINESTRING") %>%
+      #Make sure that the geometry column is equally named regardless 
+      #of file format (see https://github.com/r-spatial/sf/issues/719)
+      st_set_geometry('geometry') %>%
+      st_transform(3035)
+    
+    hydromod_country <- in_hydromod[[
+      paste0('hydromod_dt_', in_country, '_qsim')]]
+    
+    net_hydro <- merge(net_proj,
+                       hydromod_country$data_all[
+                         date < as.Date('2021-10-01', '%Y-%m-%d'),  #Link q data
+                         list(mean_qsim = mean(qsim, na.rm=T)), 
+                         by=reach_id],
+                       by.x = 'cat_cor', by.y = 'reach_id')
+    return(net_hydro)
+  }) %>% do.call(rbind, .)
   
-  #Build landscape network
   edges_lsn <- SSNbler::lines_to_lsn(
-    streams = net,
+    streams = net_eu,
     lsn_path = lsn_path,
     check_topology = TRUE,
-    snap_tolerance = 0.05,
+    snap_tolerance = 0.1,
     topo_tolerance = 20,
     overwrite = overwrite
   )
   
-  #Incorporate sites into the landscape network
+  #Incorporate sites into the landscape network --------------------------------
+  sites_eu <- lapply(names(in_sites_path), function(in_country) {
+    st_read(in_sites_path[[in_country]]) %>%
+      st_transform(3035)  
+  }) %>% do.call(rbind, .)
+  
   sites_lsn <- SSNbler::sites_to_lsn(
-    sites = st_read(in_sites_path),
+    sites = sites_eu,
     edges =  edges_lsn,
     lsn_path = lsn_path,
     file_name = "sites",
@@ -2552,12 +2593,15 @@ create_ssn <- function(in_network_path,
   
   #Incorporate barriers into the landscape network
   #Only keep barriers over 2 m and under 100 m snap from network
-  barriers_sf_sub <- read_sf(in_barriers_path) %>%
-    filter((!is.na(Height) & Height > 2) & snap_dist_m < 100)
+  barriers_eu_sub <- lapply(names(in_barriers_path), function(in_country) {
+    st_read(in_barriers_path[[in_country]]) %>%
+      st_transform(3035) %>%
+      filter((!is.na(Height) & Height > 2) & snap_dist_m < 100)
+  }) %>% do.call(rbind, .)
   
-  if (nrow(barriers_sf_sub) > 0) {
+  if (nrow(barriers_eu_sub) > 0) {
     barriers_lsn <- sites_to_lsn(
-      sites = barriers_sf_sub,
+      sites = barriers_eu_sub,
       edges =  edges_lsn,
       lsn_path = lsn_path,
       file_name = "barriers",
@@ -2568,7 +2612,7 @@ create_ssn <- function(in_network_path,
     
     sites_list$barriers <- barriers_lsn
   }
-
+  
   #Calculate upstream distance
   edges_lsn <- updist_edges(
     edges =  edges_lsn,
@@ -2586,9 +2630,9 @@ create_ssn <- function(in_network_path,
   )
   
   #Compute segment Proportional Influence (PI) and Additive Function Values (AFVs)
-  if (min(net$mean_qsim) > 0) {
+  if (min(net_eu$mean_qsim) > 0) {
     edges_lsn$mean_qsim_sqrt <- sqrt(edges_lsn$mean_qsim)
-
+    
     edges_lsn <- afv_edges(
       edges = edges_lsn,
       infl_col = "mean_qsim_sqrt",
@@ -2625,30 +2669,13 @@ create_ssn <- function(in_network_path,
     overwrite = TRUE
   )
   
-  # ggplot() +
-  #   geom_sf(
-  #     data = out_ssn$edges,
-  #     color = "medium blue",
-  #     aes(linewidth = mean_qsim_sqrt)
-  #   ) +
-  #   scale_linewidth(range = c(0.1, 2.5)) +
-  #   geom_sf(
-  #     data = out_ssn$obs,
-  #     size = 1.7,
-  #     aes(color = id)
-  #   ) +
-  #   coord_sf(datum = st_crs(out_ssn$edges)) +
-  #   labs(color = "ID", linewidth = "sqrt(Q average)") +
-  #   theme(
-  #     legend.text = element_text(size = 6),
-  #     legend.title = element_text(size = 8)
-  #   )
-  
   return(list(
     path = out_ssn_path,
     ssn = out_ssn)
   )
 }
+
+
 #------ compute_connectivity ---------------------------------------------------
 # load("data/data_annika\\STconMEGAmatrix_annika\\Final_STconmat_MegaMat.RData")
 # check <- Final_STconmat_MegaMat
@@ -2687,7 +2714,7 @@ merge_alphadat <- function(in_sprich, in_hydrostats_comb) {
 
 
 #------ model_SSN --------------------------------------------------------------
-# in_country <- 'Croatia'
+
 # in_ssn <- tar_read(ssn_list)[[in_country]]$ssn
 # SSN2::ssn_create_distmat(in_ssn, overwrite=TRUE)
 
@@ -2784,8 +2811,171 @@ plot_alpha_cor <- function(in_alphadat_merged, out_dir, facet_wrap=F) {
   ))
 }
 
-###################### OLD #####################################################
+###################### NOT USED #####################################################
+#------ create_ssn_drn ---------------------------------------------------------
+# in_country <- 'Croatia'
+# in_network_path = tar_read(network_ssnready_gpkg_list)[[in_country]]
+# in_sites_path = tar_read(site_snapped_gpkg_list)[[in_country]]
+# in_barriers_path = tar_read(barrier_snapped_gpkg_list)[[in_country]]
+# out_dir = 'results/ssn'
+# out_ssn_name = paste0(in_country, '_drn')
+# overwrite=T
 
+create_ssn_drn <- function(in_network_path,
+                           in_sites_path,
+                           in_barriers_path,
+                           in_hydromod,
+                           out_dir,
+                           out_ssn_name,
+                           overwrite = T) {
+  
+  if (!dir.exists(out_dir)) {
+    dir.create(out_dir)
+  }
+  
+  lsn_path <- file.path(out_dir,
+                        tools::file_path_sans_ext(
+                          sub('[.](?=(shp|gpkg)$)', '_lsn.',
+                              basename(in_network_path), perl=T)
+                        ))
+  
+  #Read input network
+  net <- st_read(in_network_path) %>%
+    st_cast("LINESTRING") %>%
+    #Make sure that the geometry column is equally named regardless 
+    #of file format (see https://github.com/r-spatial/sf/issues/719)
+    st_set_geometry('geometry') %>%
+    merge(in_hydromod$data_all[date < as.Date('2021-10-01', '%Y-%m-%d'),  #Link q data
+                               list(mean_qsim = mean(qsim, na.rm=T)), 
+                               by=reach_id],
+          by.x = 'cat_cor', by.y = 'reach_id') 
+  
+  #Build landscape network
+  edges_lsn <- SSNbler::lines_to_lsn(
+    streams = net,
+    lsn_path = lsn_path,
+    check_topology = TRUE,
+    snap_tolerance = 0.05,
+    topo_tolerance = 20,
+    overwrite = overwrite
+  )
+  
+  #Incorporate sites into the landscape network
+  sites_lsn <- SSNbler::sites_to_lsn(
+    sites = st_read(in_sites_path),
+    edges =  edges_lsn,
+    lsn_path = lsn_path,
+    file_name = "sites",
+    snap_tolerance = 5,
+    save_local = TRUE,
+    overwrite = TRUE
+  )
+  
+  sites_list <- list(sites = sites_lsn)
+  
+  #Incorporate barriers into the landscape network
+  #Only keep barriers over 2 m and under 100 m snap from network
+  barriers_sf_sub <- read_sf(in_barriers_path) %>%
+    filter((!is.na(Height) & Height > 2) & snap_dist_m < 100)
+  
+  if (nrow(barriers_sf_sub) > 0) {
+    barriers_lsn <- sites_to_lsn(
+      sites = barriers_sf_sub,
+      edges =  edges_lsn,
+      lsn_path = lsn_path,
+      file_name = "barriers",
+      snap_tolerance = 5,
+      save_local = TRUE,
+      overwrite = TRUE
+    )
+    
+    sites_list$barriers <- barriers_lsn
+  }
+  
+  #Calculate upstream distance
+  edges_lsn <- updist_edges(
+    edges =  edges_lsn,
+    save_local = TRUE,
+    lsn_path = lsn_path,
+    calc_length = TRUE
+  )
+  
+  sites_list_lsn <- updist_sites(
+    sites = sites_list,
+    edges = edges_lsn,
+    length_col = "Length",
+    save_local = TRUE,
+    lsn_path = lsn_path
+  )
+  
+  #Compute segment Proportional Influence (PI) and Additive Function Values (AFVs)
+  if (min(net$mean_qsim) > 0) {
+    edges_lsn$mean_qsim_sqrt <- sqrt(edges_lsn$mean_qsim)
+    
+    edges_lsn <- afv_edges(
+      edges = edges_lsn,
+      infl_col = "mean_qsim_sqrt",
+      segpi_col = "pi_qsqrt",
+      afv_col = "afv_qsqrt",
+      lsn_path = lsn_path
+    )
+    
+    sites_list_lsn <- afv_sites(
+      sites = sites_list_lsn,
+      edges = edges_lsn,
+      afv_col = "afv_qsqrt",
+      save_local = TRUE,
+      lsn_path = lsn_path
+    )
+    
+  } else {
+    stop("Trying to use mean discharge to compute Additive Function Values (AFVs),
+         but there are 0s in the discharge column.")
+  }
+  
+  
+  #Assemble the SSN
+  out_ssn_path <- paste0(out_dir, out_ssn_name)
+  
+  out_ssn <- ssn_assemble(
+    edges = edges_lsn,
+    lsn_path = lsn_path,
+    obs_sites = sites_list_lsn$sites,
+    ssn_path = out_ssn_path,
+    import = TRUE,
+    check = TRUE,
+    afv_col = "afv_qsqrt",
+    overwrite = TRUE
+  )
+  
+  # ggplot() +
+  #   geom_sf(
+  #     data = out_ssn$edges,
+  #     color = "medium blue",
+  #     aes(linewidth = mean_qsim_sqrt)
+  #   ) +
+  #   scale_linewidth(range = c(0.1, 2.5)) +
+  #   geom_sf(
+  #     data = out_ssn$obs,
+  #     size = 1.7,
+  #     aes(color = id)
+  #   ) +
+  #   coord_sf(datum = st_crs(out_ssn$edges)) +
+  #   labs(color = "ID", linewidth = "sqrt(Q average)") +
+  #   theme(
+  #     legend.text = element_text(size = 6),
+  #     legend.title = element_text(size = 8)
+  #   )
+  
+  return(list(
+    path = out_ssn_path,
+    ssn = out_ssn)
+  )
+}
+
+
+
+###################### OLD #####################################################
 #------ compute_null_model_inner -----------------------------------------------
 compute_null_model_inner <- function(in_dt, 
                                      in_metacols,
