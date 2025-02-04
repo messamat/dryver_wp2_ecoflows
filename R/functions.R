@@ -2700,17 +2700,101 @@ merge_alphadat <- function(in_sprich, in_hydrostats_comb) {
       setDT %>%
       setnames('id', 'site')
     
+    
+    cols_to_keep <- names(in_hydrostats_isflowing)[
+      (!names(in_hydrostats_isflowing) %in% names(in_hydrostats_qsim)) |
+       (names(in_hydrostats_isflowing) %in% c('date','site'))] 
+
     sprich_hydro_drn <- merge(in_sprich[drn==in_country,],
-                          in_hydrostats_isflowing,
+                          in_hydrostats_isflowing[, cols_to_keep, with=F],
                           by=c('date', 'site')) %>%
       merge(in_hydrostats_qsim, by=c('date', 'site'))
-    
+
     return(sprich_hydro_drn)  
   }) %>% rbindlist
   
  return(sprich_hydro)
 }
 
+
+
+#------ cor_heatmap ------------------------------------------------------------
+# alphadat_env_dt <- tar_read(alphadat_merged)
+# 
+# names(alphadat_env_dt)
+# env_dd_melt <- melt(
+#   alphadat_env_dt,
+#   id.vars=stat_cols) %>%
+#   merge(driver_cols_dt,
+#         by='variable') %>%
+#   merge(in_bvdep_inters[!duplicated(INSEE_DEP),
+#                         .(INSEE_DEP, NOM)], 
+#         by='INSEE_DEP')
+# 
+# env_dd_dep_cor <- env_dd_melt[, list(
+#   cor= .SD[!is.na(value), 
+#            cor(ddt_to_bdtopo_ddratio_ceind, value, method='spearman')],
+#   n_bvs = .SD[!is.na(value), .N])
+#   , by=c("INSEE_DEP", "NOM", "description")] %>%
+#   .[n_bvs>10,] #Removing those departments with 10 or less bvs (really only removes those with 5 or less)
+# 
+# env_dd_dep_cormat <- dcast(env_dd_dep_cor, NOM+INSEE_DEP~description,
+#                            value.var='cor')
+# mat_names <-  env_dd_dep_cormat$NOM
+# env_dd_dep_cormat <- as.matrix(env_dd_dep_cormat[, -c('NOM', 'INSEE_DEP')])
+# row.names(env_dd_dep_cormat) <- mat_names
+# 
+# #Heatmap of correlation between drainage density ratio and variables----------
+# colnames(env_dd_dep_cormat) <- 
+#   gsub("gw", "gw",
+#        gsub("surface water", "sw",
+#             gsub("water withdrawals", "ww", colnames(env_dd_dep_cormat))))
+# 
+# max(env_dd_dep_cormat, na.rm=T)
+# min(env_dd_dep_cormat, na.rm=T)
+# 
+# env_dd_dep_cormat_avg_morecl <- env_dd_dep_cormat[env_dd_dep_hclust_avg$order,]
+# #as.data.table(env_dd_dendo_avg_morecl[[1]])[order(ID),order(gclass)],]
+# 
+# class_colors_avg_morecl <- classcol[as.data.table(
+#   env_dd_dendo_avg_morecl[[1]])[order(gclass, ID),gclass]]
+# 
+# env_ddratio_corheatmap_avg_morecl <- 
+#   ggcorrplot(corr=env_dd_dep_cormat_avg_morecl, #method = "circle", 
+#              #hc.order = TRUE, hc.method = 'average',
+#              lab=T, lab_size =3,
+#              digits=1, insig='blank',
+#              outline.color = "white") +
+#   scale_fill_distiller(
+#     name=str_wrap("Correlation coefficient Spearman's rho", 20),
+#     palette='RdBu', 
+#     limits=c(-0.8, 0.81), 
+#     breaks=c(-0.7, -0.5, 0, 0.5, 0.7))  +
+#   coord_flip() +
+#   theme(axis.text.y = ggtext::element_markdown(
+#     colour = class_colors_avg_morecl))
+# 
+# #Plot heatmap of env-dd correlations, clustered
+# env_dd_dep_cormat_ward_morecl <- env_dd_dep_cormat[env_dd_dep_hclust_ward$order,]
+# 
+# class_colors_ward_morecl <- classcol[as.data.table(
+#   env_dd_dendo_ward_morecl[[1]])[order(gclass, ID),gclass]]
+# 
+# 
+# env_ddratio_corheatmap_ward_morecl <- 
+#   ggcorrplot(env_dd_dep_cormat_ward_morecl, #method = "circle", 
+#              #hc.order = TRUE, hc.method = 'average',
+#              lab=T, lab_size =3,
+#              digits=1, insig='blank',
+#              outline.color = "white") +
+#   scale_fill_distiller(
+#     name=str_wrap("Correlation coefficient Spearman's rho", 20),
+#     palette='RdBu', 
+#     limits=c(-0.81, 0.81), 
+#     breaks=c(-0.7, -0.5, 0, 0.5, 0.7))  +
+#   coord_flip() +
+#   theme(axis.text.y = element_text(
+#     colour = class_colors_ward_morecl))
 
 
 #------ model_SSN --------------------------------------------------------------

@@ -380,12 +380,12 @@ analysis_targets <- list(
   tar_target(
     ssn_eu,
     create_ssn_europe(in_network_path = network_ssnready_gpkg_list,
-                 in_sites_path = site_snapped_gpkg_list,
-                 in_barriers_path = barrier_snapped_gpkg_list,
-                 in_hydromod = hydromod_comb,
-                 out_dir = file.path(resdir, 'ssn'),
-                 out_ssn_name = 'ssn_eu',
-                 overwrite = T)
+                      in_sites_path = site_snapped_gpkg_list,
+                      in_barriers_path = barrier_snapped_gpkg_list,
+                      in_hydromod = hydromod_comb,
+                      out_dir = file.path(resdir, 'ssn'),
+                      out_ssn_name = 'ssn_eu',
+                      overwrite = T)
   ),
   
   tar_target(
@@ -405,15 +405,15 @@ analysis_targets <- list(
     merge_alphadat(in_sprich = sprich,
                    in_hydrostats_comb = hydrostats_comb)
   )
-  #,
-  #
-  # tar_target(
-  #   alpha_cor_plots_wrap,
-  #   plot_alpha_cor(alphadat_merged,
-  #                  out_dir = file.path(resdir, 'Null_models'),
-  #                  facet_wrap = TRUE)
-  # )
   # ,
+  # 
+  #   tar_target(
+  #     alpha_cor_plots_wrap,
+  #     plot_alpha_cor(alphadat_merged,
+  #                    out_dir = file.path(resdir, 'Null_models'),
+  #                    facet_wrap = TRUE)
+  #   )
+  #   ,
   # 
   # tar_target(
   #   alpha_cor_plots_all,
