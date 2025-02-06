@@ -16,6 +16,7 @@ setwd(rootdir)
 
 source('R/packages.R')
 source("R/functions.R")
+source("bin/03_diversity_metrics.R") #From https://github.com/LysandreJ/dryver/blob/main/Script/03_diversity_metrics.R
 
 hydromod_present_dir <- file.path('data', 'wp1', 'Results_present_period_final', 'data')
 bio_dir <- file.path('data', 'wp2', '01_WP2 final data')

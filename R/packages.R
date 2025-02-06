@@ -30,6 +30,7 @@ pkg_vec <- list(
   'tibble',
   'tidygraph',
   'tidyterra',
+  'tidytext',
   'vegan',
   'mapview',
   'data.table')

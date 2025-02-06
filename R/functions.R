@@ -437,8 +437,8 @@ compute_hydrostats_q <- function(in_hydromod_dt = hydromod_dt_sites) {
                               align='right'), 
                  by = reach_id]
   
-  #Proportion of days above overall 90th percentile in the past c(10, 30, 60, 90, 120, 180) days
-  in_hydromod_dt[, paste0("uQ10_", rollingstep, "past") := 
+  #Proportion of days over overall 90th percentile in the past c(10, 30, 60, 90, 120, 180) days
+  in_hydromod_dt[, paste0("oQ10_", rollingstep, "past") := 
                    frollapply(Pqsim, n = rollingstep, 
                               FUN = function(x) { #45% faster than using na.omit; 75% faster than uniqueN
                                 length(x[x>0.9])/length(x)
@@ -1084,18 +1084,68 @@ read_biodt <- function(path_list, in_metadata_edna) {
   return(dt_list)
 }
 
-#------ calc_sprich ------------------------------------------------------------
-# in_biodt <- tar_read(bio_dt)[['bac_sedi']]
-# in_metacols <- metacols
+#------ calc_spdiv -------------------------------------------------------------
+in_biodt <- tar_read(bio_dt)[['miv']]
+in_metacols <- metacols
 
-calc_sprich <- function(in_biodt, in_metacols) {
+calc_spdiv <- function(in_biodt, in_metacols) {
   #Get metadata columns (all except species data)
   metacols_sub <- names(in_biodt)[names(in_biodt) %in% in_metacols]
   biodt_melt <- melt(in_biodt, id.vars = metacols_sub)
+  
   #Compute species richness
   biodt_sprich <- biodt_melt[, list(richness = sum(value > 0)), 
                              by=.(site, campaign, organism)] %>%
     .[, mean_richness := mean(richness), by=site]
+  
+  #Compute and partition taxonomic diversity between
+  setorderv(in_biodt, c('country', 'campaign', 'site'))
+  decomp_list <- lapply(unique(in_biodt$country), function(in_country) {
+    print(in_country)
+    biodt_sub <- in_biodt[country == in_country,] 
+    spxp <- as.matrix(biodt_sub[,-metacols_sub, with=F])
+    bio_structure <- data.frame(space = as.factor(biodt_sub$site),
+                                time = as.factor(biodt_sub$campaign))
+    z = rowSums(spxp > 0)
+    decomp <- try(HierAnodiv(spxp = spxp[z>0,], 
+                             structure = bio_structure[z>0,], 
+                             phy = NULL, weight = NULL, check = T, q = 1))
+    metadiv <- decomp[[1]]
+    localdiv <- as.data.table(decomp[[2]]) %>%
+      setnames('nsite', 'ncampaigns')
+    localdiv[, name := unique(biodt_sub$site)]
+    
+    return(list(metadiv, localdiv))
+  })
+
+    
+  return(biodt_sprich)
+}
+
+#------ calc_metadiv -----------------------------------------------------------
+in_biodt <- tar_read(bio_dt)[['bac_sedi']]
+in_metacols <- metacols
+
+calc_spdiv <- function(in_biodt, in_metacols) {
+  #Get metadata columns (all except species data)
+  metacols_sub <- names(in_biodt)[names(in_biodt) %in% in_metacols]
+  biodt_melt <- melt(in_biodt, id.vars = metacols_sub)
+  
+  #Compute species richness
+  biodt_sprich <- biodt_melt[, list(richness = sum(value > 0)), 
+                             by=.(site, campaign, organism)] %>%
+    .[, mean_richness := mean(richness), by=site]
+  
+  #Compute exponential Shannon Index (alpha diversity)
+  vegan::diversity(t(metacom[[tmp]]), MARGIN = 2, index = "shannon")
+  
+  #Compute temporal beta diversity
+  
+  #Compute inverse simpson index
+  vegan::diversity(t(metacom[[tmp]]), MARGIN = 2, index = "invsimpson")
+  
+  #Compute nestedness and turnover
+  
   return(biodt_sprich)
 }
 
@@ -2717,26 +2767,77 @@ merge_alphadat <- function(in_sprich, in_hydrostats_comb) {
 }
 
 
-
 #------ cor_heatmap ------------------------------------------------------------
-# alphadat_env_dt <- tar_read(alphadat_merged)
-# 
-# names(alphadat_env_dt)
-# env_dd_melt <- melt(
-#   alphadat_env_dt,
-#   id.vars=stat_cols) %>%
-#   merge(driver_cols_dt,
-#         by='variable') %>%
-#   merge(in_bvdep_inters[!duplicated(INSEE_DEP),
-#                         .(INSEE_DEP, NOM)], 
-#         by='INSEE_DEP')
-# 
-# env_dd_dep_cor <- env_dd_melt[, list(
-#   cor= .SD[!is.na(value), 
-#            cor(ddt_to_bdtopo_ddratio_ceind, value, method='spearman')],
-#   n_bvs = .SD[!is.na(value), .N])
-#   , by=c("INSEE_DEP", "NOM", "description")] %>%
-#   .[n_bvs>10,] #Removing those departments with 10 or less bvs (really only removes those with 5 or less)
+alphadat_env_dt <- tar_read(alphadat_merged) %>%
+  setDT %>%
+  .[, `:=`(`if_ip_number_and_size_2_axes_+_depth_of_the_pools` = NULL,
+           last_noflowdate = NULL)] %>%
+  .[is.na(noflow_period_dur), noflow_period_dur := 0] %>%
+  .[, avg_bank_slope := rowMeans(.SD), 
+    .SDcols=c('left_river_bank_slope', 'right_river_bank_slope')]
+ 
+names(alphadat_env_dt)
+idcols <- c( 'date', 'site', 'campaign', 'reach_id', 'doy', 'month', 
+             'hy', 'nsim', 'stream_type', 'state_of_flow', 'drn', 
+             'organism', 'running_id','mean_richness', 'richness')
+exclu_cols <- c('qsim', 'longitude', 'latitude', 'noflow_period', 'reach_length',
+                'min_wetted_width', 'left_river_bank_slope', 'right_river_bank_slope')
+predcols <- names(alphadat_env_dt)[!names(alphadat_env_dt) %in% 
+                                     c(idcols, exclu_cols)]
+
+alpha_env_melt <- melt(
+  alphadat_env_dt,
+  id.vars = idcols,
+  measure.vars = predcols
+  ) 
+
+# alpha_env_cor_drn_type <- alpha_env_melt[, list(
+#   cor = .SD[!is.na(value),
+#             cor(richness, value, method='spearman')]),
+#   , by=c('drn', 'variable', 'organism', 'stream_type', 'nsim')] %>%
+#   .[,  list(mean_spr = mean(cor, na.rm=T),
+#             sd_spr = sd(cor, na.rm=T)),
+#     by=c('drn', 'variable', 'organism', 'stream_type')]
+
+#Compute correlation between all predictor variables and species richness
+#by organism and drn, then average across DRNs
+alpha_env_cor_drn <- alpha_env_melt[, list(
+  cor = .SD[!is.na(value),
+            cor(richness, value, method='spearman')]),
+  , by=c('drn', 'variable', 'organism', 'nsim')] %>%
+  .[,  list(mean_spr = mean(cor, na.rm=T), #Average across RF sims
+            sd_spr = sd(cor, na.rm=T)),
+    by=c('drn', 'variable', 'organism')]
+
+alpha_env_cor_avg <- alpha_env_cor_drn[
+  , list(mean_spr = mean(mean_spr, na.rm=T)), 
+  by = c('variable', 'organism')]
+
+ggplot(alpha_env_cor_avg[
+  abs(mean_spr) > 0.2 & 
+    !(organism %in% c('miv_nopools', 'miv_nopools_flying', 
+                      'miv_nopools_nonflying', 'bac_biof')),],
+       aes(x=tidytext::reorder_within(variable, mean_spr, within=organism),
+                                      y=mean_spr)) +
+  geom_bar(aes(fill = mean_spr), stat='identity') +
+  scale_fill_distiller(palette='Spectral', direction=1, 
+                       breaks = seq(-1, 1, 0.1)) +
+  tidytext::scale_x_reordered(name = 'Candidate predictor variable') +
+  scale_y_discrete(name = "Mean Spearman's correlation across DRNs", expand=c(0,0)) +
+  facet_wrap(~organism, scales='free', nrow = 1) +
+  coord_flip() +
+  theme_bw()
+
+
+#Check relationship between alpha richness for each organism and:
+#reach volume, mean discharge, and 
+
+#Model alpha richness for miv based on residuals from regression on reach volume 
+#(reach length x average wetted width), 
+
+
+
+
 # 
 # env_dd_dep_cormat <- dcast(env_dd_dep_cor, NOM+INSEE_DEP~description,
 #                            value.var='cor')
