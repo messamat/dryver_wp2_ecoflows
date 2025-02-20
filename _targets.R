@@ -390,14 +390,28 @@ analysis_targets <- list(
   ),
   
   tar_target(
-    sprich,
-    lapply(bio_dt, function(dt) {
-      calc_sprich(in_biodt=dt,
-                  in_metacols=metacols)
-    }) %>%
-      rbindlist %>%
-      .[, running_id := paste0(site, '_', campaign)] %>%
-      merge(env_dt, by=c('site', 'campaign', 'running_id')) 
+    spdiv_local,
+    lapply(names(bio_dt), function(in_org) {
+      print(in_org)
+      bio_dt[[in_org]][, calc_spdiv(in_biodt = .SD, 
+                                    in_metacols = metacols,
+                                    level = 'local'),
+                       by=country]
+    }) %>% 
+      rbindlist
+  )
+  ,
+  
+  tar_target(
+    spdiv_drn,
+    lapply(names(bio_dt), function(in_org) {
+      print(in_org)
+      bio_dt[[in_org]][, calc_spdiv(in_biodt = .SD, 
+                                    in_metacols = metacols,
+                                    level = 'regional'),
+                       by=country]
+    }) %>% 
+      rbindlist
   )
   ,
   

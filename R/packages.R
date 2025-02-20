@@ -1,4 +1,5 @@
 pkg_vec <- list(
+  'ade4',
   'dbscan',
   'dplyr',
   'ggnewscale',

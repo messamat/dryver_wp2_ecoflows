@@ -200,6 +200,31 @@ zero_lomf <- function(x, first=TRUE) {
     }
   }
 }
+#------ mergDTlist -----------------------------------------
+#Function to merge a list of data.tables (dt), adding a suffix to all columns
+#by dt based on the name of the input data.table
+mergeDTlist <- function(dt_list, by = NULL, all = TRUE, sort = FALSE,
+                        set_suffix=TRUE) {
+  
+  if (set_suffix) {
+    dt_list <-  Map(function(dt_name, dt) {
+      dt_copy <- copy(dt)
+      cols_to_rename <- names(dt)[!(names(dt) %in% by)]
+      setnames(dt_copy,
+               old=cols_to_rename,
+               new=paste(cols_to_rename, dt_name, sep='_'))
+      return(dt_copy)
+    },
+    names(dt_list), dt_list
+    )
+  }
+  
+  Reduce(
+    function(...) {
+      merge(..., by = by, all = all, sort = sort)
+    }, dt_list)
+}
+
 #------ create_sitepoints_raw --------------------------------------------------
 create_sitepoints_raw <- function(in_dt, lon_col, lat_col, out_points_path,
                                   columns_to_include=NULL) {
@@ -1085,68 +1110,123 @@ read_biodt <- function(path_list, in_metadata_edna) {
 }
 
 #------ calc_spdiv -------------------------------------------------------------
-in_biodt <- tar_read(bio_dt)[['miv']]
-in_metacols <- metacols
+# in_country <- 'Croatia'
+# in_biodt <- tar_read(bio_dt)[['dia_biof']][country == in_country,]
+# in_metacols <- metacols
+# level='local'
+# 
+# calc_spdiv(in_biodt, in_metacols, level = 'local')
 
-calc_spdiv <- function(in_biodt, in_metacols) {
-  #Get metadata columns (all except species data)
-  metacols_sub <- names(in_biodt)[names(in_biodt) %in% in_metacols]
-  biodt_melt <- melt(in_biodt, id.vars = metacols_sub)
+#Compute nestedness and turnover based on temporal beta diversity
+#https://www.rdocumentation.org/packages/adespatial/versions/0.3-24/topics/beta.div.comp
+comp_richrepl_inner <- function(dt, spcols, beta_div_coef, quant) {
+  sub_dt <- copy(dt)
+  beta_div_format <- beta_div_coef
+  if (quant) {
+    beta_div_format <- ifelse(beta_div_coef == 'J', 'R', 'BC')
+  }
+  #J: Jaccard, S: SOrense, R: Ruzicka, O: Bray-Curtis
   
-  #Compute species richness
-  biodt_sprich <- biodt_melt[, list(richness = sum(value > 0)), 
-                             by=.(site, campaign, organism)] %>%
-    .[, mean_richness := mean(richness), by=site]
+  repl_rich_list <- adespatial::beta.div.comp(
+    as.matrix(sub_dt[, spcols, with=F]),
+    coef = beta_div_coef, quant = quant)
   
-  #Compute and partition taxonomic diversity between
-  setorderv(in_biodt, c('country', 'campaign', 'site'))
-  decomp_list <- lapply(unique(in_biodt$country), function(in_country) {
-    print(in_country)
-    biodt_sub <- in_biodt[country == in_country,] 
-    spxp <- as.matrix(biodt_sub[,-metacols_sub, with=F])
-    bio_structure <- data.frame(space = as.factor(biodt_sub$site),
-                                time = as.factor(biodt_sub$campaign))
-    z = rowSums(spxp > 0)
-    decomp <- try(HierAnodiv(spxp = spxp[z>0,], 
-                             structure = bio_structure[z>0,], 
-                             phy = NULL, weight = NULL, check = T, q = 1))
-    metadiv <- decomp[[1]]
-    localdiv <- as.data.table(decomp[[2]]) %>%
-      setnames('nsite', 'ncampaigns')
-    localdiv[, name := unique(biodt_sub$site)]
-    
-    return(list(metadiv, localdiv))
-  })
-
-    
-  return(biodt_sprich)
+  out_dt <- sub_dt[2:.N, `:=`(
+    repl_tm1 ={as.matrix(repl_rich_list$repl) %>% #Get replacement compared to t-1; off-diagonal t2 to t1, t3 to t2, etc. 
+        .[row(.)==(col(.)+1)]},
+    rich_tm1 = {as.matrix(repl_rich_list$rich) %>% 
+        .[row(.)==(col(.)+1)]},
+    tm1 = {as.matrix(repl_rich_list$D) %>% 
+        .[row(.)==(col(.)+1)]}
+  )] %>%
+    .[, c('repl_tm1', 'rich_tm1', 'tm1'), with=F] %>%
+    cbind(data.table(t(repl_rich_list$part))) %>%
+    setnames(paste0(beta_div_format , names(.)))
+  
+  out_dt[, campaign :=  sub_dt$campaign]
 }
 
-#------ calc_metadiv -----------------------------------------------------------
-in_biodt <- tar_read(bio_dt)[['bac_sedi']]
-in_metacols <- metacols
-
-calc_spdiv <- function(in_biodt, in_metacols) {
+calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
   #Get metadata columns (all except species data)
   metacols_sub <- names(in_biodt)[names(in_biodt) %in% in_metacols]
-  biodt_melt <- melt(in_biodt, id.vars = metacols_sub)
+  spcols <- names(in_biodt)[!(names(in_biodt) %in% in_metacols)]
   
-  #Compute species richness
-  biodt_sprich <- biodt_melt[, list(richness = sum(value > 0)), 
-                             by=.(site, campaign, organism)] %>%
-    .[, mean_richness := mean(richness), by=site]
+  #Set order
+  setorderv(in_biodt, c('campaign', 'site'))
   
-  #Compute exponential Shannon Index (alpha diversity)
-  vegan::diversity(t(metacom[[tmp]]), MARGIN = 2, index = "shannon")
-  
-  #Compute temporal beta diversity
-  
-  #Compute inverse simpson index
-  vegan::diversity(t(metacom[[tmp]]), MARGIN = 2, index = "invsimpson")
-  
-  #Compute nestedness and turnover
-  
-  return(biodt_sprich)
+  #Compute and partition taxonomic gamma diversity 
+  #between alpha and beta for the overall period, for individual sites
+  #and for the metacom
+  spxp <- as.matrix(in_biodt[,-metacols_sub, with=F])
+  bio_structure <- data.frame(space = as.factor(in_biodt$site),
+                              time = as.factor(in_biodt$campaign))
+  z = rowSums(spxp > 0)
+  decomp <- try(HierAnodiv(spxp = spxp[z>0,], 
+                           structure = bio_structure[z>0,], 
+                           phy = NULL, weight = NULL, check = T, q = 1))
+ 
+  if (level == 'local') {
+    #Compute species richness
+    biodt_div <-in_biodt[, list(richness = rowSums(.SD > 0)
+                    ), by=.(site, campaign, organism), .SDcols = spcols] %>%
+      .[, mean_richness := mean(richness), by=site]
+    
+    #Keep only sites x campaigns with species
+    biodt_copy <- merge(in_biodt, 
+                        biodt_div[richness>0, .(site, campaign)],
+                        by=c('site', 'campaign'),
+                        all.x = F
+    )
+    
+    #Fourth-root transform data
+    biodt_copy[, (spcols) := lapply(.SD, function(x) x^(1/4)), 
+               .SDcols = spcols]
+    
+    # ggplot(biodt_melt, aes(x=(value^(1/4)))) +
+    #   geom_histogram() +
+    #   scale_x_continuous() +
+    #   facet_wrap(~country)
+    # 
+    # ggplot(biodt_melt, aes(x=log10(value+1))) +
+    #   geom_histogram() +
+    #   scale_x_continuous() +
+    #   facet_wrap(~country)
+    
+    #Compute Shannon Index and inverse Simpson (alpha diversity) by site x time step
+    sha_simp <- biodt_copy[, list(
+      campaign = campaign,
+      site = site,
+      shannon = vegan::diversity(as.matrix(.SD), index = "shannon"),
+      invsimpson = vegan::diversity(as.matrix(.SD), index = "invsimpson")
+    ), .SDcols = spcols]
+    
+    #Compute nestedness and turnover based on temporal beta diversity
+    multicampaign_sites <- biodt_copy[, .N, by=site][N>1, site]
+    J_richrepl <- biodt_copy[site %in% multicampaign_sites, 
+                             comp_richrepl_inner(dt = .SD, spcols = spcols,
+                                                 beta_div_coef = 'J', quant=F), 
+                             by=site]
+    R_richrepl <- biodt_copy[site %in% multicampaign_sites,
+                             comp_richrepl_inner(dt = .SD, spcols = spcols,
+                                                 beta_div_coef = 'J', quant=T),
+                             by=site]
+    
+    #Format local diversity decomposition
+    localdiv_decomp <- as.data.table(decomp$tab_by_site) %>%
+      setnames('nsite', 'ncampaigns')
+    localdiv_decomp[, site := unique(biodt_copy$site)]
+    
+    out_dt <- mergeDTlist(
+      list(biodt_div, sha_simp, J_richrepl, R_richrepl), 
+      by=c('site', 'campaign'), all=T, sort = T, set_suffix=F) %>%
+      merge(localdiv_decomp, by='site', all.x=T)
+    
+  } else if (level == 'regional') {
+    out_dt <- t(decomp[[1]]) %>%
+      data.table
+  }
+
+  return(out_dt)
 }
 
 #------ sprich_plot ------------------------------------------------------------
@@ -2768,29 +2848,29 @@ merge_alphadat <- function(in_sprich, in_hydrostats_comb) {
 
 
 #------ cor_heatmap ------------------------------------------------------------
-alphadat_env_dt <- tar_read(alphadat_merged) %>%
-  setDT %>%
-  .[, `:=`(`if_ip_number_and_size_2_axes_+_depth_of_the_pools` = NULL,
-           last_noflowdate = NULL)] %>%
-  .[is.na(noflow_period_dur), noflow_period_dur := 0] %>%
-  .[, avg_bank_slope := rowMeans(.SD), 
-    .SDcols=c('left_river_bank_slope', 'right_river_bank_slope')]
- 
-names(alphadat_env_dt)
-idcols <- c( 'date', 'site', 'campaign', 'reach_id', 'doy', 'month', 
-             'hy', 'nsim', 'stream_type', 'state_of_flow', 'drn', 
-             'organism', 'running_id','mean_richness', 'richness')
-exclu_cols <- c('qsim', 'longitude', 'latitude', 'noflow_period', 'reach_length',
-                'min_wetted_width', 'left_river_bank_slope', 'right_river_bank_slope')
-predcols <- names(alphadat_env_dt)[!names(alphadat_env_dt) %in% 
-                                     c(idcols, exclu_cols)]
-
-alpha_env_melt <- melt(
-  alphadat_env_dt,
-  id.vars = idcols,
-  measure.vars = predcols
-  ) 
-
+# alphadat_env_dt <- tar_read(alphadat_merged) %>%
+#   setDT %>%
+#   .[, `:=`(`if_ip_number_and_size_2_axes_+_depth_of_the_pools` = NULL,
+#            last_noflowdate = NULL)] %>%
+#   .[is.na(noflow_period_dur), noflow_period_dur := 0] %>%
+#   .[, avg_bank_slope := rowMeans(.SD), 
+#     .SDcols=c('left_river_bank_slope', 'right_river_bank_slope')]
+#  
+# names(alphadat_env_dt)
+# idcols <- c( 'date', 'site', 'campaign', 'reach_id', 'doy', 'month', 
+#              'hy', 'nsim', 'stream_type', 'state_of_flow', 'drn', 
+#              'organism', 'running_id','mean_richness', 'richness')
+# exclu_cols <- c('qsim', 'longitude', 'latitude', 'noflow_period', 'reach_length',
+#                 'min_wetted_width', 'left_river_bank_slope', 'right_river_bank_slope')
+# predcols <- names(alphadat_env_dt)[!names(alphadat_env_dt) %in% 
+#                                      c(idcols, exclu_cols)]
+# 
+# alpha_env_melt <- melt(
+#   alphadat_env_dt,
+#   id.vars = idcols,
+#   measure.vars = predcols
+#   ) 
+#
 # alpha_env_cor_drn_type <- alpha_env_melt[, list(
 #   cor = .SD[!is.na(value),
 #             cor(richness, value, method='spearman')]),
@@ -2798,35 +2878,35 @@ alpha_env_melt <- melt(
 #   .[,  list(mean_spr = mean(cor, na.rm=T),
 #             sd_spr = sd(cor, na.rm=T)),
 #     by=c('drn', 'variable', 'organism', 'stream_type')]
-
-#Compute correlation between all predictor variables and species richness
-#by organism and drn, then average across DRNs
-alpha_env_cor_drn <- alpha_env_melt[, list(
-  cor = .SD[!is.na(value),
-            cor(richness, value, method='spearman')]),
-  , by=c('drn', 'variable', 'organism', 'nsim')] %>%
-  .[,  list(mean_spr = mean(cor, na.rm=T), #Average across RF sims
-            sd_spr = sd(cor, na.rm=T)),
-    by=c('drn', 'variable', 'organism')]
-
-alpha_env_cor_avg <- alpha_env_cor_drn[
-  , list(mean_spr = mean(mean_spr, na.rm=T)), 
-  by = c('variable', 'organism')]
-
-ggplot(alpha_env_cor_avg[
-  abs(mean_spr) > 0.2 & 
-    !(organism %in% c('miv_nopools', 'miv_nopools_flying', 
-                      'miv_nopools_nonflying', 'bac_biof')),],
-       aes(x=tidytext::reorder_within(variable, mean_spr, within=organism),
-                                      y=mean_spr)) +
-  geom_bar(aes(fill = mean_spr), stat='identity') +
-  scale_fill_distiller(palette='Spectral', direction=1, 
-                       breaks = seq(-1, 1, 0.1)) +
-  tidytext::scale_x_reordered(name = 'Candidate predictor variable') +
-  scale_y_discrete(name = "Mean Spearman's correlation across DRNs", expand=c(0,0)) +
-  facet_wrap(~organism, scales='free', nrow = 1) +
-  coord_flip() +
-  theme_bw()
+# 
+# #Compute correlation between all predictor variables and species richness
+# #by organism and drn, then average across DRNs
+# alpha_env_cor_drn <- alpha_env_melt[, list(
+#   cor = .SD[!is.na(value),
+#             cor(richness, value, method='spearman')]),
+#   , by=c('drn', 'variable', 'organism', 'nsim')] %>%
+#   .[,  list(mean_spr = mean(cor, na.rm=T), #Average across RF sims
+#             sd_spr = sd(cor, na.rm=T)),
+#     by=c('drn', 'variable', 'organism')]
+# 
+# alpha_env_cor_avg <- alpha_env_cor_drn[
+#   , list(mean_spr = mean(mean_spr, na.rm=T)), 
+#   by = c('variable', 'organism')]
+# 
+# ggplot(alpha_env_cor_avg[
+#   abs(mean_spr) > 0.2 & 
+#     !(organism %in% c('miv_nopools', 'miv_nopools_flying', 
+#                       'miv_nopools_nonflying', 'bac_biof')),],
+#        aes(x=tidytext::reorder_within(variable, mean_spr, within=organism),
+#                                       y=mean_spr)) +
+#   geom_bar(aes(fill = mean_spr), stat='identity') +
+#   scale_fill_distiller(palette='Spectral', direction=1, 
+#                        breaks = seq(-1, 1, 0.1)) +
+#   tidytext::scale_x_reordered(name = 'Candidate predictor variable') +
+#   scale_y_discrete(name = "Mean Spearman's correlation across DRNs", expand=c(0,0)) +
+#   facet_wrap(~organism, scales='free', nrow = 1) +
+#   coord_flip() +
+#   theme_bw()
 
 
 #Check relationship between alpha richness for each organism and:
