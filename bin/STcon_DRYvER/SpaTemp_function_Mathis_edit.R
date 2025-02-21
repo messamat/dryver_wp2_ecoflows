@@ -202,21 +202,27 @@ spat_temp_index_edit <- function(interm_dataset,
     cat("We are at time unit", days, "of", (nsteps-1), "\n")
     # First we define the spatial connections of the matrix
     ### Also known as the rows or columns at which we have to add the values of the connections 
-    spa_connections_bis <- seq(1, numn_nodes)#+((days-1)*numn_nodes)
+    spa_connections_bis <- seq(1, numn_nodes)#+((days-1)*numn_nodes) #SAME
     
     # We obtain the time steps:
     ## time_step_1 is the present
     ## time_step_2 is the following step (the close future)
-    time_step_1_bis <- interm_dataset[days, 2:interm_ncols]
-    time_step_2_bis <- interm_dataset[days+1, 2:interm_ncols]
-    if(weighting_links==T){day_link_weights <- link_weights[days,2:interm_ncols]}
+    time_step_1_bis <- interm_dataset[days, 2:interm_ncols] #SAME
+    time_step_2_bis <- interm_dataset[days+1, 2:interm_ncols] #SAME
+    #if(weighting_links==T){day_link_weights <- link_weights[days,2:interm_ncols]}
     
     #Simple fluvial network_______________________
     #Create an adjacancy matrix for time step 1 whereby:
     #for sites that are wet, get the normal structure (direct connection to sites)
     #for sites that are dry, 0s to all sites
     ST_matrix_bis_netwGraph[time_step_1_bis==1,] <- 
-      as.numeric(as.matrix(Network_stru)[time_step_1_bis==1,])
+      as.matrix(Network_stru)[time_step_1_bis==1,]
+    diag_backup <- diag(ST_matrix_bis_netwGraph)
+    ST_matrix_bis_netwGraph[time_step_1_bis==0,] <- 0
+    diag(ST_matrix_bis_netwGraph) <- diag_backup #####REMARK Mathis: not sure why this is needed
+    #It's equivalent to [-site_step] in 
+    #ST_matrix_netwGraph[spa_connections[site_step],
+    #c(spa_connections[1]:spa_connections[numn_nodes])[-site_step]] <- 0
     
     # FLuvial SPATIAL links ___________________________________________________________________________________________________________________
     ## Here we fill the matrix section corresponding to the time_step based on the river graph based on a dendritic. 
