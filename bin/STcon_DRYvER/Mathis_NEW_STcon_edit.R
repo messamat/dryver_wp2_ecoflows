@@ -8,8 +8,8 @@ library(devtools)
 library(igraph)
 #library(riverconn)
 
-working_directory <- file.path(getwd(), "bin", "STcon_DRYvER")
-setwd(working_directory)
+#working_directory <- file.path(getwd(), "bin", "STcon_DRYvER")
+#setwd(working_directory)
 
 # load functions
 source("functions_flow_intermittence_indicators.R")
@@ -17,6 +17,7 @@ source("functions_flow_intermittence_indicators.R")
 #source("https://raw.github.com/Cunillera-Montcusi/Quantifyinig-SpaTem-connectivity/main/SpaTemp_function.R")
 # You are interested in the "depurated" version of the code
 source("SpaTemp_function_Mathis.R")
+source("SpaTemp_function_Mathis_edit.R")
 
 DryRiverNet <- c("Albarine", "Bukkosdi", "Lepsamaanjoki", "Genal","Butiznica","Velicka")
 
@@ -182,9 +183,9 @@ Network_stru_campaigns_To_Run[[
 
 
 # Here we STCON things! 
-interm_dataset = interm_dataset_campaigns_To_Run
-Sites_coordinates=Sites_coordinates_campaigns_To_Run
-Network_stru = Network_stru_campaigns_To_Run
+interm_dataset = interm_dataset_campaigns_To_Run[[1]]
+Sites_coordinates=Sites_coordinates_campaigns_To_Run[[1]]
+Network_stru = Network_stru_campaigns_To_Run[[1]]
 direction="directed"
 sense= "out"
 weighting=F
@@ -198,9 +199,10 @@ value_T_LINK=1 # Values to links
 value_NO_S_link=0
 value_NO_T_link=0 #
 
-DirNonW <- spat_temp_index(interm_dataset = interm_dataset_campaigns_To_Run,
-                           Sites_coordinates=Sites_coordinates_campaigns_To_Run,
-                           Network_stru = Network_stru_campaigns_To_Run, 
+tictoc::tic()
+DirNonW_original <- spat_temp_index(interm_dataset = interm_dataset_campaigns_To_Run[1],
+                           Sites_coordinates=Sites_coordinates_campaigns_To_Run[1],
+                           Network_stru = Network_stru_campaigns_To_Run[1], 
                            direction="directed", 
                            sense= "out",
                            weighting=F,
@@ -212,12 +214,31 @@ DirNonW <- spat_temp_index(interm_dataset = interm_dataset_campaigns_To_Run,
                            value_S_LINK=1,
                            value_T_LINK=1, # Values to links
                            value_NO_S_link=0,
-                           value_NO_T_link=0, # Values to links
+                           value_NO_T_link=0 # Values to links
                            ) # Last parameters information
+tictoc::toc()
 
+tictoc::tic()
+DirNonW <- spat_temp_index_edit(interm_dataset = interm_dataset_campaigns_To_Run[[1]],
+                           Sites_coordinates=Sites_coordinates_campaigns_To_Run[[1]],
+                           Network_stru = Network_stru_campaigns_To_Run[[1]], 
+                           direction="directed", 
+                           sense= "out",
+                           weighting=F,
+                           dist_matrices = NULL, # Weighting pairs
+                           weighting_links =F,
+                           link_weights = NULL, # Weighting links
+                           legacy_effect = 1, 
+                           legacy_length = 1, # Legacy effects
+                           value_S_LINK=1,
+                           value_T_LINK=1, # Values to links
+                           value_NO_S_link=0,
+                           value_NO_T_link=0 # Values to links
+) # Last parameters information
+tictoc::toc()
 
-
-STcon <- DirNonW$STcon[[1]]/DirNonW$STcon[[2]]
+STcon <- DirNonW$STcon
+#[[1]]/DirNonW$STcon[[2]]
 STcon <- STcon[-is.na(STcon)]
 
 ggplot()+

@@ -153,26 +153,9 @@ spat_temp_index_edit <- function(interm_dataset,
   ####_______________________________________________________________________
   # River network ####
   ####_______________________________________________________________________
-  # River network matrix BUILDING ####
-  ####_______________________________________________________________________
-  pack_check <- search()
-  pack_check_val <- length(which(pack_check=="package:sna"))
-  if(pack_check_val>0) {detach("package:sna", unload = TRUE)}
-  # Below there is the function who builds the MATRIX ponderating SPATIAL lINKS=1 and TEMPORAL LINKS=1
   ST_matrix_rivers <- list()
-  
-  #Parallelization parameters
-  # cores <- detectCores() #Number of cores in computer
-  # cl <- makeCluster(cores[1]-1) #not to overload your computer
-  # registerDoParallel(cl)
-  
   out_Matrix_LIST <- list()
-  pack_check <- search()
-  pack_check_val <- length(which(pack_check=="package:sna"))
-  if(pack_check_val>0){detach("package:sna", unload = TRUE)}
-  #out_Matrix_LIST <- foreach(river=1:length(interm_dataset))%dopar%{
   
-  #for (river in 1:length(interm_dataset)) { #- With this it takes 6'26''
   # We calculate the number of nodes of our network (used along the function)  
   interm_ncols <- ncol(interm_dataset)
   numn_nodes <- interm_ncols - 1
@@ -180,20 +163,11 @@ spat_temp_index_edit <- function(interm_dataset,
   
   if(weighting==TRUE){dist_matr <- dist_matrices}
   
-  
-  ST_matrix <- matrix(nrow = numn_nodes,ncol = numn_nodes*2, data=0)
-  ST_matrix_netwGraph <- matrix(nrow = numn_nodes,ncol = numn_nodes, data=0)
-  
-  ##############################################################################################################################
-  ##############################################################################################################################
-  ##############################################################################################################################
-  ##############################################################################################################################
-  
   # We built the matrix corresponding to the num. of nodes multiplied by the DAYS of HOBOS that we have
   ### This matrix is the "giant" template where we will put all the values.
-  ST_matrix_bis <- matrix(nrow = numn_nodes, ncol = numn_nodes*2, 
+  ST_matrix <- matrix(nrow = numn_nodes, ncol = numn_nodes*2, 
                           data = value_NO_S_link)
-  ST_matrix_bis_netwGraph <- matrix(nrow = numn_nodes, ncol = numn_nodes, 
+  ST_matrix_netwGraph <- matrix(nrow = numn_nodes, ncol = numn_nodes, 
                                     data = value_NO_S_link)
   
   # Once created the template we start to fill it for every day
@@ -202,321 +176,99 @@ spat_temp_index_edit <- function(interm_dataset,
     cat("We are at time unit", days, "of", (nsteps-1), "\n")
     # First we define the spatial connections of the matrix
     ### Also known as the rows or columns at which we have to add the values of the connections 
-    spa_connections_bis <- seq(1, numn_nodes)#+((days-1)*numn_nodes) #SAME
+    spa_connections <- seq(1, numn_nodes)#+((days-1)*numn_nodes) 
     
     # We obtain the time steps:
     ## time_step_1 is the present
     ## time_step_2 is the following step (the close future)
-    time_step_1_bis <- interm_dataset[days, 2:interm_ncols] #SAME
-    time_step_2_bis <- interm_dataset[days+1, 2:interm_ncols] #SAME
-    #if(weighting_links==T){day_link_weights <- link_weights[days,2:interm_ncols]}
+    time_step_1 <- interm_dataset[days, 2:interm_ncols] 
+    time_step_2 <- interm_dataset[days+1, 2:interm_ncols] 
+    if(weighting_links==T){day_link_weights <- link_weights[days,2:interm_ncols]}
     
     #Simple fluvial network_______________________
     #Create an adjacancy matrix for time step 1 whereby:
     #for sites that are wet, get the normal structure (direct connection to sites)
     #for sites that are dry, 0s to all sites
-    ST_matrix_bis_netwGraph[time_step_1_bis==1,] <- 
-      as.matrix(Network_stru)[time_step_1_bis==1,]
-    diag_backup <- diag(ST_matrix_bis_netwGraph)
-    ST_matrix_bis_netwGraph[time_step_1_bis==0,] <- 0
-    diag(ST_matrix_bis_netwGraph) <- diag_backup #####REMARK Mathis: not sure why this is needed
-    #It's equivalent to [-site_step] in 
+    ST_matrix_netwGraph[time_step_1==1,] <- 
+      as.matrix(Network_stru)[time_step_1==1,]
+    diag_backup <- diag(ST_matrix_netwGraph)
+    ST_matrix_netwGraph[time_step_1==0,] <- 0
+    diag(ST_matrix_netwGraph) <- diag_backup #####REMARK Mathis: not sure why this is needed
+    #It's equivalent to [-site_step] in the original code
     #ST_matrix_netwGraph[spa_connections[site_step],
     #c(spa_connections[1]:spa_connections[numn_nodes])[-site_step]] <- 0
     
     # FLuvial SPATIAL links ___________________________________________________________________________________________________________________
     ## Here we fill the matrix section corresponding to the time_step based on the river graph based on a dendritic. 
     # We create the graph
-    a_bis <- igraph::graph_from_adjacency_matrix(ST_matrix_bis_netwGraph, 
+    a <- igraph::graph_from_adjacency_matrix(ST_matrix_netwGraph, 
                                                  mode=direction, 
                                                  diag = FALSE)
-    
-    # # For each path (e.g., from node 1 to node 7) we "check" the length of the shortest path. 
-    # ## check = 0 means that the graph is disconnected.
-    # ## check bigger than 0 means that the graph is connected.
-    
+
     # Compute shortest path distances for all node pairs
-    dist_matrix <- igraph::distances(a_bis, mode = sense)
+    dist_matrix <- igraph::distances(a, mode = sense)
     dist_matrix[is.infinite(dist_matrix)] <- 0
     
     # Convert distances into binary connectivity (1 if connected, 0 if not)
-    All_river_paths_bis <- ifelse(dist_matrix > 0, value_S_LINK, value_NO_S_link)
+    All_river_paths <- ifelse(dist_matrix > 0, value_S_LINK, value_NO_S_link)
     
     #weight the links base on daily information of flow or strength of the link.
     if (weighting_links == TRUE) {
-      All_river_paths_bis <- All_river_paths_bis * as.numeric(day_link_weights)
+      All_river_paths <- All_river_paths * as.numeric(day_link_weights)
     }
     # We weight the sites for the distances between them (a pairwise matrix)
     if (weighting == TRUE) {
-      All_river_paths_bis <- All_river_paths_bis * dist_matr
+      All_river_paths <- All_river_paths * dist_matr
     }
     
-    # We add the "All_river_paths_bis" filled for each node in the "big" matrix specific sites
-    ST_matrix_bis[, spa_connections_bis] <- ST_matrix_bis[, spa_connections_bis] + All_river_paths_bis
+    # We add the "All_river_paths" filled for each node in the "big" matrix specific sites
+    ST_matrix[, spa_connections] <- ST_matrix[, spa_connections] + All_river_paths
     
     # # In the following lines we continue the party towards temporal steps
     # We create the matrix where we will drop the information of the shortest paths.
-    All_river_paths_bis <- matrix(nrow = length(time_step_1_bis),
-                                  ncol = length(time_step_1_bis),
+    All_river_paths <- matrix(nrow = length(time_step_1),
+                                  ncol = length(time_step_1),
                                   data = value_NO_T_link)
     
-    temp_connections_bis <- seq(1 + numn_nodes, 2 * numn_nodes)
+    temp_connections <- seq(1 + numn_nodes, 2 * numn_nodes)
     
     #Calculate temporal changes in one step
-    temp_changes <- time_step_1_bis - time_step_2_bis
+    temp_changes <- time_step_1 - time_step_2
     
     #Determine stable (can be stable 1-1 or 0-0), lost, and gained indices
-    stable_indices_1 <- which(temp_changes == 0 & time_step_1_bis == 1)
-    stable_indices_0 <- which(temp_changes == 0 & time_step_1_bis == 0)
+    stable_indices_1 <- which(temp_changes == 0 & time_step_1 == 1)
+    stable_indices_0 <- which(temp_changes == 0 & time_step_1 == 0)
     lost_indices <- which(temp_changes == 1)
     gained_indices <- which(temp_changes == -1)
     
     #Compute direct spatial links for stable connected nodes (1->1)
-    All_river_paths_bis[stable_indices_1, ] <- (dist_matrix[stable_indices_1, ] > 0) * value_T_LINK
+    All_river_paths[stable_indices_1, ] <- (dist_matrix[stable_indices_1, ] > 0) * value_T_LINK
     
     #Indirect dispersal for lost nodes (1->0) ################ NOT APPLYING THIS ASSUMPTION
-    All_river_paths_bis[lost_indices, ] <- (dist_matrix[lost_indices, ] > 0) * value_T_LINK
+    All_river_paths[lost_indices, ] <- (dist_matrix[lost_indices, ] > 0) * value_T_LINK
     
     #Apply weights 
-    if (weighting_links) {All_river_paths_bis <- All_river_paths_bis * day_link_weights}
-    if (weighting) {All_river_paths_bis <- All_river_paths_bis * dist_matr}
+    if (weighting_links) {All_river_paths <- All_river_paths * day_link_weights}
+    if (weighting) {All_river_paths <- All_river_paths * dist_matr}
     
     #Apply legacy effects and update ST_matrix
     for (leg_eff in seq_len(legacy_length)) {
-      All_river_paths_bis_legacy <- All_river_paths_bis * legacy_effect[leg_eff]
-      ST_matrix_bis[, temp_connections_bis] <- 
-        ST_matrix_bis[, temp_connections_bis] + All_river_paths_bis_legacy
+      All_river_paths_legacy <- All_river_paths * legacy_effect[leg_eff]
+      ST_matrix[, temp_connections] <- 
+        ST_matrix[, temp_connections] + All_river_paths_legacy
       
       #Self-connection for stable connected nodes (diagonal assignment)
       value_T_LINK_modif <- if (weighting_links) value_T_LINK * day_link_weights else value_T_LINK
-      ST_matrix_bis[cbind(spa_connections_bis[stable_indices_1], temp_connections_bis[stable_indices_1])] <- 
-        ST_matrix_bis[cbind(spa_connections_bis[stable_indices_1], temp_connections_bis[stable_indices_1])] + value_T_LINK_modif
+      ST_matrix[cbind(spa_connections[stable_indices_1], 
+                      temp_connections[stable_indices_1])] <- 
+        ST_matrix[cbind(spa_connections[stable_indices_1], 
+                        temp_connections[stable_indices_1])] + value_T_LINK_modif
     }
-    
-    
-    
-    #}# Days closing
-    ##############################################################################################################################
-    ##############################################################################################################################
-    ##############################################################################################################################
-    ##############################################################################################################################
-    
-    # Once created the template we start to fill it for every day
-    ### We fill it for Days (or time)-1 because the last day does not have a "future" from which to extract values. 
-    #for (days in 1:c(length(interm_dataset[,1])-1)) {
-    cat("We are at time unit", days, "of", (length(interm_dataset[,1])-1), "\n")
-    # First we define the spatial connections of the matrix
-    ### Also known as the rows or columns at which we have to add the values of the connections 
-    spa_connections <-seq(1,length(colnames(interm_dataset))-1,1)#+((days-1)*numn_nodes)
-    
-    # We obtain the time steps:
-    ## time_step_1 is the present
-    ## time_step_2 is the following step (the close future)
-    time_step_1 <- interm_dataset[days,2:ncol(interm_dataset)]
-    time_step_2 <- interm_dataset[days+1,2:ncol(interm_dataset)]
-    if(weighting_links==T){day_link_weights <- link_weights[days,2:ncol(interm_dataset)]}
-    
-    #Simple fluvial network_______________________
-    ## This step fills "the diagonal" of each time_step following the direction of the river
-    ## it basically connects the river in a dendritic structure.
-    for (site_step in 1:c(length(time_step_1))) {
-      if(time_step_1[site_step]==1){
-        ST_matrix_netwGraph[spa_connections[site_step],
-                            c(spa_connections[1]:spa_connections[numn_nodes])] <- as.numeric(Network_stru[site_step,])
-      }else{
-        ST_matrix_netwGraph[spa_connections[site_step],
-                            c(spa_connections[1]:spa_connections[numn_nodes])[-site_step]] <- 0
-      }
-    }
-    
-    # FLuvial SPATIAL links ___________________________________________________________________________________________________________________
-    # Now the party begins. 
-    ## Here we fill the matrix section corresponding to the time_step based on the river graph based on a dendritic. 
-    require(igraph)
-    # We create the graph
-    a <- graph.adjacency(ST_matrix_netwGraph[spa_connections[1]:spa_connections[numn_nodes],
-                                             spa_connections[1]:spa_connections[numn_nodes]], 
-                         mode=direction,diag = FALSE)
-    
-    # We create the matrix where we will drop the information of the shortest paths.
-    ## We will fill "1" or "0" according to the shortest paths. 
-    All_river_paths <- matrix(nrow =length(time_step_1),ncol = length(time_step_1),data = value_NO_S_link)
-    #All_river_paths[upper.tri(All_river_paths)] <- value_NO_S_link
-    
-    # For each path (e.g., from node 1 to node 7) we "check" the length of the shortest path. 
-    ## check = 0 means that the graph is disconnected.
-    ## check bigger than 0 means that the graph is connected.
-    for (every_path in 1:c(length(time_step_1))){
-      check <- length(all_shortest_paths(a, every_path, 1:numn_nodes, mode = sense)$res)
-      if (check==0) {
-        site <-0
-      }else{
-        # If bigger than 0. we create a sequence from the path to downstream.
-        neigh <- (c(1:numn_nodes)[-every_path])
-        connect_loc <- all_shortest_paths(a, every_path,neigh, mode = sense)$nrgeo
-        connect_loc[every_path] <- 0
-        site <- which(connect_loc>0)
-      }
-      # We fill the "All_river_paths" with 1 on the connections concerning to each "row" or node.
-      ## Site is the vector with the connections (follwing the river downstream).
-      ## When "0" site does not correspond to any row... so the "1" does not go anywhere. 
-      All_river_paths[every_path,site] <- value_S_LINK
-      # We weight the links base on daily information of flow or strength of the link.
-      if(weighting_links==T){All_river_paths[every_path,] <-  as.numeric(All_river_paths[every_path,]*as.numeric(day_link_weights[every_path]))}
-      # We weight the sites for the distances between them (a pairwise matrix)
-      if(weighting==T){All_river_paths[every_path,] <-  as.numeric(All_river_paths[every_path,]*dist_matr[every_path,])}
-    }
-    
-    # We add the "All_river_paths" filled for each node in the "big" matrix specific sites
-    ST_matrix[spa_connections[1]:spa_connections[numn_nodes],
-              spa_connections[1]:spa_connections[numn_nodes]] <- All_river_paths+ST_matrix[spa_connections[1]:spa_connections[numn_nodes],
-                                                                                           spa_connections[1]:spa_connections[numn_nodes]]
-    
-    # In the following lines we continue the party towards temporal steps
-    for (site_step in 1:length(time_step_1)) {
-      # We created "All_river_paths" for temporal
-      All_river_paths <- matrix(nrow =length(time_step_1),ncol = length(time_step_1),data = value_NO_T_link)
-      
-      # FLuvial TEMPORAL DIRECT links ___________________________________________________________________________________________________________________
-      ## We generate the temporal connectins
-      temp_connections <-seq(1+numn_nodes,length(colnames(interm_dataset))-1+numn_nodes,1)#+((days)*numn_nodes) 
-      
-      ## We then evaluate the difference between the two time steps and therefore we quantify:
-      # - Stable links: 0 (WARNING: stable links can be stable 1-1 or 0-0!)
-      # - Lost links: 1
-      # - Gained links: -1
-      ## - This values 0,1,-1 define what we will do with the links that match such pattern
-      temp_change <- time_step_1[site_step]-time_step_2[site_step]
-      
-      #Stable links (when temp_change=0)
-      ## The mechanics is the same as previously.
-      if(temp_change==0){# Temporal change is constant 
-        if(time_step_1[site_step]==1){# This temporal change implies going from 1 to 1 (so a real stable connected link)
-          # We then do the same as before, check, substitute and add "1" or 0 depending if the connection 
-          # following the river is flow.
-          #for (every_path in 1:length(time_step_1)){
-          check <- length(all_shortest_paths(a, site_step, 1:numn_nodes, mode = sense)$res)
-          if (check==0) {
-            site <-0
-          }else{
-            neigh <- (c(1:numn_nodes)[-site_step])
-            connect_loc <- all_shortest_paths(a, site_step,neigh, mode = sense)$nrgeo
-            connect_loc[site_step] <- 0
-            site <- which(connect_loc>0)
-          }
-          All_river_paths[site_step,site] <- value_T_LINK
-          
-          # We weight the links base on daily information of flow or strength of the link.
-          if(weighting_links==T){All_river_paths[site_step,] <-  as.numeric(All_river_paths[site_step,]*as.numeric(day_link_weights[site_step]))}
-          # We weight
-          if(weighting==T){All_river_paths[site_step,] <-  as.numeric(All_river_paths[site_step,]*dist_matr[site_step,])}
-          
-          for (leg_eff in 1:legacy_length) {
-            All_river_paths_legacy <- All_river_paths[site_step,]*legacy_effect[leg_eff]
-            # TEMPORAL LINKS are filled in the "future" of our current matrix. This means that we are filling the matrix in 
-            # in the diagonal of our "time step" for spatial links but we add the temporal links in the following time step. 
-            # so, we evaluate here the present (time step 1) and the future (time step 2) but we register it as the past of the future (at time step 2)
-            ST_matrix[spa_connections[site_step],
-                      temp_connections[1]:temp_connections[numn_nodes]] <- All_river_paths_legacy+ST_matrix[spa_connections[site_step],
-                                                                                                            temp_connections[1]:temp_connections[numn_nodes]]
-            # Here we add the temporal "link" between "himself". If the link is stable and connected (from 1 to 1), we fill the 
-            # diagonal value accordingly. Therefore, we will be able to evaluate the relationship between "himself". Kind of 
-            # Tot_Num indicator.
-            value_T_LINK_modif <- value_T_LINK
-            if(weighting_links==T){value_T_LINK_modif <- value_T_LINK_modif*as.numeric(day_link_weights[site_step])}
-            ST_matrix[spa_connections[site_step],
-                      temp_connections[site_step]] <- (value_T_LINK_modif*legacy_effect[leg_eff])+ST_matrix[spa_connections[site_step],temp_connections[site_step]]
-          }
-        }else{# Here we check if the temporal change implies going from 0 to 0 (so a stable disconnected link). Then we put 0
-          # We weight the links base on daily information of flow or strength of the link.
-          if(weighting_links==T){All_river_paths[site_step,] <-  as.numeric(All_river_paths[site_step,]*as.numeric(day_link_weights[site_step]))}
-          # We weight
-          if(weighting==T){All_river_paths[site_step,] <-  as.numeric(All_river_paths[site_step,]*dist_matr[site_step,])}
-          for (leg_eff in 1:legacy_length) {
-            All_river_paths_legacy <- All_river_paths[site_step,]*legacy_effect[leg_eff]
-            ST_matrix[spa_connections[site_step],
-                      temp_connections[1]:temp_connections[numn_nodes]] <-All_river_paths_legacy+ST_matrix[spa_connections[site_step],
-                                                                                                           temp_connections[1]:temp_connections[numn_nodes]]
-          }
-        }
-      }
-      
-      #Lost links (when temp_change=1)
-      ## This just needs to be filled with zeros... so no need to use "All_river_paths"
-      if(temp_change==1){
-        # We weight the links base on daily information of flow or strength of the link.
-        if(weighting_links==T){All_river_paths[site_step,] <-  as.numeric(All_river_paths[site_step,]*as.numeric(day_link_weights[site_step]))}
-        # We weight
-        if(weighting==T){All_river_paths[site_step,] <-  as.numeric(All_river_paths[site_step,]*dist_matr[site_step,])}
-        for (leg_eff in 1:legacy_length) {
-          All_river_paths_legacy <- All_river_paths[site_step,]*legacy_effect[leg_eff]
-          ST_matrix[spa_connections[site_step],
-                    temp_connections[1]:temp_connections[numn_nodes]] <- All_river_paths_legacy+ST_matrix[spa_connections[site_step],
-                                                                                                          temp_connections[1]:temp_connections[numn_nodes]]
-        }
-      }
-      #Gained links (when temp_change=-1)
-      ## It is a "gain" but it means that "in the present" (time step 1), the node is still disconnected. So it =0
-      if(temp_change==-1){
-        # We weight the links base on daily information of flow or strength of the link.
-        if(weighting_links==T){All_river_paths[site_step,] <-  as.numeric(All_river_paths[site_step,]*as.numeric(day_link_weights[site_step]))}
-        # We weight
-        if(weighting==T){All_river_paths[site_step,] <- as.numeric(All_river_paths[site_step,]*dist_matr[site_step,])}
-        for (leg_eff in 1:legacy_length) {
-          All_river_paths_legacy <- All_river_paths[site_step,]*legacy_effect[leg_eff]
-          ST_matrix[spa_connections[site_step],
-                    temp_connections[1]:temp_connections[numn_nodes]] <- All_river_paths_legacy+ST_matrix[spa_connections[site_step],
-                                                                                                          temp_connections[1]:temp_connections[numn_nodes]]
-        }
-      }
-      
-      # FLuvial TEMPORAL INDIRECT links ___________________________________________________________________________________________________________________
-      ## Indirect links are those links defined here as the ones that are "lost for the first time" (so temp_change=1).
-      ## When this occurs we asign an "extra" 1 in that particular case. Assuming that when the node dries for the first time
-      ## there is an increase in "dispersal" (downstream directed).
-      ### This only occurs when there is a loss of a previously wet node (from 1 in the present to 0 in the future).
-      if(temp_change==1){
-        #All_river_paths <- matrix(nrow =length(time_step_1),ncol = length(time_step_1),data = 0) 
-        #All_river_paths[upper.tri(All_river_paths)] <- value_NO_T_link
-        check <- length(all_shortest_paths(a, site_step, 1:numn_nodes, mode = sense)$res)
-        if (check==0) {
-          site <-0
-        }else{
-          neigh <- (c(1:numn_nodes)[-site_step])
-          connect_loc <- all_shortest_paths(a, site_step,neigh, mode = sense)$nrgeo
-          connect_loc[site_step] <- 0
-          site <- which(connect_loc>0)
-        }
-        # We fill the sites with the value
-        All_river_paths[site_step,site] <- value_T_LINK
-        # We weight the links base on daily information of flow or strength of the link.
-        if(weighting_links==T){All_river_paths[site_step,] <-  as.numeric(All_river_paths[site_step,]*as.numeric(day_link_weights[site_step]))}
-        # We weight
-        if(weighting==T){All_river_paths[site_step,] <-  as.numeric(All_river_paths[site_step,]*dist_matr[site_step,])}
-        # We pass it to the main matrix
-        for (leg_eff in 1:legacy_length) {
-          All_river_paths_legacy <- All_river_paths[site_step,]*legacy_effect[leg_eff]
-          ST_matrix[spa_connections[site_step],
-                    temp_connections[1]:temp_connections[numn_nodes]] <- All_river_paths_legacy+ST_matrix[spa_connections[site_step],
-                                                                                                          temp_connections[1]:temp_connections[numn_nodes]]
-        }
-        
-      }# End of the if
-      
-    }# Site_step closing
-    print(all(ST_matrix == ST_matrix_bis))
   }# Days closing
-  ##############################################################################################################################
-  ##############################################################################################################################
-  ##############################################################################################################################
-  ##############################################################################################################################
-  
+
   out_Matrix <- list(ST_matrix)
   out_Matrix_LIST <- out_Matrix
-  # Loop for every river entered in the lists
-  
-  #parallel::stopCluster(cl) #Stop parallel computing
-  
+
   # Extracting the results into different lists
   ST_matrix_rivers <- out_Matrix_LIST[[1]]
   
@@ -526,12 +278,7 @@ spat_temp_index_edit <- function(interm_dataset,
   # Find below the lines to calculate the "collapsing" matrix that just sums all the values of all the SPATIOTEMPORAL matrix
   # These pairwise matrix is called the STconmat.   
   ST_matrix_out_out <- list()
-  
-  
-  numn_nodes <- interm_ncols-1
-  temp_connections <-seq(1+numn_nodes,interm_ncols-1+numn_nodes)
-  spa_connections <-seq(1,interm_ncols-1)
-  
+
   # We create the out matrix which match the size of our "simple" matrix num_nodes*num_nodes
   out_out <- matrix(nrow = numn_nodes,ncol = numn_nodes, data = 0)
   
@@ -550,11 +297,6 @@ spat_temp_index_edit <- function(interm_dataset,
   # STcon calculation ####
   ####_______________________________________________________________________
   ST_connectivity_value <- list()
-  
-  # We already know this value
-  numn_nodes <- interm_ncols-1
-  temp_connections <-seq(1+numn_nodes,interm_ncols-1+numn_nodes)
-  spa_connections <-seq(1,interm_ncols-1)
   
   # We create the out matrix which match the size of our "simple" matrix num_nodes*num_nodes
   out_out <- matrix(nrow = numn_nodes,ncol = numn_nodes, data = 0)

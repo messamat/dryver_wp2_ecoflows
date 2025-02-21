@@ -32,7 +32,7 @@
 # temporal patterns. 
 
 # Intermitence_dataset ____________#
-# See below, an example of the type of matrix that must be entered in the function as Inermitence_dataset
+# See below, an example of the type of matrix that must be entered in the function as interm_dataset
 #data.frame(
 #MonitoredDays= c("Day1","Day2","Day3","Day4"), # An identifier for the monitored days from ORDERED from the "oldest" to the "newest"
 #StreamSite1=c(0,1,1,1), # More upstream site water presence record (1= water presence, 0= water absence)
@@ -100,11 +100,11 @@
 
 # WARNING !# WARNING !# WARNING !# WARNING !# WARNING !# WARNING !# WARNING !
 # WARNING !# WARNING !# WARNING !# WARNING !# WARNING !# WARNING !# WARNING !
-# The values of Inermitence_dataset,Sites_coordinates,Network_stru must be entered in a list format, even if only 1 matrix is used. 
+# The values of interm_dataset,Sites_coordinates,Network_stru must be entered in a list format, even if only 1 matrix is used. 
 #This is done in order to allow the possibility to enter several streams in one call and obtain the results according to that.
 # In case of using dist_matrices and link_weights they must also be entered as list(). 
 
-spat_temp_index <- function(Inermitence_dataset, 
+spat_temp_index <- function(interm_dataset, 
                             Sites_coordinates,
                             direction,
                             sense="out",
@@ -118,7 +118,7 @@ spat_temp_index <- function(Inermitence_dataset,
                             value_NO_S_link=0,
                             value_NO_T_link=0,
                             legacy_effect=1,
-                            legacy_lenght=1){
+                            legacy_length=1){
   
   require(gridExtra);require(igraph);require(shp2graph);require(sna,quietly = T,warn.conflicts = F);
   require(tidyverse);require(viridis);require(doParallel);require(ggnetwork)
@@ -131,7 +131,7 @@ spat_temp_index <- function(Inermitence_dataset,
   # We select the corresponding distance matrix
   if(weighting_links==T){
     cat("Your links will be weighted with daily data entered in the 'link_weights'","\n")
-    if(nrow(link_weights[[1]])!=nrow(Inermitence_dataset[[1]]) & ncol(link_weights[[1]])!=ncol(Inermitence_dataset[[1]])){
+    if(nrow(link_weights[[1]])!=nrow(interm_dataset[[1]]) & ncol(link_weights[[1]])!=ncol(interm_dataset[[1]])){
       return(cat("!!!ERROR: Intermitence dataset and link_weights must have the same dimensions!","\n"))}
   }
   if(weighting_links==F){cat("Your links will be normal, as defined in the LINK/NO_LINK","\n")}
@@ -140,27 +140,28 @@ spat_temp_index <- function(Inermitence_dataset,
   if(weighting==T){cat("Your connectivity will be Weighted, connections will be multiplied by 'dist_matrices'","\n")}
   if(weighting==F){cat("Your connectivity will be NON weighted, connections will not be multiplied by any distance matrix","\n")}
   
-  if(legacy_lenght!=length(legacy_effect)){
-    return(cat("!!!ERROR: The length of your legacy effects is", length(legacy_effect), "and your legacy length is", legacy_lenght,"! They must be the same!", "\n"))}
+  if(legacy_length!=length(legacy_effect)){
+    return(cat("!!!ERROR: The length of your legacy effects is", length(legacy_effect), "and your legacy length is", legacy_length,"! They must be the same!", "\n"))}
   
-  if(length(which(c(is.list(Inermitence_dataset),is.list(Sites_coordinates),is.list(Network_stru))==F))>0){
-    return(cat("Your Inermitence_dataset,Sites_coordinates or Network_stru must be list objects", "\n"))}
+  if(length(which(c(is.list(interm_dataset),is.list(Sites_coordinates),is.list(Network_stru))==F))>0){
+    return(cat("Your interm_dataset,Sites_coordinates or Network_stru must be list objects", "\n"))}
   if(weighting==T & is.list(dist_matrices)==F){return(cat("!!!ERROR: Your distance matrix must be a list object"))}
   
   # Simple river network________________####
   # Building river networks based on just directional network.
   Simple_river_network <- list()
   Simple_river_network_maps <- list()
-  for (river in 1:length(Inermitence_dataset)) {
+  for (river in 1:length(interm_dataset)) {
+    print("Building river networks based on just directional network")
     
     if(is.numeric(Sites_coordinates[[river]][,3])==F & is.numeric(Sites_coordinates[[river]][,4])==F){
       return(cat("!!!ERROR: X and Y coordinates must be at columns 3 and 4 of the Sites_coordinates"))}
     
-    ST_matrix_out <- matrix(nrow = ncol(Inermitence_dataset[[river]])-1,ncol = ncol(Inermitence_dataset[[river]])-1, data=0)
-    spa_connections <-seq(1,ncol(Inermitence_dataset[[river]])-1,1)
-    time_step_1 <- rep(1,ncol(Inermitence_dataset[[river]])-1)
+    ST_matrix_out <- matrix(nrow = ncol(interm_dataset[[river]])-1,ncol = ncol(interm_dataset[[river]])-1, data=0)
+    spa_connections <-seq(1,ncol(interm_dataset[[river]])-1,1)
+    time_step_1 <- rep(1,ncol(interm_dataset[[river]])-1)
     
-    for (site_step in 1:c(ncol(Inermitence_dataset[[river]])-1)) {
+    for (site_step in 1:c(ncol(interm_dataset[[river]])-1)) {
       #Simple spatial links _______________________
       if(time_step_1[site_step]==1){
         ST_matrix_out[spa_connections[site_step],which(Network_stru[[river]][site_step,]==1)] <- 1
@@ -188,18 +189,18 @@ spat_temp_index <- function(Inermitence_dataset,
   ST_directed_betweennes_rivers <- list()
   
   #Parallelization parameters
-  cores <- detectCores() #Number of cores in computer
-  cl <- makeCluster(cores[1]-1) #not to overload your computer
-  registerDoParallel(cl)
+  # cores <- detectCores() #Number of cores in computer
+  # cl <- makeCluster(cores[1]-1) #not to overload your computer
+  # registerDoParallel(cl)
   
   out_Matrix_LIST <- list()
   pack_check <- search()
   pack_check_val <- length(which(pack_check=="package:sna"))
   if(pack_check_val>0){detach("package:sna", unload = TRUE)}
-  out_Matrix_LIST <- foreach(river=1:length(Inermitence_dataset))%dopar%{
-  #for (river in 1:length(Inermitence_dataset)) { #- With this it takes 6'26''
+  for (river in 1:length(interm_dataset)) {
+  #for (river in 1:length(interm_dataset)) { #- With this it takes 6'26''
   # We calculate the number of nodes of our network (used along the function)  
-    numn_nodes <- ncol(Inermitence_dataset[[river]])-1
+    numn_nodes <- ncol(interm_dataset[[river]])-1
     
     if(weighting==TRUE){dist_matr <- dist_matrices[[river]]}
     
@@ -208,27 +209,27 @@ spat_temp_index <- function(Inermitence_dataset,
     ST_matrix <- matrix(nrow = numn_nodes,ncol = numn_nodes*2, data=0)
     ST_matrix_netwGraph <- matrix(nrow = numn_nodes,ncol = numn_nodes, data=0)
     
-    ST_Oclosenness_matrix <- matrix(length(Inermitence_dataset[[river]][,1]),
+    ST_Oclosenness_matrix <- matrix(length(interm_dataset[[river]][,1]),
                                     numn_nodes, data=0)
-    ST_Allclosenness_matrix <- matrix(length(Inermitence_dataset[[river]][,1]),
+    ST_Allclosenness_matrix <- matrix(length(interm_dataset[[river]][,1]),
                                       numn_nodes, data=0)
-    ST_betweennes_matrix <- matrix(length(Inermitence_dataset[[river]][,1]),
+    ST_betweennes_matrix <- matrix(length(interm_dataset[[river]][,1]),
                                    numn_nodes, data=0)
     
     # Once created the template we start to fill it for every day
     ### We fill it for Days (or time)-1 because the last day does not have a "future" from which to extract values. 
-    for (days in 1:c(length(Inermitence_dataset[[river]][,1])-1)) {
-      cat("We are at time unit", days, "of", (length(Inermitence_dataset[[river]][,1])-1), "and at river", river,"\n")
+    for (days in 1:c(length(interm_dataset[[river]][,1])-1)) {
+      cat("We are at time unit", days, "of", (length(interm_dataset[[river]][,1])-1), "and at river", river,"\n")
       # First we define the spatial connections of the matrix
       ### Also known as the rows or columns at which we have to add the values of the connections 
-      spa_connections <-seq(1,length(colnames(Inermitence_dataset[[river]]))-1,1)#+((days-1)*numn_nodes)
+      spa_connections <-seq(1,length(colnames(interm_dataset[[river]]))-1,1)#+((days-1)*numn_nodes)
       
       # We obtain the time steps:
       ## time_step_1 is the present
       ## time_step_2 is the following step (the close future)
-      time_step_1 <- Inermitence_dataset[[river]][days,2:ncol(Inermitence_dataset[[river]])]
-      time_step_2 <- Inermitence_dataset[[river]][days+1,2:ncol(Inermitence_dataset[[river]])]
-      if(weighting_links==T){day_link_weights <- link_weights[[river]][days,2:ncol(Inermitence_dataset[[river]])]}
+      time_step_1 <- interm_dataset[[river]][days,2:ncol(interm_dataset[[river]])]
+      time_step_2 <- interm_dataset[[river]][days+1,2:ncol(interm_dataset[[river]])]
+      if(weighting_links==T){day_link_weights <- link_weights[[river]][days,2:ncol(interm_dataset[[river]])]}
       
       #Simple fluvial network_______________________
       ## This step fills "the diagonal" of each time_step following the direction of the river
@@ -293,7 +294,7 @@ spat_temp_index <- function(Inermitence_dataset,
         
         # FLuvial TEMPORAL DIRECT links ___________________________________________________________________________________________________________________
         ## We generate the temporal connectins
-        temp_connections <-seq(1+numn_nodes,length(colnames(Inermitence_dataset[[river]]))-1+numn_nodes,1)#+((days)*numn_nodes) 
+        temp_connections <-seq(1+numn_nodes,length(colnames(interm_dataset[[river]]))-1+numn_nodes,1)#+((days)*numn_nodes) 
         
         ## We then evaluate the difference between the two time steps and therefore we quantify:
         # - Stable links: 0 (WARNING: stable links can be stable 1-1 or 0-0!)
@@ -325,7 +326,7 @@ spat_temp_index <- function(Inermitence_dataset,
             # We weight
             if(weighting==T){All_river_paths[site_step,] <-  as.numeric(All_river_paths[site_step,]*dist_matr[site_step,])}
             
-            for (leg_eff in 1:legacy_lenght) {
+            for (leg_eff in 1:legacy_length) {
               All_river_paths_legacy <- All_river_paths[site_step,]*legacy_effect[leg_eff]
               # TEMPORAL LINKS are filled in the "future" of our current matrix. This means that we are filling the matrix in 
               # in the diagonal of our "time step" for spatial links but we add the temporal links in the following time step. 
@@ -346,7 +347,7 @@ spat_temp_index <- function(Inermitence_dataset,
             if(weighting_links==T){All_river_paths[site_step,] <-  as.numeric(All_river_paths[site_step,]*as.numeric(day_link_weights[site_step]))}
             # We weight
             if(weighting==T){All_river_paths[site_step,] <-  as.numeric(All_river_paths[site_step,]*dist_matr[site_step,])}
-            for (leg_eff in 1:legacy_lenght) {
+            for (leg_eff in 1:legacy_length) {
               All_river_paths_legacy <- All_river_paths[site_step,]*legacy_effect[leg_eff]
               ST_matrix[spa_connections[site_step],
                         temp_connections[1]:temp_connections[numn_nodes]] <-All_river_paths_legacy+ST_matrix[spa_connections[site_step],
@@ -362,7 +363,7 @@ spat_temp_index <- function(Inermitence_dataset,
           if(weighting_links==T){All_river_paths[site_step,] <-  as.numeric(All_river_paths[site_step,]*as.numeric(day_link_weights[site_step]))}
           # We weight
           if(weighting==T){All_river_paths[site_step,] <-  as.numeric(All_river_paths[site_step,]*dist_matr[site_step,])}
-          for (leg_eff in 1:legacy_lenght) {
+          for (leg_eff in 1:legacy_length) {
             All_river_paths_legacy <- All_river_paths[site_step,]*legacy_effect[leg_eff]
             ST_matrix[spa_connections[site_step],
                       temp_connections[1]:temp_connections[numn_nodes]] <- All_river_paths_legacy+ST_matrix[spa_connections[site_step],
@@ -376,7 +377,7 @@ spat_temp_index <- function(Inermitence_dataset,
           if(weighting_links==T){All_river_paths[site_step,] <-  as.numeric(All_river_paths[site_step,]*as.numeric(day_link_weights[site_step]))}
           # We weight
           if(weighting==T){All_river_paths[site_step,] <- as.numeric(All_river_paths[site_step,]*dist_matr[site_step,])}
-          for (leg_eff in 1:legacy_lenght) {
+          for (leg_eff in 1:legacy_length) {
             All_river_paths_legacy <- All_river_paths[site_step,]*legacy_effect[leg_eff]
             ST_matrix[spa_connections[site_step],
                       temp_connections[1]:temp_connections[numn_nodes]] <- All_river_paths_legacy+ST_matrix[spa_connections[site_step],
@@ -408,7 +409,7 @@ spat_temp_index <- function(Inermitence_dataset,
           # We weight
           if(weighting==T){All_river_paths[site_step,] <-  as.numeric(All_river_paths[site_step,]*dist_matr[site_step,])}
           # We pass it to the main matrix
-          for (leg_eff in 1:legacy_lenght) {
+          for (leg_eff in 1:legacy_length) {
             All_river_paths_legacy <- All_river_paths[site_step,]*legacy_effect[leg_eff]
             ST_matrix[spa_connections[site_step],
                       temp_connections[1]:temp_connections[numn_nodes]] <- All_river_paths_legacy+ST_matrix[spa_connections[site_step],
@@ -420,14 +421,17 @@ spat_temp_index <- function(Inermitence_dataset,
       }# Site_step closing
     }# Days closing
     
-    out_Matrix <- list(ST_matrix,ST_Oclosenness_matrix,ST_Allclosenness_matrix,ST_betweennes_matrix)
+    out_Matrix <- list(ST_matrix,
+                       ST_Oclosenness_matrix,
+                       ST_Allclosenness_matrix,
+                       ST_betweennes_matrix)
     out_Matrix_LIST[[river]] <- out_Matrix
   }# Loop for every river entered in the lists
   
-  parallel::stopCluster(cl) #Stop parallel computing
+  #parallel::stopCluster(cl) #Stop parallel computing
   
   # Exctracring the results into different lists
-  for (river in 1:length(Inermitence_dataset)) {ST_matrix_rivers[[river]] <- out_Matrix_LIST[[river]][[1]]}
+  for (river in 1:length(interm_dataset)) {ST_matrix_rivers[[river]] <- out_Matrix_LIST[[river]][[1]]}
   
   ####_______________________________________________________________________
   # STconmat calculaiton ####
@@ -436,10 +440,10 @@ spat_temp_index <- function(Inermitence_dataset,
   # These pairwise matrix is called the STconmat.   
   ST_matrix_out_out <- list()
   
-  for (river in 1:length(Inermitence_dataset)) {
-    numn_nodes <- ncol(Inermitence_dataset[[river]])-1
-    temp_connections <-seq(1+numn_nodes,length(colnames(Inermitence_dataset[[river]]))-1+numn_nodes,1)
-    spa_connections <-seq(1,length(colnames(Inermitence_dataset[[river]]))-1,1)
+  for (river in 1:length(interm_dataset)) {
+    numn_nodes <- ncol(interm_dataset[[river]])-1
+    temp_connections <-seq(1+numn_nodes,length(colnames(interm_dataset[[river]]))-1+numn_nodes,1)
+    spa_connections <-seq(1,length(colnames(interm_dataset[[river]]))-1,1)
     
     # We create the out matrix which match the size of our "simple" matrix num_nodes*num_nodes
     out_out <- matrix(nrow = numn_nodes,ncol = numn_nodes, data = 0)
@@ -448,7 +452,7 @@ spat_temp_index <- function(Inermitence_dataset,
     Temporal_matrix <- ST_matrix_rivers[[river]][,temp_connections]
     
     out_out <- Spatial_matrix+Temporal_matrix
-    out_out <- out_out/c(length(Inermitence_dataset[[river]][,1])-1)
+    out_out <- out_out/c(length(interm_dataset[[river]][,1])-1)
     
     # We save the collapsed matrix
     ST_matrix_out_out[[river]] <- out_out
@@ -459,11 +463,11 @@ spat_temp_index <- function(Inermitence_dataset,
   # STcon calculaiton ####
   ####_______________________________________________________________________
   ST_connectivity_value <- list()
-  for (river in 1:length(Inermitence_dataset)) {
+  for (river in 1:length(interm_dataset)) {
     # We already know this value
-    numn_nodes <- ncol(Inermitence_dataset[[river]])-1
-    temp_connections <-seq(1+numn_nodes,length(colnames(Inermitence_dataset[[river]]))-1+numn_nodes,1)
-    spa_connections <-seq(1,length(colnames(Inermitence_dataset[[river]]))-1,1)
+    numn_nodes <- ncol(interm_dataset[[river]])-1
+    temp_connections <-seq(1+numn_nodes,length(colnames(interm_dataset[[river]]))-1+numn_nodes,1)
+    spa_connections <-seq(1,length(colnames(interm_dataset[[river]]))-1,1)
     
     # We create the out matrix which match the size of our "simple" matrix num_nodes*num_nodes
     out_out <- matrix(nrow = numn_nodes,ncol = numn_nodes, data = 0)
@@ -485,7 +489,7 @@ spat_temp_index <- function(Inermitence_dataset,
     
     spt_conn <-apply(out_out,1,sum)/leng_correct
     # We divide by the number of days so we obtain the "per day" values
-    spt_conn<- spt_conn/c(length(Inermitence_dataset[[river]][,1])-1)
+    spt_conn<- spt_conn/c(length(interm_dataset[[river]][,1])-1)
     
     ST_connectivity_value[[river]] <- spt_conn  
   }

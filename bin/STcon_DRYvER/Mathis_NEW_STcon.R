@@ -173,6 +173,7 @@ Network_stru_Campaings_To_Run[[length(Network_stru_Campaings_To_Run)+1]] <- Netw
 
 
 # Here we STCON things! 
+tictoc::tic()
 DirNonW <- spat_temp_index(Inermitence_dataset = Inermitence_dataset_Campaings_To_Run,
                            Sites_coordinates=Sites_coordinates_Campaings_To_Run,
                            Network_stru = Network_stru_Campaings_To_Run, 
@@ -183,6 +184,7 @@ DirNonW <- spat_temp_index(Inermitence_dataset = Inermitence_dataset_Campaings_T
                            value_S_LINK=1,value_T_LINK=1, # Values to links
                            value_NO_S_link=0,value_NO_T_link=0, # Values to links
                            ) # Last parameters information
+tictoc::toc()
 
 
 STcon <- DirNonW$STcon[[1]]/DirNonW$STcon[[2]]
