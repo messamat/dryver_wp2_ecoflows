@@ -235,6 +235,7 @@ spat_temp_index <- function(interm_dataset,
       ## This step fills "the diagonal" of each time_step following the direction of the river
       ## it basically connects the river in a dendritic structure.
       for (site_step in 1:c(length(time_step_1))) {
+        #print(site_step)
         if(time_step_1[site_step]==1){
           ST_matrix_netwGraph[spa_connections[site_step],
                               c(spa_connections[1]:spa_connections[numn_nodes])] <- as.numeric(Network_stru[[river]][site_step,])

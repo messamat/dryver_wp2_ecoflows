@@ -28,7 +28,7 @@ get_results_file_present <- function(catchment)
 {
   directory <- paste0("data/",catchment,"/Results_present_period/")
   files <- list.files(directory)
-  files <- files[-which(files == "readme.txt")]
+  files <- files[!(files == "readme.txt")]
   if (length(files) == 1)
   {
     paste0(directory,files)

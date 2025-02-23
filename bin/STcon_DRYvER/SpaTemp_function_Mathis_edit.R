@@ -123,8 +123,8 @@ spat_temp_index_edit <- function(interm_dataset,
                                  legacy_effect=1,
                                  legacy_length=1){
   
-  require(gridExtra);require(igraph);require(shp2graph);require(sna,quietly = T,warn.conflicts = F);
-  require(tidyverse);require(viridis);require(doParallel);require(ggnetwork)
+  require(igraph);#require(shp2graph);#require(sna,quietly = T,warn.conflicts = F);
+  require(tidyverse);
   
   if(direction=="directed"){
     cat("Your river will be considered as a directed graph","\n")}
@@ -148,7 +148,7 @@ spat_temp_index_edit <- function(interm_dataset,
   
   if(length(which(c(is.list(interm_dataset),is.list(Sites_coordinates),is.list(Network_stru))==F))>0){
     return(cat("Your interm_dataset,Sites_coordinates or Network_stru must be list objects", "\n"))}
-  if(weighting==T & is.list(dist_matrices)==F){return(cat("!!!ERROR: Your distance matrix must be a list object"))}
+  if(weighting==T & is.matrix(dist_matrices)==F){return(cat("!!!ERROR: Your distance matrix must be a list object"))}
   
   ####_______________________________________________________________________
   # River network ####
