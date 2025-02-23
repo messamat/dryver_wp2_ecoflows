@@ -108,7 +108,6 @@
 # In case of using dist_matrices and link_weights they must also be entered as list(). 
 
 spat_temp_index_edit <- function(interm_dataset, 
-                                 Sites_coordinates,
                                  direction,
                                  sense="out",
                                  weighting=FALSE,
@@ -144,8 +143,8 @@ spat_temp_index_edit <- function(interm_dataset,
   if(legacy_length!=length(legacy_effect)){
     return(cat("!!!ERROR: The length of your legacy effects is", length(legacy_effect), "and your legacy length is", legacy_length,"! They must be the same!", "\n"))}
   
-  if(length(which(c(is.list(interm_dataset),is.list(Sites_coordinates),is.list(Network_stru))==F))>0){
-    return(cat("Your interm_dataset,Sites_coordinates or Network_stru must be list objects", "\n"))}
+  # if(length(which(c(is.list(interm_dataset) ,is.list(Network_stru))==F))>0){
+  #   return(cat("Your interm_dataset,Sites_coordinates or Network_stru must be list objects", "\n"))}
   if(weighting==T & is.matrix(dist_matrices)==F){return(cat("!!!ERROR: Your distance matrix must be a list object"))}
   
   ####_______________________________________________________________________
@@ -160,25 +159,24 @@ spat_temp_index_edit <- function(interm_dataset,
   
   # We built the matrix corresponding to the num. of nodes multiplied by the DAYS of HOBOS that we have
   ### This matrix is the "giant" template where we will put all the values.
-  ST_matrix <- matrix(nrow = numn_nodes, ncol = numn_nodes*2, 
+  ST_matrix_raw <- matrix(nrow = numn_nodes, ncol = numn_nodes*2, 
                       data = value_no_s_link)
-  ST_matrix_netwGraph <- matrix(nrow = numn_nodes, ncol = numn_nodes, 
+  ST_matrix_netwGraph_raw <- matrix(nrow = numn_nodes, ncol = numn_nodes, 
                                 data = 0)
+  # First we define the spatial connections of the matrix
+  ### Also known as the rows or columns at which we have to add the values of the connections 
+  spa_connections <- seq_len(numn_nodes)
+  temp_connections <- spa_connections + numn_nodes
   
-  # Once created the template we start to fill it for every day
-  ### We fill it for Days (or time)-1 because the last day does not have a "future" from which to extract values. 
-  for (days in 1:(nsteps-1)) {
-    cat("We are at time unit", days, "of", (nsteps-1), "\n")
-    # First we define the spatial connections of the matrix
-    ### Also known as the rows or columns at which we have to add the values of the connections 
-    spa_connections <- seq(1, numn_nodes)#+((days-1)*numn_nodes) 
+  spa_temp_index_daily <- function(ST_matrix, ST_matrix_netwGraph, day) {
+    #print(ST_matrix[1,])
     
     # We obtain the time steps:
     ## time_step_1 is the present
     ## time_step_2 is the following step (the close future)
-    time_step_1 <- interm_dataset[days, 2:interm_ncols] 
-    time_step_2 <- interm_dataset[days+1, 2:interm_ncols] 
-    if(weighting_links==T){day_link_weights <- link_weights[days,2:interm_ncols]}
+    time_step_1 <- interm_dataset[day, 2:interm_ncols] 
+    time_step_2 <- interm_dataset[day+1, 2:interm_ncols] 
+    if(weighting_links==T){day_link_weights <- link_weights[day,2:interm_ncols]}
     
     #Simple fluvial network_____________________________________________________
     #Create an adjacancy matrix for time step 1 whereby:
@@ -202,7 +200,8 @@ spat_temp_index_edit <- function(interm_dataset,
                                              diag = FALSE)
     
     # Compute shortest path distances for all node pairs
-    dist_matrix_day <- igraph::distances(a, mode = sense)
+    dist_matrix_day <- igraph::distances(a, mode = sense,
+                                         algorithm = "unweighted")
     dist_matrix_day[is.infinite(dist_matrix_day)] <- 0
     
     # Convert distances into binary connectivity (1 if connected, 0 if not)
@@ -226,11 +225,9 @@ spat_temp_index_edit <- function(interm_dataset,
                               ncol = length(time_step_1),
                               data = value_no_t_link)
     
-    temp_connections <- seq(1 + numn_nodes, 2 * numn_nodes)
-    
     #Calculate temporal changes in one step
     temp_changes <- time_step_1 - time_step_2
-    
+
     #Determine stable (can be stable 1-1 or 0-0), lost, and gained indices
     stable_indices_1 <- which(temp_changes == 0 & time_step_1 == 1)
     stable_indices_0 <- which(temp_changes == 0 & time_step_1 == 0)
@@ -249,7 +246,7 @@ spat_temp_index_edit <- function(interm_dataset,
         ifelse(dist_matrix_day[lost_indices, ] > 0, 
                value_t_link, value_no_t_link)
     }
-
+    
     #Apply weights 
     if (weighting_links) {All_river_paths <- All_river_paths * day_link_weights}
     if (weighting) {All_river_paths <- All_river_paths * dist_matr}
@@ -269,7 +266,19 @@ spat_temp_index_edit <- function(interm_dataset,
         ST_matrix[cbind(spa_connections[stable_indices_1], 
                         temp_connections[stable_indices_1])] + value_t_link_modif
     }
-  }# Days closing
+    
+    return(ST_matrix)
+  }
+  
+  # Once created the template we start to fill it for every day
+  ### We fill it for Days (or time)-1 because the last day does not have a "future" from which to extract values. 
+  #for (day in 1:(nsteps-1)) {
+  ST_matrix <- lapply(1:(nsteps-1), function(day) {
+    cat("We are at time unit", day, "of", (nsteps-1), "\n")
+    spa_temp_index_daily(ST_matrix = ST_matrix_raw, 
+                         ST_matrix_netwGraph = ST_matrix_netwGraph_raw,
+                         day)
+  }) %>% reduce(`+`) 
   
   ####_______________________________________________________________________
   # STconmat calculation ####
@@ -286,33 +295,12 @@ spat_temp_index_edit <- function(interm_dataset,
   # the fact that uperstream nodes will have higher values when considering its 
   #number of connections. As I am "node 1" my number of connections will be higher
   #than "node 10". IF WE FOLLOW THE RIVER DOWNSTREAM!
-  benchmark_results <- microbenchmark::microbenchmark(
-    for_loop = {
-      leng_correct <- c()
-      aa <- graph_from_adjacency_matrix(as.matrix(Network_stru), mode = "directed")
-      for (neigg in 1:numn_nodes) {
-        neighbour<- all_shortest_paths(aa, from = neigg, to = c(1:numn_nodes)[-neigg],mode = sense)$nrgeo
-        neighbour[neigg] <- 0
-        leng_correct[neigg] <- length(which(neighbour>0))
-      }
-    }, 
-    neighb = {leng_correct_try <- (neighborhood_size(aa, order=1000, mode = sense)-1)}, 
-    dist_mat = {leng_correct_try2 <- rowSums(!is.infinite(distances(aa, mode=sense)))-1},
-    bfs_sapply = {leng_correct_bfs <- sapply(1:numn_nodes, function(node) {
-      length(bfs(aa, root = node, unreachable = FALSE, mode = sense)$order) - 1
-    })},
-    
-    times = 10  # Run each method 10 times
-  )
-
-  all(leng_correct_try == leng_correct)
-  all(leng_correct_try2 == leng_correct)
-  all(leng_correct_bfs == leng_correct)
-  
-  spt_conn <-apply(ST_matrix_collapsed, 1, sum)/leng_correct
+  aa <- graph_from_adjacency_matrix(as.matrix(Network_stru), mode = "directed")
+  leng_correct <- neighborhood_size(aa, order=numn_nodes, mode = sense)-1 #to remove the connection to itself
+  spt_conn <- apply(ST_matrix_collapsed, 1, sum)/leng_correct
   # We divide by the number of days so we obtain the "per day" values
   spt_conn<- spt_conn/c(nsteps-1)
-
+  
   # OUTPUTS _______________________####
   Main_output <- list(Main_matrix = ST_matrix,
                       STconmat = ST_matrix_collapsed_standardized,
