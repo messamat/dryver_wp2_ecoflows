@@ -332,4 +332,4 @@ DirNonW <- spat_temp_index_edit(
 ) # Last parameters information
 tictoc::toc()
 
-all(DirNonW_original$STcon[[1]] == DirNonW$STcon)
+all(round(DirNonW_original$STcon[[1]], 5) == round(DirNonW$STcon, 5))

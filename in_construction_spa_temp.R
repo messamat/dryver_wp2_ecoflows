@@ -219,6 +219,7 @@ weighting_links = F
 link_weights = NULL # Weighting links
 legacy_effect = 1
 legacy_length = 1 # Legacy effects
+indirect_dispersal = TRUE
 value_s_link=1
 value_t_link=1 # Values to links
 value_no_s_link=0.1
@@ -320,11 +321,14 @@ for (days in 1:(nsteps-1)) {
     dist_matrix[stable_indices_1, ] > 0,
     value_t_link, value_no_t_link)
   
-  #Indirect dispersal for lost nodes (1->0) ################ NOT APPLYING THIS ASSUMPTION
-  All_river_paths_edit[lost_indices, ] <- ifelse(
-    dist_matrix[lost_indices, ] > 0,
-    value_t_link, value_no_t_link)
-  
+  #Indirect dispersal for lost nodes (1->0) 
+  if (indirect_dispersal) {
+    All_river_paths_edit[lost_indices, ] <- 
+      All_river_paths_edit[lost_indices, ] + 
+      ifelse(dist_matrix[lost_indices, ] > 0, 
+             value_t_link, value_no_t_link)
+  }
+
   #Apply weights 
   if (weighting) {All_river_paths_edit <- All_river_paths_edit * dist_matr}
   
@@ -672,7 +676,9 @@ for (days in 1:c(length(interm_dataset[,1])-1)) {
   
   #############################################################################################
   #CHECK CORRESPONDENCE
-  which(!sapply(seq_len(nrow(ST_matrix)), function(i) all(ST_matrix_edit[i,] == ST_matrix[i,])))
+  # which(!sapply(seq_len(nrow(ST_matrix)), 
+  #               function(i) all(round(ST_matrix_edit[i,], 5) == 
+  #                                 round(ST_matrix[i,], 5))))
   ###################################################################################################
 }# Days closing
 

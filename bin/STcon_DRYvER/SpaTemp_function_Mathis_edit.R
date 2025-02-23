@@ -116,6 +116,7 @@ spat_temp_index_edit <- function(interm_dataset,
                                  weighting_links=FALSE,
                                  link_weights,
                                  Network_stru,
+                                 indirect_dispersal=TRUE,
                                  value_s_link=1,
                                  value_t_link=1,
                                  value_no_s_link=0,
@@ -242,14 +243,18 @@ spat_temp_index_edit <- function(interm_dataset,
     gained_indices <- which(temp_changes == -1)
     
     #Compute direct spatial links for stable connected nodes (1->1)
-    All_river_paths_edit[stable_indices_1, ] <- ifelse(
-      dist_matrix[stable_indices_1, ] > 0,
+    All_river_paths[stable_indices_1, ] <- ifelse(
+      dist_matrix_day[stable_indices_1, ] > 0,
       value_t_link, value_no_t_link)
     
     #Indirect dispersal for lost nodes (1->0) ################ NOT APPLYING THIS ASSUMPTION
-    All_river_paths_edit[lost_indices, ] <- ifelse(
-      dist_matrix[lost_indices, ] > 0,
-      value_t_link, value_no_t_link)
+    if (indirect_dispersal) {
+      All_river_paths[lost_indices, ] <- 
+        All_river_paths[lost_indices, ] + 
+        ifelse(dist_matrix_day[lost_indices, ] > 0, 
+               value_t_link, value_no_t_link)
+    }
+
     
     #Apply weights 
     if (weighting_links) {All_river_paths <- All_river_paths * day_link_weights}
