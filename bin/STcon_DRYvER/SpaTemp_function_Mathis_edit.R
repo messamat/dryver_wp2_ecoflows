@@ -82,11 +82,11 @@
 
 # LINKS / NO-LINKS  ____________#
 # value_LINK is the value attributed for each "effective link", which is a connection between two nodes (a line)
-# - value_S_LINK for spatial links
-# - value_T_LINK for temporal links
+# - value_s_link for spatial links
+# - value_t_link for temporal links
 # value_NO_link is the value for each "effective disconnection", which is a "connection"void" between (a white space)
-# - value_NO_S_LINK for spatial links
-# - value_NO_T_LINK for temporal links
+# - value_NO_s_link for spatial links
+# - value_NO_t_link for temporal links
 
 # Legacy effects & Legacy length  ____________#
 #Legacy effects are a way to quantify spatiotemporal connectivity during several
@@ -116,10 +116,10 @@ spat_temp_index_edit <- function(interm_dataset,
                                  weighting_links=FALSE,
                                  link_weights,
                                  Network_stru,
-                                 value_S_LINK=1,
-                                 value_T_LINK=1,
-                                 value_NO_S_link=0,
-                                 value_NO_T_link=0,
+                                 value_s_link=1,
+                                 value_t_link=1,
+                                 value_no_s_link=0,
+                                 value_no_t_link=0,
                                  legacy_effect=1,
                                  legacy_length=1){
   
@@ -166,9 +166,9 @@ spat_temp_index_edit <- function(interm_dataset,
   # We built the matrix corresponding to the num. of nodes multiplied by the DAYS of HOBOS that we have
   ### This matrix is the "giant" template where we will put all the values.
   ST_matrix <- matrix(nrow = numn_nodes, ncol = numn_nodes*2, 
-                          data = value_NO_S_link)
+                      data = value_no_s_link)
   ST_matrix_netwGraph <- matrix(nrow = numn_nodes, ncol = numn_nodes, 
-                                    data = value_NO_S_link)
+                                data = 0)
   
   # Once created the template we start to fill it for every day
   ### We fill it for Days (or time)-1 because the last day does not have a "future" from which to extract values. 
@@ -202,15 +202,15 @@ spat_temp_index_edit <- function(interm_dataset,
     ## Here we fill the matrix section corresponding to the time_step based on the river graph based on a dendritic. 
     # We create the graph
     a <- igraph::graph_from_adjacency_matrix(ST_matrix_netwGraph, 
-                                                 mode=direction, 
-                                                 diag = FALSE)
-
+                                             mode=direction, 
+                                             diag = FALSE)
+    
     # Compute shortest path distances for all node pairs
-    dist_matrix <- igraph::distances(a, mode = sense)
-    dist_matrix[is.infinite(dist_matrix)] <- 0
+    dist_matrix_day <- igraph::distances(a, mode = sense)
+    dist_matrix_day[is.infinite(dist_matrix_day)] <- 0
     
     # Convert distances into binary connectivity (1 if connected, 0 if not)
-    All_river_paths <- ifelse(dist_matrix > 0, value_S_LINK, value_NO_S_link)
+    All_river_paths <- ifelse(dist_matrix_day > 0, value_s_link, value_no_s_link)
     
     #weight the links base on daily information of flow or strength of the link.
     if (weighting_links == TRUE) {
@@ -224,11 +224,11 @@ spat_temp_index_edit <- function(interm_dataset,
     # We add the "All_river_paths" filled for each node in the "big" matrix specific sites
     ST_matrix[, spa_connections] <- ST_matrix[, spa_connections] + All_river_paths
     
-    # # In the following lines we continue the party towards temporal steps
+    # # In the following lines we continue the party towards temporal steps-------
     # We create the matrix where we will drop the information of the shortest paths.
     All_river_paths <- matrix(nrow = length(time_step_1),
-                                  ncol = length(time_step_1),
-                                  data = value_NO_T_link)
+                              ncol = length(time_step_1),
+                              data = value_no_t_link)
     
     temp_connections <- seq(1 + numn_nodes, 2 * numn_nodes)
     
@@ -242,10 +242,14 @@ spat_temp_index_edit <- function(interm_dataset,
     gained_indices <- which(temp_changes == -1)
     
     #Compute direct spatial links for stable connected nodes (1->1)
-    All_river_paths[stable_indices_1, ] <- (dist_matrix[stable_indices_1, ] > 0) * value_T_LINK
+    All_river_paths_edit[stable_indices_1, ] <- ifelse(
+      dist_matrix[stable_indices_1, ] > 0,
+      value_t_link, value_no_t_link)
     
     #Indirect dispersal for lost nodes (1->0) ################ NOT APPLYING THIS ASSUMPTION
-    All_river_paths[lost_indices, ] <- (dist_matrix[lost_indices, ] > 0) * value_T_LINK
+    All_river_paths_edit[lost_indices, ] <- ifelse(
+      dist_matrix[lost_indices, ] > 0,
+      value_t_link, value_no_t_link)
     
     #Apply weights 
     if (weighting_links) {All_river_paths <- All_river_paths * day_link_weights}
@@ -258,17 +262,19 @@ spat_temp_index_edit <- function(interm_dataset,
         ST_matrix[, temp_connections] + All_river_paths_legacy
       
       #Self-connection for stable connected nodes (diagonal assignment)
-      value_T_LINK_modif <- if (weighting_links) value_T_LINK * day_link_weights else value_T_LINK
+      value_t_link_modif <- if (weighting_links) { 
+        value_t_link * day_link_weights 
+      } else value_t_link
       ST_matrix[cbind(spa_connections[stable_indices_1], 
                       temp_connections[stable_indices_1])] <- 
         ST_matrix[cbind(spa_connections[stable_indices_1], 
-                        temp_connections[stable_indices_1])] + value_T_LINK_modif
+                        temp_connections[stable_indices_1])] + value_t_link_modif
     }
   }# Days closing
-
+  
   out_Matrix <- list(ST_matrix)
   out_Matrix_LIST <- out_Matrix
-
+  
   # Extracting the results into different lists
   ST_matrix_rivers <- out_Matrix_LIST[[1]]
   
@@ -278,9 +284,9 @@ spat_temp_index_edit <- function(interm_dataset,
   # Find below the lines to calculate the "collapsing" matrix that just sums all the values of all the SPATIOTEMPORAL matrix
   # These pairwise matrix is called the STconmat.   
   ST_matrix_out_out <- list()
-
+  
   # We create the out matrix which match the size of our "simple" matrix num_nodes*num_nodes
-  out_out <- matrix(nrow = numn_nodes,ncol = numn_nodes, data = 0)
+  #out_out <- matrix(nrow = numn_nodes,ncol = numn_nodes, data = value_no_s_link)
   
   Spatial_matrix <-  ST_matrix_rivers[,spa_connections]
   Temporal_matrix <- ST_matrix_rivers[,temp_connections]
@@ -299,7 +305,7 @@ spat_temp_index_edit <- function(interm_dataset,
   ST_connectivity_value <- list()
   
   # We create the out matrix which match the size of our "simple" matrix num_nodes*num_nodes
-  out_out <- matrix(nrow = numn_nodes,ncol = numn_nodes, data = 0)
+  #out_out <- matrix(nrow = numn_nodes,ncol = numn_nodes, data = 0)
   
   Spatial_matrix <-  ST_matrix_rivers[,spa_connections]
   Temporal_matrix <- ST_matrix_rivers[,temp_connections]
