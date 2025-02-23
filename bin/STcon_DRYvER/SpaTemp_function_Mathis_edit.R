@@ -226,7 +226,25 @@ spat_temp_index_edit <- function(interm_dataset,
                               data = value_no_t_link)
     
     #Calculate temporal changes in one step
-    temp_changes <- time_step_1 - time_step_2
+    dt <- as.data.table(interm_dataset[, 2:interm_ncols]) 
+    matrix_df <- as.matrix(interm_dataset[, 2:interm_ncols])
+    
+    check <- microbenchmark::microbenchmark(option1 = {
+      time_step_1 <- interm_dataset[day, 2:interm_ncols] 
+      time_step_2 <- interm_dataset[day+1, 2:interm_ncols] 
+      temp_changes <- time_step_1 - time_step_2
+    },
+    option2 = {
+      time_step_1 <- dt[day, ]
+      time_step_2 <- dt[day+1, ]
+      result <- dt[day, ] - dt[day+1, ]
+    },
+    option3 = {
+      time_step_1 <- matrix_df[day, ]
+      time_step_2 <- matrix_df[day+1, ]
+      result <- matrix_df[day, ] - matrix_df[day+1, ]
+    }
+    )
 
     #Determine stable (can be stable 1-1 or 0-0), lost, and gained indices
     stable_indices_1 <- which(temp_changes == 0 & time_step_1 == 1)
