@@ -170,7 +170,7 @@ if (length(cat_to_correct)>0) {
 
 # You cut the length of the intermittence according to whatever you want. In this case we select the first 
 # 30 days of the whole dataset. 
-FL_intermitence_cut <- as.data.frame(interm_dataset[1:30,]) # THIS IS THE MOST IMPORTANT POINT! WHERE YOU DEFINE THE TIME WINDOW!!!! 
+FL_intermitence_cut <- as.data.frame(interm_dataset[1:10,]) # THIS IS THE MOST IMPORTANT POINT! WHERE YOU DEFINE THE TIME WINDOW!!!! 
 
 # We built the matrix of the network structure for the STcon, which is the "base" on which connectivity will be assessed. 
 Network_structure <- as.data.frame(as.matrix(as_adjacency_matrix(igr1)))
@@ -213,10 +213,10 @@ weighting_links =F
 link_weights = NULL # Weighting links
 legacy_effect = 1
 legacy_length = 1 # Legacy effects
-value_S_LINK=1
-value_T_LINK=1 # Values to links
-value_NO_S_link=0
-value_NO_T_link=0 #
+value_s_link=1
+value_t_link=1 # Values to links
+value_no_s_link=0
+value_no_t_link=0 #
 
 tictoc::tic()
 DirNonW_original <- spat_temp_index(
@@ -231,10 +231,10 @@ DirNonW_original <- spat_temp_index(
   link_weights = NULL, # Weighting links
   legacy_effect = 1, 
   legacy_length = 1, # Legacy effects
-  value_S_LINK=1,
-  value_T_LINK=1, # Values to links
-  value_NO_S_link=0,
-  value_NO_T_link=0 # Values to links
+  value_s_link=1,
+  value_t_link=1, # Values to links
+  value_no_s_link=0,
+  value_no_t_link=0 # Values to links
 ) # Last parameters information
 tictoc::toc()
 
@@ -251,10 +251,10 @@ DirNonW <- spat_temp_index_edit(
   link_weights = NULL, # Weighting links
   legacy_effect = 1, 
   legacy_length = 1, # Legacy effects
-  value_S_LINK=1,
-  value_T_LINK=1, # Values to links
-  value_NO_S_link=0,
-  value_NO_T_link=0 # Values to links
+  value_s_link=1,
+  value_t_link=1, # Values to links
+  value_no_s_link=0,
+  value_no_t_link=0 # Values to links
 ) # Last parameters information
 tictoc::toc()
 
@@ -289,28 +289,28 @@ DirNonW_original <- spat_temp_index(
   link_weights = NULL, # Weighting links
   legacy_effect = 1, 
   legacy_length = 1, # Legacy effects
-  value_S_LINK=1,
-  value_T_LINK=1, # Values to links
-  value_NO_S_link=0.1,
-  value_NO_T_link=0.1 # Values to links
+  value_s_link=1,
+  value_t_link=1, # Values to links
+  value_no_s_link=0.1,
+  value_no_t_link=0.1 # Values to links
 ) # Last parameters information
 tictoc::toc()
 
-interm_dataset = interm_dataset_campaigns_To_Run[1]
-Sites_coordinates=Sites_coordinates_campaigns_To_Run[1]
-Network_stru = Network_stru_campaigns_To_Run[1]
+interm_dataset = interm_dataset_campaigns_To_Run[[1]]
+Sites_coordinates=Sites_coordinates_campaigns_To_Run[[1]]
+Network_stru = Network_stru_campaigns_To_Run[[1]]
 direction="directed"
 sense= "out"
-weighting=F
+weighting=T
 dist_matrices = river_dist_mat # Weighting pairs
-weighting_links = T
+weighting_links = F
 link_weights = NULL # Weighting links
 legacy_effect = 1
 legacy_length = 1 # Legacy effects
-value_S_LINK=1
-value_T_LINK=1 # Values to links
-value_NO_S_link=0.1
-value_NO_T_link=0.1 #
+value_s_link=1
+value_t_link=1 # Values to links
+value_no_s_link=0.1
+value_no_t_link=0.1 #
 
 tictoc::tic()
 DirNonW <- spat_temp_index_edit(
@@ -325,12 +325,11 @@ DirNonW <- spat_temp_index_edit(
   link_weights = NULL, # Weighting links
   legacy_effect = 1, 
   legacy_length = 1, # Legacy effects
-  value_S_LINK=1,
-  value_T_LINK=1, # Values to links
-  value_NO_S_link=0.1,
-  value_NO_T_link=0.1 # Values to links
+  value_s_link=1,
+  value_t_link=1, # Values to links
+  value_no_s_link=0.1,
+  value_no_t_link=0.1 # Values to links
 ) # Last parameters information
 tictoc::toc()
 
 all(DirNonW_original$STcon[[1]] == DirNonW$STcon)
-
