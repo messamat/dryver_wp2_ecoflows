@@ -124,9 +124,6 @@ spat_temp_index_edit <- function(interm_dataset,
                                  legacy_effect=1,
                                  legacy_length=1){
   
-  require(igraph);#require(shp2graph);#require(sna,quietly = T,warn.conflicts = F);
-  require(tidyverse);
-  
   if(direction=="directed"){
     cat("Your river will be considered as a directed graph","\n")}
   if(direction=="undirected"){
@@ -154,9 +151,6 @@ spat_temp_index_edit <- function(interm_dataset,
   ####_______________________________________________________________________
   # River network ####
   ####_______________________________________________________________________
-  ST_matrix_rivers <- list()
-  out_Matrix_LIST <- list()
-  
   # We calculate the number of nodes of our network (used along the function)  
   interm_ncols <- ncol(interm_dataset)
   numn_nodes <- interm_ncols - 1
@@ -186,7 +180,7 @@ spat_temp_index_edit <- function(interm_dataset,
     time_step_2 <- interm_dataset[days+1, 2:interm_ncols] 
     if(weighting_links==T){day_link_weights <- link_weights[days,2:interm_ncols]}
     
-    #Simple fluvial network_______________________
+    #Simple fluvial network_____________________________________________________
     #Create an adjacancy matrix for time step 1 whereby:
     #for sites that are wet, get the normal structure (direct connection to sites)
     #for sites that are dry, 0s to all sites
@@ -199,8 +193,9 @@ spat_temp_index_edit <- function(interm_dataset,
     #ST_matrix_netwGraph[spa_connections[site_step],
     #c(spa_connections[1]:spa_connections[numn_nodes])[-site_step]] <- 0
     
-    # FLuvial SPATIAL links ___________________________________________________________________________________________________________________
-    ## Here we fill the matrix section corresponding to the time_step based on the river graph based on a dendritic. 
+    # FLuvial SPATIAL links ____________________________________________________
+    ## Here we fill the matrix section corresponding to the time_step based 
+    # on the river graph based on a dendritic. 
     # We create the graph
     a <- igraph::graph_from_adjacency_matrix(ST_matrix_netwGraph, 
                                              mode=direction, 
@@ -255,7 +250,6 @@ spat_temp_index_edit <- function(interm_dataset,
                value_t_link, value_no_t_link)
     }
 
-    
     #Apply weights 
     if (weighting_links) {All_river_paths <- All_river_paths * day_link_weights}
     if (weighting) {All_river_paths <- All_river_paths * dist_matr}
@@ -277,78 +271,52 @@ spat_temp_index_edit <- function(interm_dataset,
     }
   }# Days closing
   
-  out_Matrix <- list(ST_matrix)
-  out_Matrix_LIST <- out_Matrix
-  
-  # Extracting the results into different lists
-  ST_matrix_rivers <- out_Matrix_LIST[[1]]
-  
   ####_______________________________________________________________________
   # STconmat calculation ####
   ####_______________________________________________________________________
   # Find below the lines to calculate the "collapsing" matrix that just sums all the values of all the SPATIOTEMPORAL matrix
   # These pairwise matrix is called the STconmat.   
-  ST_matrix_out_out <- list()
-  
-  # We create the out matrix which match the size of our "simple" matrix num_nodes*num_nodes
-  #out_out <- matrix(nrow = numn_nodes,ncol = numn_nodes, data = value_no_s_link)
-  
-  Spatial_matrix <-  ST_matrix_rivers[,spa_connections]
-  Temporal_matrix <- ST_matrix_rivers[,temp_connections]
-  
-  out_out <- Spatial_matrix+Temporal_matrix
-  out_out <- out_out/c(nsteps-1)
-  
-  # We save the collapsed matrix
-  ST_matrix_out_out <- out_out
-  
-  ####_______________________________________________________________________
+  ST_matrix_collapsed <- ST_matrix[,spa_connections] + ST_matrix[,temp_connections]
+  ST_matrix_collapsed_standardized <- ST_matrix_collapsed/c(nsteps-1)
   
   ####_______________________________________________________________________
   # STcon calculation ####
   ####_______________________________________________________________________
-  ST_connectivity_value <- list()
+  # "leng_correct" is a reverse vector (from big to small) used to correct
+  # the fact that uperstream nodes will have higher values when considering its 
+  #number of connections. As I am "node 1" my number of connections will be higher
+  #than "node 10". IF WE FOLLOW THE RIVER DOWNSTREAM!
+  benchmark_results <- microbenchmark::microbenchmark(
+    for_loop = {
+      leng_correct <- c()
+      aa <- graph_from_adjacency_matrix(as.matrix(Network_stru), mode = "directed")
+      for (neigg in 1:numn_nodes) {
+        neighbour<- all_shortest_paths(aa, from = neigg, to = c(1:numn_nodes)[-neigg],mode = sense)$nrgeo
+        neighbour[neigg] <- 0
+        leng_correct[neigg] <- length(which(neighbour>0))
+      }
+    }, 
+    neighb = {leng_correct_try <- (neighborhood_size(aa, order=1000, mode = sense)-1)}, 
+    dist_mat = {leng_correct_try2 <- rowSums(!is.infinite(distances(aa, mode=sense)))-1},
+    bfs_sapply = {leng_correct_bfs <- sapply(1:numn_nodes, function(node) {
+      length(bfs(aa, root = node, unreachable = FALSE, mode = sense)$order) - 1
+    })},
+    
+    times = 10  # Run each method 10 times
+  )
+
+  all(leng_correct_try == leng_correct)
+  all(leng_correct_try2 == leng_correct)
+  all(leng_correct_bfs == leng_correct)
   
-  # We create the out matrix which match the size of our "simple" matrix num_nodes*num_nodes
-  #out_out <- matrix(nrow = numn_nodes,ncol = numn_nodes, data = 0)
-  
-  Spatial_matrix <-  ST_matrix_rivers[,spa_connections]
-  Temporal_matrix <- ST_matrix_rivers[,temp_connections]
-  
-  out_out <- Spatial_matrix+Temporal_matrix
-  
-  # "leng_correct" is a reverse vector (from big to small) used to correct the fact that uperstream nodes will have higher values when 
-  # considering its number of connections. As I am "node 1" my number of connections will be higher tan "node 10". IF WE FOLLOW THE RIVER DOWNSTREAM!
-  leng_correct <- c()
-  aa <- graph_from_adjacency_matrix(as.matrix(Network_stru),mode = "directed")
-  for (neigg in 1:numn_nodes) {
-    neighbour<- all_shortest_paths(aa, from = neigg, to = c(1:numn_nodes)[-neigg],mode = sense)$nrgeo
-    neighbour[neigg] <- 0
-    leng_correct[neigg] <- length(which(neighbour>0))
-  }
-  
-  spt_conn <-apply(out_out,1,sum)/leng_correct
+  spt_conn <-apply(ST_matrix_collapsed, 1, sum)/leng_correct
   # We divide by the number of days so we obtain the "per day" values
   spt_conn<- spt_conn/c(nsteps-1)
-  
-  ST_connectivity_value <- spt_conn  
-  
-  
-  
-  ####_______________________________________________________________________
+
   # OUTPUTS _______________________####
-  # Global matrix
-  NonW_ST_matrix_rivers <- ST_matrix_rivers
-  
-  # Spatiotemporal matrix 
-  NonW_ST_matrix_out_out <- ST_matrix_out_out
-  
-  # Spatiotemporal connectivity 
-  NonW_ST_connectivity_value <- ST_connectivity_value
-  
-  Main_output <- list(Main_matrix=  NonW_ST_matrix_rivers,
-                      STconmat=    NonW_ST_matrix_out_out,
-                      STcon=       NonW_ST_connectivity_value
+  Main_output <- list(Main_matrix = ST_matrix,
+                      STconmat = ST_matrix_collapsed_standardized,
+                      STcon = spt_conn  
   )
   
   return(Main_output)
