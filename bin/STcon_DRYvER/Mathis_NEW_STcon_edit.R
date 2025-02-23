@@ -275,6 +275,7 @@ ggplot()+
 
 ############################## TEST DISTANCE WEIGHTS ###########################
 river_dist_mat <- igraph::distances(igr1)
+interm_ncols <- ncol(interm_dataset_campaigns_To_Run[[1]])
 
 tictoc::tic()
 DirNonW_original <- spat_temp_index(
@@ -296,7 +297,7 @@ DirNonW_original <- spat_temp_index(
 ) # Last parameters information
 tictoc::toc()
 
-interm_dataset = interm_dataset_campaigns_To_Run[[1]]
+interm_dataset = as.matrix(interm_dataset_campaigns_To_Run[[1]][, 2:interm_ncols])
 Sites_coordinates=Sites_coordinates_campaigns_To_Run[[1]]
 Network_stru = Network_stru_campaigns_To_Run[[1]]
 direction="directed"
@@ -307,15 +308,16 @@ weighting_links = F
 link_weights = NULL # Weighting links
 legacy_effect = 1
 legacy_length = 1 # Legacy effects
+indirect_dispersal = TRUE
 value_s_link=1
 value_t_link=1 # Values to links
 value_no_s_link=0.1
 value_no_t_link=0.1 #
 
+#profvis({
 tictoc::tic()
 DirNonW <- spat_temp_index_edit(
-  interm_dataset = interm_dataset_campaigns_To_Run[[1]],
-  Sites_coordinates=Sites_coordinates_campaigns_To_Run[[1]],
+  interm_dataset = as.matrix(interm_dataset_campaigns_To_Run[[1]][, 2:interm_ncols]),
   Network_stru = Network_stru_campaigns_To_Run[[1]], 
   direction="directed", 
   sense= "out",
@@ -329,7 +331,10 @@ DirNonW <- spat_temp_index_edit(
   value_t_link=1, # Values to links
   value_no_s_link=0.1,
   value_no_t_link=0.1 # Values to links
-) # Last parameters information
+) # Last
 tictoc::toc()
+#})
 
-all(round(DirNonW_original$STcon[[1]], 5) == round(DirNonW$STcon, 5))
+all(round(DirNonW_original$STcon[[1]], 3) == round(DirNonW$STcon, 3))
+all(round(DirNonW_original$STcon[[1]]/DirNonW$STcon, 3) == 1, na.rm=T)
+

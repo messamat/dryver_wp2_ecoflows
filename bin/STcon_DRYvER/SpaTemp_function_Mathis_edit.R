@@ -151,9 +151,8 @@ spat_temp_index_edit <- function(interm_dataset,
   # River network ####
   ####_______________________________________________________________________
   # We calculate the number of nodes of our network (used along the function)  
-  interm_ncols <- ncol(interm_dataset)
-  numn_nodes <- interm_ncols - 1
-  nsteps <- length(interm_dataset[,1])
+  numn_nodes <- ncol(interm_dataset)
+  nsteps <- nrow(interm_dataset)
   
   if(weighting==TRUE){dist_matr <- dist_matrices}
   
@@ -174,8 +173,8 @@ spat_temp_index_edit <- function(interm_dataset,
     # We obtain the time steps:
     ## time_step_1 is the present
     ## time_step_2 is the following step (the close future)
-    time_step_1 <- interm_dataset[day, 2:interm_ncols] 
-    time_step_2 <- interm_dataset[day+1, 2:interm_ncols] 
+    time_step_1 <- interm_dataset[day, ]
+    time_step_2 <- interm_dataset[day+1,]
     if(weighting_links==T){day_link_weights <- link_weights[day,2:interm_ncols]}
     
     #Simple fluvial network_____________________________________________________
@@ -226,25 +225,7 @@ spat_temp_index_edit <- function(interm_dataset,
                               data = value_no_t_link)
     
     #Calculate temporal changes in one step
-    dt <- as.data.table(interm_dataset[, 2:interm_ncols]) 
-    matrix_df <- as.matrix(interm_dataset[, 2:interm_ncols])
-    
-    check <- microbenchmark::microbenchmark(option1 = {
-      time_step_1 <- interm_dataset[day, 2:interm_ncols] 
-      time_step_2 <- interm_dataset[day+1, 2:interm_ncols] 
-      temp_changes <- time_step_1 - time_step_2
-    },
-    option2 = {
-      time_step_1 <- dt[day, ]
-      time_step_2 <- dt[day+1, ]
-      result <- dt[day, ] - dt[day+1, ]
-    },
-    option3 = {
-      time_step_1 <- matrix_df[day, ]
-      time_step_2 <- matrix_df[day+1, ]
-      result <- matrix_df[day, ] - matrix_df[day+1, ]
-    }
-    )
+    temp_changes <- time_step_1 - time_step_2
 
     #Determine stable (can be stable 1-1 or 0-0), lost, and gained indices
     stable_indices_1 <- which(temp_changes == 0 & time_step_1 == 1)
