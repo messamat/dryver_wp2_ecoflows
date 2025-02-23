@@ -181,8 +181,7 @@ spat_temp_index_edit <- function(interm_dataset,
     #Create an adjacancy matrix for time step 1 whereby:
     #for sites that are wet, get the normal structure (direct connection to sites)
     #for sites that are dry, 0s to all sites
-    ST_matrix_netwGraph[time_step_1==1,] <- 
-      as.matrix(Network_stru)[time_step_1==1,]
+    ST_matrix_netwGraph[time_step_1==1,] <- Network_stru[time_step_1==1,]
     diag_backup <- diag(ST_matrix_netwGraph)
     ST_matrix_netwGraph[time_step_1==0,] <- 0
     diag(ST_matrix_netwGraph) <- diag_backup #####REMARK Mathis: not sure why this is needed
@@ -204,7 +203,7 @@ spat_temp_index_edit <- function(interm_dataset,
     dist_matrix_day[is.infinite(dist_matrix_day)] <- 0
     
     # Convert distances into binary connectivity (1 if connected, 0 if not)
-    All_river_paths <- ifelse(dist_matrix_day > 0, value_s_link, value_no_s_link)
+    All_river_paths <- fifelse(dist_matrix_day > 0, value_s_link, value_no_s_link)
     
     #weight the links base on daily information of flow or strength of the link.
     if (weighting_links == TRUE) {
@@ -234,7 +233,7 @@ spat_temp_index_edit <- function(interm_dataset,
     gained_indices <- which(temp_changes == -1)
     
     #Compute direct spatial links for stable connected nodes (1->1)
-    All_river_paths[stable_indices_1, ] <- ifelse(
+    All_river_paths[stable_indices_1, ] <- fifelse(
       dist_matrix_day[stable_indices_1, ] > 0,
       value_t_link, value_no_t_link)
     
@@ -242,7 +241,7 @@ spat_temp_index_edit <- function(interm_dataset,
     if (indirect_dispersal) {
       All_river_paths[lost_indices, ] <- 
         All_river_paths[lost_indices, ] + 
-        ifelse(dist_matrix_day[lost_indices, ] > 0, 
+        fifelse(dist_matrix_day[lost_indices, ] > 0, 
                value_t_link, value_no_t_link)
     }
     
@@ -294,7 +293,7 @@ spat_temp_index_edit <- function(interm_dataset,
   # the fact that uperstream nodes will have higher values when considering its 
   #number of connections. As I am "node 1" my number of connections will be higher
   #than "node 10". IF WE FOLLOW THE RIVER DOWNSTREAM!
-  aa <- graph_from_adjacency_matrix(as.matrix(Network_stru), mode = "directed")
+  aa <- graph_from_adjacency_matrix(Network_stru, mode = "directed")
   leng_correct <- neighborhood_size(aa, order=numn_nodes, mode = sense)-1 #to remove the connection to itself
   spt_conn <- apply(ST_matrix_collapsed, 1, sum)/leng_correct
   # We divide by the number of days so we obtain the "per day" values

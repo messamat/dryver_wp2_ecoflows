@@ -170,7 +170,7 @@ if (length(cat_to_correct)>0) {
 
 # You cut the length of the intermittence according to whatever you want. In this case we select the first 
 # 30 days of the whole dataset. 
-FL_intermitence_cut <- as.data.frame(interm_dataset[1:10,]) # THIS IS THE MOST IMPORTANT POINT! WHERE YOU DEFINE THE TIME WINDOW!!!! 
+FL_intermitence_cut <- as.data.frame(interm_dataset[1:50,]) # THIS IS THE MOST IMPORTANT POINT! WHERE YOU DEFINE THE TIME WINDOW!!!! 
 
 # We built the matrix of the network structure for the STcon, which is the "base" on which connectivity will be assessed. 
 Network_structure <- as.data.frame(as.matrix(as_adjacency_matrix(igr1)))
@@ -199,6 +199,9 @@ Sites_coordinates_campaigns_To_Run[[
   length(Sites_coordinates_campaigns_To_Run)+1]] <- nodes_df
 Network_stru_campaigns_To_Run[[
   length(Network_stru_campaigns_To_Run)+1]] <- Network_structure
+
+interm_ncols <- ncol(interm_dataset_campaigns_To_Run[[1]])
+
 
 ############################## TEST NO WEIGHTS #################################
 # Here we STCON things! 
@@ -240,12 +243,11 @@ tictoc::toc()
 
 tictoc::tic()
 DirNonW <- spat_temp_index_edit(
-  interm_dataset = interm_dataset_campaigns_To_Run[[1]],
-  Sites_coordinates=Sites_coordinates_campaigns_To_Run[[1]],
-  Network_stru = Network_stru_campaigns_To_Run[[1]], 
+  interm_dataset = as.matrix(interm_dataset_campaigns_To_Run[[1]][, 2:interm_ncols]),
+  Network_stru = as.matrix(Network_stru_campaigns_To_Run[[1]]), 
   direction="directed", 
   sense= "out",
-  weighting=F,
+  weighting= F,
   dist_matrices = NULL, # Weighting pairs
   weighting_links =F,
   link_weights = NULL, # Weighting links
@@ -255,7 +257,7 @@ DirNonW <- spat_temp_index_edit(
   value_t_link=1, # Values to links
   value_no_s_link=0,
   value_no_t_link=0 # Values to links
-) # Last parameters information
+) ast parameters information
 tictoc::toc()
 
 all(DirNonW_original$STcon[[1]] == DirNonW$STcon)
@@ -275,7 +277,6 @@ ggplot()+
 
 ############################## TEST DISTANCE WEIGHTS ###########################
 river_dist_mat <- igraph::distances(igr1)
-interm_ncols <- ncol(interm_dataset_campaigns_To_Run[[1]])
 
 tictoc::tic()
 DirNonW_original <- spat_temp_index(
@@ -297,28 +298,28 @@ DirNonW_original <- spat_temp_index(
 ) # Last parameters information
 tictoc::toc()
 
-interm_dataset = as.matrix(interm_dataset_campaigns_To_Run[[1]][, 2:interm_ncols])
-Sites_coordinates=Sites_coordinates_campaigns_To_Run[[1]]
-Network_stru = Network_stru_campaigns_To_Run[[1]]
-direction="directed"
-sense= "out"
-weighting=T
-dist_matrices = river_dist_mat # Weighting pairs
-weighting_links = F
-link_weights = NULL # Weighting links
-legacy_effect = 1
-legacy_length = 1 # Legacy effects
-indirect_dispersal = TRUE
-value_s_link=1
-value_t_link=1 # Values to links
-value_no_s_link=0.1
-value_no_t_link=0.1 #
+# interm_dataset = as.matrix(interm_dataset_campaigns_To_Run[[1]][, 2:interm_ncols])
+# Sites_coordinates=Sites_coordinates_campaigns_To_Run[[1]]
+# Network_stru = Network_stru_campaigns_To_Run[[1]]
+# direction="directed"
+# sense= "out"
+# weighting=T
+# dist_matrices = river_dist_mat # Weighting pairs
+# weighting_links = F
+# link_weights = NULL # Weighting links
+# legacy_effect = 1
+# legacy_length = 1 # Legacy effects
+# indirect_dispersal = TRUE
+# value_s_link=1
+# value_t_link=1 # Values to links
+# value_no_s_link=0.1
+# value_no_t_link=0.1 #
 
 #profvis({
 tictoc::tic()
 DirNonW <- spat_temp_index_edit(
   interm_dataset = as.matrix(interm_dataset_campaigns_To_Run[[1]][, 2:interm_ncols]),
-  Network_stru = Network_stru_campaigns_To_Run[[1]], 
+  Network_stru = as.matrix(Network_stru_campaigns_To_Run[[1]]), 
   direction="directed", 
   sense= "out",
   weighting= T,
@@ -333,7 +334,8 @@ DirNonW <- spat_temp_index_edit(
   value_no_t_link=0.1 # Values to links
 ) # Last
 tictoc::toc()
-#})
+#   interval = 0.005
+# })
 
 all(round(DirNonW_original$STcon[[1]], 3) == round(DirNonW$STcon, 3))
 all(round(DirNonW_original$STcon[[1]]/DirNonW$STcon, 3) == 1, na.rm=T)
