@@ -16,7 +16,13 @@ setwd(rootdir)
 
 source('R/packages.R')
 source("R/functions.R")
-source("bin/03_diversity_metrics.R") #From https://github.com/LysandreJ/dryver/blob/main/Script/03_diversity_metrics.R
+source("R/SpaTemp_function_Mathis_edit.R")
+# if (!file.exists("bin/03_diversity_metrics.R")) {
+#   download.file(url = "https://github.com/LysandreJ/dryver/blob/main/Script/03_diversity_metrics.R",
+#                 destfil = file.path("bin", "03_diversity_metrics.R")
+#   )
+# }
+source("bin/03_diversity_metrics.R") #From 
 
 hydromod_present_dir <- file.path('data', 'wp1', 'Results_present_period_final', 'data')
 bio_dir <- file.path('data', 'wp2', '01_WP2 final data')
@@ -336,7 +342,8 @@ preformatting_targets <- list(
   tar_target(
     bio_dt,
     read_biodt(path_list = bio_data_paths,
-               in_metadata_edna = metadata_edna)
+               in_metadata_edna = metadata_edna,
+               include_bacteria = F)
   )
 )
 
@@ -377,6 +384,20 @@ combined_hydrotargets <- list(
 
 #Compute local species richness
 analysis_targets <- list(
+  #Prepare data for STCon
+  tar_target(
+    preformatted_data_STCon,
+    lapply(names(network_ssnready_shp_list), function(in_country) {
+      #print(in_country)
+      prepare_data_for_STCon(
+        in_hydromod_drn = hydromod_comb[[paste0(
+          "hydromod_dt_", in_country, '_isflowing')]], 
+        in_net_shp_path = network_ssnready_shp_list[[in_country]]
+        )
+    }) %>% setNames(names(network_ssnready_shp_list))
+  )
+  ,
+  
   #Create Spatial Stream Network (SSN) objects
   tar_target(
     ssn_eu,
@@ -413,13 +434,13 @@ analysis_targets <- list(
     }) %>% 
       rbindlist
   )
-  ,
-  
-  tar_target(
-    alphadat_merged,
-    merge_alphadat(in_sprich = sprich,
-                   in_hydrostats_comb = hydrostats_comb)
-  )
+  #,
+  #
+  # tar_target(
+  #   alphadat_merged,
+  #   merge_alphadat(in_sprich = sprich,
+  #                  in_hydrostats_comb = hydrostats_comb)
+  # )
   # ,
   # 
   #   tar_target(
@@ -441,12 +462,6 @@ analysis_targets <- list(
 list(preformatting_targets, mapped_hydrotargets, 
      combined_hydrotargets, analysis_targets) %>%
   unlist(recursive = FALSE)
-
-
-#,
-#
-#Merge all site-based data
-
 
 
 

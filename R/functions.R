@@ -1056,7 +1056,7 @@ read_envdt <- function(in_env_data_path_annika,
 # path_list = tar_read(bio_data_paths)
 # in_metadata_edna = tar_read(metadata_edna)
 
-read_biodt <- function(path_list, in_metadata_edna) {
+read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
   #Read and name all data tables
   dt_list <- mapply(function(in_path, in_name) {
     print(in_path)
@@ -1105,6 +1105,10 @@ read_biodt <- function(path_list, in_metadata_edna) {
     .[, `:=`(habitat = NULL,
              organism = 'bac_sedi_nopools')]
   dt_list$bac_sedi[, habitat := NULL]
+  
+  if (!include_bacteria) {
+    dt_list <- dt_list[!grepl('bac_', names(dt_list))]
+  }
   
   return(dt_list)
 }
@@ -1223,7 +1227,8 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
     
   } else if (level == 'regional') {
     out_dt <- t(decomp[[1]]) %>%
-      data.table
+      data.table %>%
+      .[, organism := in_biodt[1, .(organism)]]
   }
 
   return(out_dt)
@@ -2806,11 +2811,83 @@ create_ssn_europe <- function(in_network_path,
 }
 
 
-#------ compute_connectivity ---------------------------------------------------
-# load("data/data_annika\\STconMEGAmatrix_annika\\Final_STconmat_MegaMat.RData")
-# check <- Final_STconmat_MegaMat
+#------ prepare_data_for_STCon ---------------------------------------------------
+# in_drn <- 'Croatia'
+# in_hydromod_drn <- tar_read(hydromod_comb)[[paste0(
+#   "hydromod_dt_", in_country, '_isflowing')]]
+# in_net_shp_path <- tar_read(network_ssnready_shp_list)[[in_drn]]
+
+prepare_data_for_STCon <- function(in_hydromod_drn, in_net_shp_path) {
+  net <- vect(in_net_shp_path)
+  
+  #Build the adjacency list to built the graph
+  net_dt <- net  %>% 
+    arrange(from) %>% 
+    select(UID, cat, from, to, length_m, to_cat_shp) %>%
+    as.data.table
+  
+  #Identify the outlet (NA in to_cat_shp)
+  outlet_to <- net_dt[which(is.na(net_dt$to_cat_shp)==T),]$to 
+  
+  #Create the graph from the DRN_adj_list (from - to)
+  net_graph <- igraph::graph_from_edgelist(
+    as.matrix(net_dt[, .(from, to)]), 
+    directed = TRUE)
+  
+  # Incorporate a new vertex corresponding the outlet
+  # We name the cat 11111 and it will be our last vertex and where the outlet will be directed.  
+  nodes_cat <-  rbind(net_dt, data.table(UID = 11111, from = outlet_to), fill=T) 
+  
+  # We assign vertex attributes according to the cat_shape, ordered following the "from" value from the cat_shape, 
+  # which is not exactly "from anymore" it is an ID of the vertex
+  V(net_graph)$UID <- as.character(nodes_cat$UID)
+  
+  #Compute edge distances for distance matrices
+  E(net_graph)$weight <- net_dt$length_m
+  
+  #Compute distance matrix
+  river_dist_mat <- igraph::distances(net_graph)
+  
+  #Format intermittence data
+  setDT(in_hydromod_drn$data_all) %>%
+    setnames('reach_id', 'cat')
+  
+  # We create the "End_point" site that will correspond to the 111111 in the flow_intermittence dataset
+  # this point will be added with the same frequency of any other reach
+  end_point_interm <- in_hydromod_drn$data_all %>%
+    .[cat == .[1, cat],] %>% #select whatever reach
+    .[, `:=`(UID = 11111, value=1)] %>% #format
+    .[, .(date, UID, isflowing, nsim)] 
+  
+  # Merge shapefile with flow intermittence data
+  # Merge the Endpoint site and "pivot_wide" the table to obtain the TRUE intermittence table, 
+  # where each row corresponds to a day (dates as factors) and columns to all nodes of the network.
+  interm_dataset <- 
+    merge(net_dt, in_hydromod_drn$data_all, by='cat') %>%
+    rbind(end_point_interm, fill=T) %>%
+    dcast(date + nsim ~ UID, value.var = 'isflowing')
+
+  # We built the matrix of the network structure for the STcon, which is the "base" on which connectivity will be assessed. 
+  network_structure <- as.matrix(as_adjacency_matrix(net_graph))
+  
+  #Create "reference river" datasets
+  interm_ref <-interm_dataset %>% replace(.==0,1)
+  
+  return(list(
+    interm_dataset = interm_dataset,
+    network_structure = network_structure,
+    river_dist_mat = river_dist_mat,
+    interm_ref = interm_ref
+  ))
+}
 
 
+#------ compute_STCon ---------------------------------------------------
+# in_drn <- 'Croatia'
+# in_hydromod_drn <- tar_read_raw((paste0('hydromod_dt_', in_drn, '_isflowing')))
+# in_net_shp_path <- tar_read(network_ssnready_shp_list)[[in_drn]]
+
+compute_STCon <- function(in_preformatted_data)
 
 
 #------ merge_alphadat ---------------------------------------------------------

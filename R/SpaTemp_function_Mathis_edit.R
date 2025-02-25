@@ -67,7 +67,7 @@
 #dist_matrices--> corresponds to the attached matrix representing the 
 # "distances" between sites. 
 
-# Network_structure ____________#
+# network_structurecture ____________#
 # Network structure is a matrix that corresponds to the "basic" connections that 
 # can be possible. An adjacency matrix where all sites are connected among them. 
 # Should be equivalent to the network that you would expect from a "fully"
@@ -109,20 +109,20 @@
 
 # WARNING !# WARNING !# WARNING !# WARNING !# WARNING !# WARNING !# WARNING !
 # WARNING !# WARNING !# WARNING !# WARNING !# WARNING !# WARNING !# WARNING !
-# The values of interm_dataset,Sites_coordinates,Network_stru must be entered in 
+# The values of interm_dataset,Sites_coordinates,network_structure must be entered in 
 # a list format, even if only 1 matrix is used. 
 #This is done in order to allow the possibility to enter several streams in 
 # one call and obtain the results according to that.
 # In case of using dist_matrices and link_weights they must also be entered as list(). 
 
 spat_temp_index_edit <- function(interm_dataset, 
+                                 network_structure,
                                  direction,
                                  sense = "out",
                                  weighting = FALSE,
                                  dist_matrices,
                                  weighting_links = FALSE,
                                  link_weights,
-                                 Network_stru,
                                  indirect_dispersal = TRUE,
                                  value_s_link = 1,
                                  value_t_link = 1,
@@ -198,7 +198,7 @@ spat_temp_index_edit <- function(interm_dataset,
     #Create an adjacancy matrix for time step 1 whereby:
     #for sites that are wet, get the normal structure (direct connection to sites)
     #for sites that are dry, 0s to all sites
-    ST_matrix_netwGraph[time_step_1 == 1,] <- Network_stru[time_step_1 == 1,]
+    ST_matrix_netwGraph[time_step_1 == 1,] <- network_structure[time_step_1 == 1,]
     diag_backup <- diag(ST_matrix_netwGraph)
     ST_matrix_netwGraph[time_step_1 == 0,] <- 0
     diag(ST_matrix_netwGraph) <- diag_backup #####REMARK Mathis: not sure why this is needed
@@ -311,7 +311,7 @@ spat_temp_index_edit <- function(interm_dataset,
   # the fact that uperstream nodes will have higher values when considering its 
   #number of connections. As I am "node 1" my number of connections will be higher
   #than "node 10". IF WE FOLLOW THE RIVER DOWNSTREAM!
-  aa <- graph_from_adjacency_matrix(Network_stru, mode = "directed")
+  aa <- graph_from_adjacency_matrix(network_structure, mode = "directed")
   leng_correct <- neighborhood_size(aa, order=numn_nodes, mode = sense)-1 #to remove the connection to itself
   spt_conn <- apply(ST_matrix_collapsed, 1, sum)/leng_correct
   # We divide by the number of days so we obtain the "per day" values

@@ -7,6 +7,7 @@ pkg_vec <- list(
   'ggnetwork',
   'ggplot2',
   'gridExtra',
+  'igraph',
   'lmerTest', 
   'lme4', 
   'lubridate',
