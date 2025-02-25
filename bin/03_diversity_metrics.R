@@ -496,7 +496,8 @@ HierAnodiv <- function(spxp, structure, phy = NULL, weight = NULL, check = T, q 
   }
   # Abg by site
   tab_by_site <- do.call(rbind, lapply(unique(structure[,1]), function(i){
-    c(unlist(abgDecompQ(spxp[structure[,1] == i,], q= q)[1:3]), nsite = sum(structure[,1] == i), name = i)
+    c(unlist(abgDecompQ(spxp[structure[,1] == i,,drop=FALSE], q= q)[1:3]), 
+      nsite = sum(structure[,1] == i), name = i)
   }))
   
   spxp.int<-aggregate(sweep(spxp, 1, site.weight, "*"), by=list(structure[,1]), sum)
