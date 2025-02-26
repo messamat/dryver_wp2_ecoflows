@@ -43,6 +43,13 @@ hydro_combi <- expand.grid(
   in_varname =  c('isflowing', 'qsim'),
   stringsAsFactors = FALSE)
 
+
+perf_ratio <- 0.8 #Set how much you want to push your computer (% of cores and RAM) 
+nthreads <- min(nrow(drn_dt), round(parallel::detectCores(logical=F)*perf_ratio))
+future::plan("future::multisession", workers=nthreads)
+total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
+options(future.globals.maxSize = perf_ratio*total_ram)
+
 #--------------------------  Define targets plan -------------------------------
 #-------------- Preformatting targets ------------------------------------------
 preformatting_targets <- list(
@@ -70,7 +77,7 @@ preformatting_targets <- list(
   #Path to metadata accompanying eDNA data
   tar_target(
     metadata_edna_path,
-    file.path(bio_dir, '_Microbes data', 'metadata DRYvER eDNA updated.xlsx'),
+    file.path(rootdir, 'data', 'data_annika', 'metadata_DRYvER_eDNA_updated.csv'),
     format='file'
   ),
   
@@ -332,10 +339,13 @@ preformatting_targets <- list(
   #Read metadata accompanying eDNA data
   tar_target(
     metadata_edna,
-    read_xlsx(metadata_edna_path,
-              sheet = 'metadataDNA') %>%
-      as.data.table %>%
-      setnames(tolower(names(.)))
+    fread(metadata_edna_path,
+          colClasses = c(rep('character', 5), 'integer', 
+                         rep('character',4))) %>%
+      setnames(tolower(names(.))) %>%
+      setnames(c('matchingenvid', 'sampling_date'),
+               c('running_id', 'date')) %>%
+      .[, date := as.Date(date, "%d.%m.%Y")]
   ),
   
   #Read pre-processed biological sampling data
@@ -384,17 +394,91 @@ combined_hydrotargets <- list(
 
 #Compute local species richness
 analysis_targets <- list(
-  #Prepare data for STCon
+  #Prepare data for STcon
   tar_target(
-    preformatted_data_STCon,
+    preformatted_data_STcon,
     lapply(names(network_ssnready_shp_list), function(in_country) {
       #print(in_country)
-      prepare_data_for_STCon(
+      prepare_data_for_STcon(
         in_hydromod_drn = hydromod_comb[[paste0(
           "hydromod_dt_", in_country, '_isflowing')]], 
         in_net_shp_path = network_ssnready_shp_list[[in_country]]
-        )
+      )
     }) %>% setNames(names(network_ssnready_shp_list))
+  )
+  ,
+  
+  tar_target(
+    STcon_rolling_list, 
+    {
+      out_STcon_list <- future_lapply(
+        names(preformatted_data_STcon), function(in_country) {
+          print(in_country)
+          
+          unique_sampling_dates <- lapply(bio_dt, function(org_dt) {
+            org_dt[country==in_country, .(date)]
+          }) %>% rbindlist %>% unique
+          in_dates <- unique_sampling_dates
+          
+          window_size_list <- c(10, 30, 365) #, 30, 365) #60, 90, 180 
+          lapply(window_size_list, function(in_window) { 
+            print(in_window)
+            if (in_window == 365) {
+              in_output <- 'all'
+            } else {
+              in_output <- 'STcon'
+            }
+            
+            compute_STcon_rolling(
+              in_preformatted_data = preformatted_data_STcon[[in_country]], 
+              ref = FALSE,
+              in_nsim = hydromod_paths_dt[country == in_country,]$best_sim,
+              in_dates = in_dates, 
+              window = in_window, 
+              output = in_output,
+              direction = 'undirected',
+              weighting = TRUE)
+          }) %>% setNames(paste0('STcon_m', window_size_list)) #60, 90, 180, 
+        })
+      setNames(out_STcon_list, names(preformatted_data_STcon))
+    }
+  )
+  ,
+  
+  tar_target(
+    STcon_rolling_ref_list,
+    {
+      out_STcon_list <- future_lapply(
+        names(preformatted_data_STcon), function(in_country) {
+          print(in_country)
+
+          unique_sampling_dates <- lapply(bio_dt, function(org_dt) {
+            org_dt[country==in_country, .(date)]
+          }) %>% rbindlist %>% unique
+          in_dates <- unique_sampling_dates
+
+          window_size_list <- c(10, 30, 365) #60, 90, 180
+          lapply(window_size_list, function(in_window) {
+            print(in_window)
+
+            if (in_window == 365) {
+              in_output <- 'all'
+            } else {
+              in_output <- 'STcon'
+            }
+
+            compute_STcon_rolling(in_preformatted_data = preformatted_data_STcon[[in_country]],
+                                  ref = TRUE,
+                                  in_nsim = NULL,
+                                  in_dates = in_dates,
+                                  window = in_window,
+                                  output = in_output,
+                                  direction = 'directed',
+                                  weighting = FALSE)
+          }) %>% setNames(paste0('STcon_m', window_size_list))
+        })
+      setNames(out_STcon_list, names(preformatted_data_STcon))
+    }
   )
   ,
   

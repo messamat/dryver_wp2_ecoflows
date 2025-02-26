@@ -7,10 +7,10 @@ library(reshape2)
 library(sf)
 library(devtools)
 library(igraph)
-library(riverconn)
+#library(riverconn)
 
 working_directory <- paste("/STcon_DRYvER",sep="")
-setwd(working_directory)
+#setwd(working_directory)
 
 # load functions
 source("functions_flow_intermittence_indicators.R")
@@ -42,7 +42,13 @@ flow_intermittence$value[is.na(flow_intermittence$value)] <- 1
 
 # Shape names & uploadign
 Shape_country <- c("france","hungary","finland","spain","croatia","czech")
-shape_DRN <- sf::st_read(paste(MSI_New,"Desktop/dryver_shapefiles_cleaned/",Shape_country[DRN_position],"_river_network_cleaned.shp",sep=""))
+shape_DRN <- sf::st_read(paste("C:\\DRYvER_wp2\\dryver_wp2_ecoflows\\results\\gis\\",
+                               Shape_country[DRN_position],
+                               "_river_network_nocomplexconf20250204_reided20250204.shp",
+                               sep=""))
+
+
+# shape_DRN <- sf::st_read(paste(MSI_New,"Desktop/dryver_shapefiles_cleaned/",Shape_country[DRN_position],"_river_network_cleaned.shp",sep=""))
 
 #___________________________________________________________________
 # WARNING 2
@@ -146,7 +152,7 @@ if (length(cat_to_correct)>0) {
 
 # You cut the lenght of the intermittence according to whatever you want. In this case we select the first 
 # 30 days of the whole dataset. 
-FL_intermitence_cut <- as.data.frame(Inermitence_dataset[1:30,]) # THIS IS THE MOST IMPORTANT POINT! WHERE YOU DEFINE THE TIME WINDOW!!!! 
+FL_intermitence_cut <- as.data.frame(Inermitence_dataset[1:10,]) # THIS IS THE MOST IMPORTANT POINT! WHERE YOU DEFINE THE TIME WINDOW!!!! 
 
 # We built the matrix of the network structure for the STcon, which is the "base" on which connectivity will be assessed. 
 Network_structure <- as.data.frame(as.matrix(as_adjacency_matrix(igr1)))
@@ -174,15 +180,15 @@ Network_stru_Campaings_To_Run[[length(Network_stru_Campaings_To_Run)+1]] <- Netw
 
 # Here we STCON things! 
 tictoc::tic()
-DirNonW <- spat_temp_index(Inermitence_dataset = Inermitence_dataset_Campaings_To_Run,
+DirNonW <- spat_temp_index(interm_dataset = Inermitence_dataset_Campaings_To_Run,
                            Sites_coordinates=Sites_coordinates_Campaings_To_Run,
                            Network_stru = Network_stru_Campaings_To_Run, 
                            direction="directed", sense= "out",
                            weighting=F,dist_matrices = NULL, # Weighting pairs
                            weighting_links =F,link_weights = NULL, # Weighting links
-                           legacy_effect = 1, legacy_lenght = 1, # Legacy effects
-                           value_S_LINK=1,value_T_LINK=1, # Values to links
-                           value_NO_S_link=0,value_NO_T_link=0, # Values to links
+                           legacy_effect = 1, legacy_length = 1, # Legacy effects
+                           value_s_link=1,value_t_link=1, # Values to links
+                           value_no_s_link=0,value_no_t_link=0 # Values to links
                            ) # Last parameters information
 tictoc::toc()
 

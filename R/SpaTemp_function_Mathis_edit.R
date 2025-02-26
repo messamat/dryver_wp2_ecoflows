@@ -124,44 +124,50 @@ spat_temp_index_edit <- function(interm_dataset,
                                  weighting_links = FALSE,
                                  link_weights,
                                  indirect_dispersal = TRUE,
+                                 standardize_neighbors = FALSE,
                                  value_s_link = 1,
                                  value_t_link = 1,
                                  value_no_s_link = 0,
                                  value_no_t_link = 0,
                                  legacy_effect = 1,
-                                 legacy_length = 1){
-  
-  if(direction=="directed"){
-    cat("Your river will be considered as a directed graph","\n")}
-  if(direction=="undirected"){
-    cat("Your river will be considered as an undirected graph","\n")}
-  
-  # We select the corresponding distance matrix
-  if(weighting_links==T){
-    cat("Your links will be weighted with daily data",
-        "entered in the 'link_weights'","\n")
-    if(nrow(link_weights[[1]])!=nrow(interm_dataset[[1]]) & 
-       ncol(link_weights[[1]])!=ncol(interm_dataset[[1]])){
-      return(cat("!!!ERROR: Intermitence dataset and link_weights", 
-                 "must have the same dimensions!","\n"))}
-  }
-  if(weighting_links==F){cat("Your links will be normal,", "
+                                 legacy_length = 1,
+                                 verbose = T,
+                                 output = c('Main_matrix', 
+                                            'STconmat',
+                                            'STcon')) {
+  if (verbose) {
+    if(direction=="directed"){
+      cat("Your river will be considered as a directed graph","\n")}
+    if(direction=="undirected"){
+      cat("Your river will be considered as an undirected graph","\n")}
+    
+    # We select the corresponding distance matrix
+    if(weighting_links==T){
+      cat("Your links will be weighted with daily data",
+          "entered in the 'link_weights'","\n")
+      if(nrow(link_weights[[1]])!=nrow(interm_dataset[[1]]) & 
+         ncol(link_weights[[1]])!=ncol(interm_dataset[[1]])){
+        return(cat("!!!ERROR: Intermitence dataset and link_weights", 
+                   "must have the same dimensions!","\n"))}
+    }
+    if(weighting_links==F){cat("Your links will be normal,", "
                              as defined in the LINK/NO_LINK","\n")}
-  
-  # We select the corresponding distance matrix
-  if(weighting==T){cat("Your connectivity will be Weighted,", 
-                       "connections will be multiplied by 'dist_matrices'","\n")}
-  if(weighting==F){cat("Your connectivity will be NON weighted, connections", "
+    
+    # We select the corresponding distance matrix
+    if(weighting==T){cat("Your connectivity will be Weighted,", 
+                         "connections will be multiplied by 'dist_matrices'","\n")}
+    if(weighting==F){cat("Your connectivity will be NON weighted, connections", "
                        will not be multiplied by any distance matrix","\n")}
-  
-  if(legacy_length!=length(legacy_effect)){
-    return(cat("!!!ERROR: The length of your legacy effects is", 
-               length(legacy_effect), "and your legacy length is", 
-               legacy_length,"! They must be the same!", "\n"))}
-  
-  if(weighting==T & is.matrix(dist_matrices)==F){
-    return(cat("!!!ERROR: Your distance matrix must be a list object"))}
-  
+    
+    if(legacy_length!=length(legacy_effect)){
+      return(cat("!!!ERROR: The length of your legacy effects is", 
+                 length(legacy_effect), "and your legacy length is", 
+                 legacy_length,"! They must be the same!", "\n"))}
+    
+    if(weighting==T & is.matrix(dist_matrices)==F){
+      return(cat("!!!ERROR: Your distance matrix must be a list object"))}
+  }
+
   ####_______________________________________________________________________
   # River network ####
   ####_______________________________________________________________________
@@ -175,9 +181,13 @@ spat_temp_index_edit <- function(interm_dataset,
   # DAYS of HOBOS that we have
   ### This matrix is the "giant" template where we will put all the values.
   ST_matrix_raw <- matrix(nrow = numn_nodes, ncol = numn_nodes*2, 
-                          data = value_no_s_link)
+                          data = value_no_s_link, 
+                          dimnames = list(colnames(interm_dataset),
+                                          rep(colnames(interm_dataset), 2)))
   ST_matrix_netwGraph_raw <- matrix(nrow = numn_nodes, ncol = numn_nodes, 
-                                    data = 0)
+                                    data = 0,
+                                    dimnames = list(colnames(interm_dataset),
+                                                    colnames(interm_dataset)))
   # First we define the spatial connections of the matrix
   ### Also known as the rows or columns at which we have to add the values of 
   #the connections 
@@ -211,16 +221,15 @@ spat_temp_index_edit <- function(interm_dataset,
     # on the river graph based on a dendritic. 
     # We create the graph
     a <- igraph::graph_from_adjacency_matrix(ST_matrix_netwGraph, 
-                                             mode=direction, 
+                                             mode = direction, 
                                              diag = FALSE)
     
     # Compute shortest path distances for all node pairs
     dist_matrix_day <- igraph::distances(a, mode = sense,
                                          algorithm = "unweighted")
-    dist_matrix_day[is.infinite(dist_matrix_day)] <- 0
     
     # Convert distances into binary connectivity (1 if connected, 0 if not)
-    All_river_paths <- fifelse(dist_matrix_day > 0, value_s_link, value_no_s_link)
+    All_river_paths <- fifelse(!is.infinite(dist_matrix_day), value_s_link, value_no_s_link)
     
     #weight the links base on daily information of flow or strength of the link.
     if (weighting_links == TRUE) {
@@ -251,14 +260,14 @@ spat_temp_index_edit <- function(interm_dataset,
     
     #Compute direct spatial links for stable connected nodes (1->1)
     All_river_paths[stable_indices_1, ] <- fifelse(
-      dist_matrix_day[stable_indices_1, ] > 0,
+      !is.infinite(dist_matrix_day[stable_indices_1, ]),
       value_t_link, value_no_t_link)
     
     #Indirect dispersal for lost nodes (1->0) ################ NOT APPLYING THIS ASSUMPTION
-    if (indirect_dispersal) {
+    if (indirect_dispersal & (weighting == FALSE)) {
       All_river_paths[lost_indices, ] <- 
         All_river_paths[lost_indices, ] + 
-        fifelse(dist_matrix_day[lost_indices, ] > 0, 
+        fifelse(!is.infinite(dist_matrix_day[lost_indices, ]), 
                 value_t_link, value_no_t_link)
     }
     
@@ -289,11 +298,11 @@ spat_temp_index_edit <- function(interm_dataset,
   ### We fill it for Days (or time)-1 because the last day does not have a 
   #"future" from which to extract values. 
   ST_matrix <- lapply(1:(nsteps-1), function(day) {
-    cat("We are at time unit", day, "of", (nsteps-1), "\n")
+    if (verbose) cat("We are at time unit", day, "of", (nsteps-1), "\n")
     spa_temp_index_daily(ST_matrix = ST_matrix_raw, 
                          ST_matrix_netwGraph = ST_matrix_netwGraph_raw,
-                         day)
-  }) %>% reduce(`+`) 
+                         day = day)
+  }) %>% purrr::reduce(`+`) 
   
   ####_______________________________________________________________________
   # STconmat calculation ####
@@ -302,25 +311,43 @@ spat_temp_index_edit <- function(interm_dataset,
   # all the values of all the SPATIOTEMPORAL matrix
   # These pairwise matrix is called the STconmat.   
   ST_matrix_collapsed <- ST_matrix[,spa_connections] + ST_matrix[,temp_connections]
-  ST_matrix_collapsed_standardized <- ST_matrix_collapsed/c(nsteps-1)
   
+  if (any(c('all', 'STconmat') %in% output)) {
+    ST_matrix_collapsed_standardized <- ST_matrix_collapsed/c(nsteps-1)
+  } else {
+    ST_matrix_collapsed_standardized <- NULL
+  }
+
   ####_______________________________________________________________________
   # STcon calculation ####
   ####_______________________________________________________________________
-  # "leng_correct" is a reverse vector (from big to small) used to correct
-  # the fact that uperstream nodes will have higher values when considering its 
-  #number of connections. As I am "node 1" my number of connections will be higher
-  #than "node 10". IF WE FOLLOW THE RIVER DOWNSTREAM!
-  aa <- graph_from_adjacency_matrix(network_structure, mode = "directed")
-  leng_correct <- neighborhood_size(aa, order=numn_nodes, mode = sense)-1 #to remove the connection to itself
-  spt_conn <- apply(ST_matrix_collapsed, 1, sum)/leng_correct
-  # We divide by the number of days so we obtain the "per day" values
-  spt_conn<- spt_conn/c(nsteps-1)
+  if (any(c('all', 'STcon') %in% output)) {
+    spt_conn <- apply(ST_matrix_collapsed, 1, sum)
+    
+    # "leng_correct" is a reverse vector (from big to small) used to correct
+    # the fact that uperstream nodes will have higher values when considering its 
+    #number of connections. As I am "node 1" my number of connections will be higher
+    #than "node 10". IF WE FOLLOW THE RIVER DOWNSTREAM!
+    if (standardize_neighbors) {
+      aa <- graph_from_adjacency_matrix(network_structure, mode = direction)
+      leng_correct <- neighborhood_size(aa, order = numn_nodes, mode = sense) - 1 #to remove the connection to itself
+      spt_conn <- spt_conn/leng_correct
+    }
+    # We divide by the number of days so we obtain the "per day" values
+    spt_conn <- spt_conn/c(nsteps-1)
+  } else {
+    spt_conn <- NULL
+  }
   
   # OUTPUTS _______________________####
-  Main_output <- list(Main_matrix = ST_matrix,
-                      STconmat = ST_matrix_collapsed_standardized,
-                      STcon = spt_conn  
+  if (!(any(c('all', 'Main_matrix') %in% output))) {
+    ST_matrix <- NULL
+  }
+  
+  Main_output <- list(
+    Main_matrix = ST_matrix,
+    STconmat = ST_matrix_collapsed_standardized,
+    STcon = spt_conn  
   )
   
   return(Main_output)

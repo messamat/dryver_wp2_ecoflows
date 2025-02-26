@@ -531,7 +531,7 @@ snap_points_inner <- function(in_pts,
                               in_target,
                               sites_idcol,
                               attri_to_join=NULL
-                              ) {
+) {
   #Snap points (fastest custom way in R, it seems):
   #first computing a line between site and snapping place on nearest segment
   sitesnap_l <- terra::nearest(in_pts, in_target, centroids = F, lines = T)
@@ -782,6 +782,7 @@ define_hydromod_paths <- function(in_hydromod_dir) {
   hydro_drn_paths_dt <- data.table(
     country = c("Croatia", "Czech", "Finland", "France",  "Hungary", "Spain"),
     catchment = c("Butiznica", "Velicka", "Lepsamaanjoki", "Albarine", "Bukkosdi", "Genal"), 
+    best_sim = c(8, 9, 20, 3, 8, 15),
     all_sims_filename = c(
       "Butiznica_2022-12-15_option0.nc", #_run8_final
       "Velicka_2023-02-01_option0.nc",
@@ -811,6 +812,8 @@ define_hydromod_paths <- function(in_hydromod_dir) {
              sites_reachids = file.path(in_hydromod_dir, catchment,
                                         paste0(catchment, 
                                                '_sampling_sites_ReachIDs.csv')))]
+  
+  return(hydro_drn_paths_dt)
 }
 
 #------ get_drn_hydromod -------------------------------------------------------
@@ -1025,10 +1028,12 @@ read_envdt <- function(in_env_data_path_annika,
                 by=site]
   
   #Correct riparian area based on observation of satellite imagery
-  env_dt_merged[running_id == 'BUK36_1', riparian_cover_in_the_riparian_area := 90]
+  env_dt_merged[running_id == 'BUK36_1', 
+                riparian_cover_in_the_riparian_area := 90]
   
   #Use corrected data for some records
-  env_dt_merged[running_id == 'BUK42_3', bankfull_at_max_wetted_width_m := 4.7] #from original data sheet uploaded on Teams
+  env_dt_merged[running_id == 'BUK42_3',
+                bankfull_at_max_wetted_width_m := 4.7] #from original data sheet uploaded on Teams
   
   #Check that max is larger than min
   check <- env_dt_merged[max_wetted_width_m < min_wetted_width_m,]
@@ -1060,10 +1065,35 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
   #Read and name all data tables
   dt_list <- mapply(function(in_path, in_name) {
     print(in_path)
-    fread(in_path) %>% 
+    out_dt <- fread(in_path) %>% 
       .[, organism := in_name] %>%
-      setnames(tolower(names(.)))},
-    path_list, names(path_list))
+      setnames(tolower(names(.)))
+    
+    if (is.character(out_dt$date)) {
+      out_dt[, date := as.Date(date, '%d.%m.%Y')]
+    }
+    
+    if (all(c('site', 'campaign') %in% names(out_dt))) {
+      out_dt[, running_id := paste0(site, '_', campaign)]
+    }
+    
+    return(out_dt)
+  }, path_list, names(path_list)
+  )
+  
+  #Fill NAs in dates with eDNA metadata if possible
+  dt_list$dia_sedi[
+    is.na(date),
+    date := in_metadata_edna[sample_type=='sediment', .(running_id, date)][
+      .SD, on='running_id', x.date]]
+  dt_list$fun_sedi[
+    is.na(date),
+    date := in_metadata_edna[sample_type=='sediment', .(running_id, date)][
+      .SD, on='running_id', x.date]]
+  dt_list$fun_biof[
+    is.na(date),
+    date := in_metadata_edna[sample_type=='biofilm', .(running_id, date)][
+      .SD, on='running_id', x.date]]
   
   #Add Campaign and Site to bacteria data, then remove pool sites
   dt_list$bac_sedi[, c('site', 'campaign') := tstrsplit(v1, '_')] %>%
@@ -1073,25 +1103,25 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
     setnames('v1', 'running_id') %>%
     .[, campaign := as.integer(campaign)]
   
-  #Standardize country names
-  country_standard <- data.table(
-    original = c("CRO", "FRA", "SPA", "CZ",  "HUN", "FIN"),
-    new = c("Croatia", 'France', "spain", "Czech", "Hungary", 'Finland')
-  )
-  in_metadata_edna <- merge(in_metadata_edna, country_standard,
-                            by.x='country', by.y='original') %>%
-    .[, country := new] %>%
-    .[, `:=`(new = NULL)]
+  # #Standardize country names
+  # country_standard <- data.table(
+  #   original = c("CRO", "FRA", "SPA", "CZ",  "HUN", "FIN"),
+  #   new = c("Croatia", 'France', "spain", "Czech", "Hungary", 'Finland')
+  # )
+  # in_metadata_edna <- merge(in_metadata_edna, country_standard,
+  #                           by.x='country', by.y='original') %>%
+  #   .[, country := new] %>%
+  #   .[, `:=`(new = NULL)]
   
   #Remove bacteria in pools
   dt_list$bac_sedi <- merge(dt_list$bac_sedi, 
                             in_metadata_edna[sample_type=='sediment', 
-                                             .(matchingenvid, habitat, country)],
-                            by.x='running_id', by.y='matchingenvid')
+                                             .(running_id, date, habitat, country)],
+                            by='running_id')
   dt_list$bac_biof <- merge(dt_list$bac_biof,
                             in_metadata_edna[sample_type=='biofilm',
-                                             .(matchingenvid, habitat, country)],
-                            by.x='running_id', by.y='matchingenvid')
+                                             .(running_id, date, habitat, country)],
+                            by='running_id')
   
   dt_list$bac_biof_nopools <- dt_list$bac_biof %>%
     .[habitat!='pool',] %>%
@@ -1105,6 +1135,12 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
     .[, `:=`(habitat = NULL,
              organism = 'bac_sedi_nopools')]
   dt_list$bac_sedi[, habitat := NULL]
+  
+  #Correct typo in date for fungi  
+  dt_list$fun_sedi[date == as.Date("2012-02-25"), 
+                   date := as.Date("2021-02-25")]
+  dt_list$fun_biof[date == as.Date("2012-02-25"), 
+                   date := as.Date("2021-02-25")]
   
   if (!include_bacteria) {
     dt_list <- dt_list[!grepl('bac_', names(dt_list))]
@@ -1168,11 +1204,11 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
   decomp <- try(HierAnodiv(spxp = spxp[z>0,], 
                            structure = bio_structure[z>0,], 
                            phy = NULL, weight = NULL, check = T, q = 1))
- 
+  
   if (level == 'local') {
     #Compute species richness
     biodt_div <-in_biodt[, list(richness = rowSums(.SD > 0)
-                    ), by=.(site, campaign, organism), .SDcols = spcols] %>%
+    ), by=.(site, campaign, organism), .SDcols = spcols] %>%
       .[, mean_richness := mean(richness), by=site]
     
     #Keep only sites x campaigns with species
@@ -1230,7 +1266,7 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
       data.table %>%
       .[, organism := in_biodt[1, .(organism)]]
   }
-
+  
   return(out_dt)
 }
 
@@ -1339,7 +1375,7 @@ clean_network <- function(rivnet_path, idcol,
     #Make sure that the geometry column is equally named regardless 
     #of file format (see https://github.com/r-spatial/sf/issues/719)
     st_set_geometry('geometry') 
-
+  
   #Preformat basic network
   sfnet_ini <- rivnet %>%
     as_sfnetwork %>%
@@ -1436,7 +1472,7 @@ clean_network <- function(rivnet_path, idcol,
     dplyr::filter(!((dangle == 'dangle') &
                       (length < min_segment_length))) %>%
     select(-c(length, dangle))
-
+  
   #------------------ Re-assign original IDs to all segments ---------------
   #Split back into component linestrings
   rivnet_endpts <- c(lwgeom::st_startpoint(rivnet), 
@@ -1618,7 +1654,7 @@ direct_network <- function(rivnet_path, idcol,
   #                         length = unit(0.075, 'inches'),
   #                         ends = "last",
   #                         type = "closed")))
-
+  
   #Identify dangle points
   agg_endpts <- c(lwgeom::st_startpoint(rivnet), 
                   lwgeom::st_endpoint(rivnet)) 
@@ -1641,9 +1677,9 @@ direct_network <- function(rivnet_path, idcol,
   
   # Apply to the entire network
   out_net <- direct_network_inner(segment = outlet_seg, 
-                                 in_network = rivnet, 
-                                 idcol = idcol,
-                                 visited = NULL)
+                                  in_network = rivnet, 
+                                  idcol = idcol,
+                                  visited = NULL)
   
   #------------------ Write out results ------------------------------------------
   out_path <- file.path(outdir,
@@ -1751,7 +1787,7 @@ assign_strahler_order <- function(in_rivnet, idcol, verbose = F) {
     rivnet_fromto_dt <-  merge(rivnet_fromto_dt, rivnet_fromto_dt[, .(to, strahler)], 
                                by.x='from', by.y='to', suffixes = c('_down', '_up'),
                                all.x=T)
-   
+    
     #Extend strahler order downstream for consecutive sections on the same segment 
     #(only one source section)
     rivnet_fromto_dt[is.na(strahler_down) & !is.na(strahler_up) & nsource == 1,
@@ -1767,8 +1803,8 @@ assign_strahler_order <- function(in_rivnet, idcol, verbose = F) {
                      max_strahler_u := max(strahler_up),
                      by=idcol]
     rivnet_fromto_dt[eligible & !is.na(eligible),
-                    n_max_strahler_u := .SD[strahler_up==max_strahler_u, .N],
-                    by=idcol]
+                     n_max_strahler_u := .SD[strahler_up==max_strahler_u, .N],
+                     by=idcol]
     
     rivnet_fromto_dt[eligible & !is.na(eligible),
                      strahler_down := fifelse(
@@ -1776,7 +1812,7 @@ assign_strahler_order <- function(in_rivnet, idcol, verbose = F) {
                        max_strahler_u + 1,
                        max_strahler_u),
                      by = idcol]
-
+    
     setnames(rivnet_fromto_dt, 'strahler_down', 'strahler')
     
     rivnet_fromto_dt <- rivnet_fromto_dt[
@@ -2262,7 +2298,7 @@ reassign_netids <- function(rivnet_path, strahler_dt,
     merge(reaches_hydromod_format[, .(ID_hydromod, to_reach_hydromod)],
           by.x='cat_cor', by.y='ID_hydromod', all.x=T) %>%
     .[, hydromod_shpcor_match := (to_reach_hydromod == to_reach_shpcor)]
-
+  
   #---------- Write out results ------------------------------------------------------
   out_path <- file.path(outdir,
                         paste0(tools::file_path_sans_ext(basename(rivnet_path)),
@@ -2346,7 +2382,7 @@ format_site_dt <- function(in_path, in_country) {
   sites_dt <- fread(in_path) %>%
     setnames(tolower(names(.))) %>%
     .[, reach_id := as.integer(reach_id)]
-
+  
   if (in_country == 'Croatia') {
     sites_dt[, id := sub('BUT', '', id) %>%
                str_pad(width=2, side='left', pad = 0) %>%
@@ -2368,9 +2404,9 @@ format_site_dt <- function(in_path, in_country) {
   }
   
   if (in_country == 'Finland') {
-      sites_dt[, id := sub('FIN', '', id) %>%
-                 str_pad(width=2, side='left', pad = 0) %>%
-                 paste0('LEP', .)]
+    sites_dt[, id := sub('FIN', '', id) %>%
+               str_pad(width=2, side='left', pad = 0) %>%
+               paste0('LEP', .)]
   }
   
   if (in_country == 'Hungary') {
@@ -2399,12 +2435,12 @@ format_site_dt <- function(in_path, in_country) {
 # in_network_path_list = tar_read(network_ssnready_gpkg_list)
 
 create_sites_gpkg <- function(in_hydromod_paths_dt,
-                             in_sites_dt,
-                             out_dir, 
-                             geom,
-                             in_network_path_list = NULL,
-                             in_network_idcol = 'cat_cor',
-                             overwrite = FALSE) {
+                              in_sites_dt,
+                              out_dir, 
+                              geom,
+                              in_network_path_list = NULL,
+                              in_network_idcol = 'cat_cor',
+                              overwrite = FALSE) {
   if (!dir.exists(out_dir)) {
     dir.create(out_dir)
   }
@@ -2430,7 +2466,7 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
       }
     }, by=country]
   }
-
+  
   if (geom == 'points') {
     #Create site points
     in_hydromod_paths_dt[, {
@@ -2441,7 +2477,7 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
       }
     }, by=country]
   }
-
+  
   return(in_hydromod_paths_dt[, stats::setNames(sites_gpkg_path, country)])
 }
 
@@ -2538,7 +2574,7 @@ snap_river_sites <- function(in_sites_path,
       #Reproject points to original proj
       sitesnap_p <- terra::project(sitesnap_p, sitesp)
     }
-
+    
     #Write it out
     terra::writeVector(sitesnap_p,
                        out_snapped_sites_path,
@@ -2566,7 +2602,7 @@ subset_amber <- function(amber_path, in_hydromod_paths_dt, out_dir,
   
   amber_pts_path <- file.path(out_dir,
                               'amber_sub_pts.gpkg')
-
+  
   create_sitepoints_raw(in_dt = amber_countries, 
                         lon_col = 'Longitude_WGS84', lat_col = 'Latitude_WGS84',
                         out_points_path = amber_pts_path) 
@@ -2605,12 +2641,12 @@ subset_amber <- function(amber_path, in_hydromod_paths_dt, out_dir,
 # custom_proj = F
 
 snap_barrier_sites <- function(in_sites_path, 
-                             in_network_path,
-                             out_snapped_sites_path=NULL, 
-                             custom_proj = T,
-                             idcol = 'id',
-                             attri_to_join = 'cat_cor',
-                             overwrite = F) {
+                               in_network_path,
+                               out_snapped_sites_path=NULL, 
+                               custom_proj = T,
+                               idcol = 'id',
+                               attri_to_join = 'cat_cor',
+                               overwrite = F) {
   
   if (is.null(out_snapped_sites_path)) {
     out_snapped_sites_path <- sub(
@@ -2629,7 +2665,7 @@ snap_barrier_sites <- function(in_sites_path,
     
     #Read network
     target <- terra::vect(in_network_path)
-
+    
     #Project sites to custom projection
     sitesp_proj <- terra::project(sitesp, crs(target))
     
@@ -2811,13 +2847,13 @@ create_ssn_europe <- function(in_network_path,
 }
 
 
-#------ prepare_data_for_STCon ---------------------------------------------------
-# in_drn <- 'Croatia'
+#------ prepare_data_for_STcon ---------------------------------------------------
+# in_country <- in_drn <- 'Croatia'
 # in_hydromod_drn <- tar_read(hydromod_comb)[[paste0(
 #   "hydromod_dt_", in_country, '_isflowing')]]
 # in_net_shp_path <- tar_read(network_ssnready_shp_list)[[in_drn]]
 
-prepare_data_for_STCon <- function(in_hydromod_drn, in_net_shp_path) {
+prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
   net <- vect(in_net_shp_path)
   
   #Build the adjacency list to built the graph
@@ -2832,11 +2868,13 @@ prepare_data_for_STCon <- function(in_hydromod_drn, in_net_shp_path) {
   #Create the graph from the DRN_adj_list (from - to)
   net_graph <- igraph::graph_from_edgelist(
     as.matrix(net_dt[, .(from, to)]), 
-    directed = TRUE)
+    directed = TRUE) 
   
   # Incorporate a new vertex corresponding the outlet
   # We name the cat 11111 and it will be our last vertex and where the outlet will be directed.  
-  nodes_cat <-  rbind(net_dt, data.table(UID = 11111, from = outlet_to), fill=T) 
+  nodes_cat <- rbind(net_dt, 
+                     data.table(UID = 11111, from = outlet_to), fill=T) %>%
+    setorder(from)
   
   # We assign vertex attributes according to the cat_shape, ordered following the "from" value from the cat_shape, 
   # which is not exactly "from anymore" it is an ID of the vertex
@@ -2847,7 +2885,7 @@ prepare_data_for_STCon <- function(in_hydromod_drn, in_net_shp_path) {
   
   #Compute distance matrix
   river_dist_mat <- igraph::distances(net_graph)
-  
+    
   #Format intermittence data
   setDT(in_hydromod_drn$data_all) %>%
     setnames('reach_id', 'cat')
@@ -2856,8 +2894,8 @@ prepare_data_for_STCon <- function(in_hydromod_drn, in_net_shp_path) {
   # this point will be added with the same frequency of any other reach
   end_point_interm <- in_hydromod_drn$data_all %>%
     .[cat == .[1, cat],] %>% #select whatever reach
-    .[, `:=`(UID = 11111, value=1)] %>% #format
-    .[, .(date, UID, isflowing, nsim)] 
+    .[, `:=`(UID = 11111,  from=4, value=1)] %>% #format
+    .[, .(date, UID, isflowing, from, nsim)] 
   
   # Merge shapefile with flow intermittence data
   # Merge the Endpoint site and "pivot_wide" the table to obtain the TRUE intermittence table, 
@@ -2865,13 +2903,17 @@ prepare_data_for_STCon <- function(in_hydromod_drn, in_net_shp_path) {
   interm_dataset <- 
     merge(net_dt, in_hydromod_drn$data_all, by='cat') %>%
     rbind(end_point_interm, fill=T) %>%
-    dcast(date + nsim ~ UID, value.var = 'isflowing')
-
+    .[is.na(isflowing), isflowing := 1] %>% #FILL NAs in original hydrological data
+    setorder(from) %>%
+    dcast(date + nsim ~ from, value.var = 'isflowing')
+  
   # We built the matrix of the network structure for the STcon, which is the "base" on which connectivity will be assessed. 
-  network_structure <- as.matrix(as_adjacency_matrix(net_graph))
+  network_structure <- as.matrix(as_adjacency_matrix(net_graph)) 
   
   #Create "reference river" datasets
-  interm_ref <-interm_dataset %>% replace(.==0,1)
+  interm_ref <- interm_dataset %>%
+    filter(nsim == 1) %>%
+    replace(.==0,1) 
   
   return(list(
     interm_dataset = interm_dataset,
@@ -2882,12 +2924,139 @@ prepare_data_for_STCon <- function(in_hydromod_drn, in_net_shp_path) {
 }
 
 
-#------ compute_STCon ---------------------------------------------------
-# in_drn <- 'Croatia'
-# in_hydromod_drn <- tar_read_raw((paste0('hydromod_dt_', in_drn, '_isflowing')))
-# in_net_shp_path <- tar_read(network_ssnready_shp_list)[[in_drn]]
+#------ compute_STcon_rolling ---------------------------------------------------
+# in_drn <- 'France'
+# in_preformatted_data <- tar_read(preformatted_data_STcon)[[in_drn]]
+# in_bio_dt <- tar_read(bio_dt)
+# in_nsim <- tar_read(hydromod_paths_dt)[country == in_drn,]$best_sim
+# 
+# unique_sampling_dates <- lapply(in_bio_dt, function(org_dt) {
+#   org_dt[country==in_drn, .(date)]
+# }) %>% rbindlist %>% unique
+# in_dates <- unique_sampling_dates
+# window <- 10
+# direction <- 'directed'
+# weighting <- TRUE
+# output <- 'all'
+# verbose <- F
+# ref = T
 
-compute_STCon <- function(in_preformatted_data)
+compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL, 
+                                  in_dates, window, output,
+                                  direction, weighting, sense, verbose = F) {
+  
+  #Make sure that date has been modeled
+  in_dates <- in_dates[date <= max(in_preformatted_data$interm_dataset$date)]
+  
+  if (isTRUE(in_nsim == 'all')) { #Wrap conditional statement to avoid error in in_nsim == NULL
+    in_nsim <- unique(in_preformatted_data$interm_dataset$nsim)
+  }
+  
+  interm_dt_sel <- if (ref) {in_preformatted_data$interm_ref
+  } else {in_preformatted_data$interm_dataset[nsim %in% in_nsim,]}
+  
+  #Compute STcon for every date and previous window of time across simulations
+  STcon_datelist <- lapply(in_dates$date, function(end_date) {
+    if (verbose) print(end_date)
+    interm_sub <- interm_dt_sel[
+      (date %in% seq(from=end_date-(window-1), to=end_date, by='day')),] %>%
+      setorder(date)
+    
+    if (weighting) {
+      value_s_link = value_t_link = 0.1
+      value_no_s_link = value_no_t_link = 1
+    } else {
+      value_no_s_link = value_no_t_link = 0
+      value_s_link = value_t_link = 1
+    }
+    
+    STcon_list <- spat_temp_index_edit(
+      interm_dataset = as.matrix(interm_sub[, !c('date', 'nsim'), with = FALSE]),
+      network_structure = in_preformatted_data$network_structure, 
+      direction ="directed", 
+      sense = "out",
+      weighting = weighting,
+      dist_matrices = in_preformatted_data$river_dist_mat, # Weighting pairs
+      indirect_dispersal = FALSE,
+      standardize_neighbors = FALSE,
+      value_s_link = value_s_link,
+      value_t_link = value_t_link, # Values to links
+      value_no_s_link = value_no_s_link,
+      value_no_t_link = value_no_t_link, # Values to links
+      output = output,
+      verbose = verbose
+    ) %>%
+      append(
+        list(IDs = names(interm_dt_sel[, !c('date', 'nsim'), with = FALSE]))
+      )
+    
+    return(STcon_list)
+  }) %>% setNames(in_dates$date)
+  
+  return(STcon_datelist)
+}
+
+
+#------ postprocess_STcon ------------------------------------------------------
+# tar_load(STcon_rolling_list)
+# tar_load(STcon_rolling_ref_list)
+# tar_load(preformatted_data_STcon)
+# 
+# in_country <- 'Croatia'
+# in_STcon <- STcon_rolling_list[[in_country]]
+# in_STcon_ref <- STcon_rolling_ref_list[[in_country]]
+# in_preformatted_data_STcon <- preformatted_data_STcon[[in_country]]
+# window_name <- 'STcon_m365'
+# date <- '2021-02-25'
+# standardize_STcon = FALSE
+
+postprocess_STcon <- function(in_STcon, 
+                              standardize_STcon = FALSE, in_STcon_ref = NULL) {
+  
+  STcon_dt <- lapply(names(in_STcon), function(window_name) {
+    lapply(names(in_STcon[[window_name]]), function(date) {
+      if (standardize_STcon & !is.null(in_STcon_ref)) {
+        out_STcon <- (in_STcon[[window_name]][[date]]$STcon/
+                        in_STcon_ref[[window_name]][[date]]$STcon)
+      } else {
+        out_STcon <- in_STcon[[window_name]][[date]]$STcon
+      }
+      
+      out_dt <- data.table(variable = window_name,
+                           date = as.Date(date),
+                           UID = in_STcon[[window_name]][[date]]$IDs,
+                           value = out_STcon
+      )
+    }) %>% rbindlist
+  }) %>% rbindlist 
+  
+  STcon_mat <- lapply(names(in_STcon), function(window_name) {
+    lapply(names(in_STcon[[window_name]]), function(date) {
+      if (!is.null(in_STcon[[window_name]][[date]]$STconmat)) {
+        if (standardize_STcon & !is.null(in_STcon_ref)) {
+          out_STconmat <- (in_STcon[[window_name]][[date]]$STconmat/
+                             in_STcon_ref[[window_name]][[date]]$STconmat)
+        } else {
+          out_STconmat <- in_STcon[[window_name]][[date]]$STconmat
+        }
+        
+        data.table(variable = window_name,
+                   date = as.Date(date),
+                   UID = in_STcon[[window_name]][[date]]$IDs,
+                   STconmat = list(out_STconmat)
+        )
+      }
+    }) %>% rbindlist
+  }) %>% rbindlist
+  
+  return(list(
+    STcon_dt = STcon_dt,
+    STcon_mat = STcon_mat
+  ))
+}
+
+#------ plot_STcon -------------------------------------------------------------
+
 
 
 #------ merge_alphadat ---------------------------------------------------------
@@ -2910,17 +3079,17 @@ merge_alphadat <- function(in_sprich, in_hydrostats_comb) {
     
     cols_to_keep <- names(in_hydrostats_isflowing)[
       (!names(in_hydrostats_isflowing) %in% names(in_hydrostats_qsim)) |
-       (names(in_hydrostats_isflowing) %in% c('date','site'))] 
-
+        (names(in_hydrostats_isflowing) %in% c('date','site'))] 
+    
     sprich_hydro_drn <- merge(in_sprich[drn==in_country,],
-                          in_hydrostats_isflowing[, cols_to_keep, with=F],
-                          by=c('date', 'site')) %>%
+                              in_hydrostats_isflowing[, cols_to_keep, with=F],
+                              by=c('date', 'site')) %>%
       merge(in_hydrostats_qsim, by=c('date', 'site'))
-
+    
     return(sprich_hydro_drn)  
   }) %>% rbindlist
   
- return(sprich_hydro)
+  return(sprich_hydro)
 }
 
 
