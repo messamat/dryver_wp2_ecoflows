@@ -107,14 +107,6 @@
 #time unit. It is a vector with values ranging from
 #0 to 1 that will modulate the relevance of a connection through time. 
 
-# WARNING !# WARNING !# WARNING !# WARNING !# WARNING !# WARNING !# WARNING !
-# WARNING !# WARNING !# WARNING !# WARNING !# WARNING !# WARNING !# WARNING !
-# The values of interm_dataset,Sites_coordinates,network_structure must be entered in 
-# a list format, even if only 1 matrix is used. 
-#This is done in order to allow the possibility to enter several streams in 
-# one call and obtain the results according to that.
-# In case of using dist_matrices and link_weights they must also be entered as list(). 
-
 spat_temp_index_edit <- function(interm_dataset, 
                                  network_structure,
                                  direction,
@@ -125,49 +117,69 @@ spat_temp_index_edit <- function(interm_dataset,
                                  link_weights,
                                  indirect_dispersal = TRUE,
                                  standardize_neighbors = FALSE,
-                                 value_s_link = 1,
-                                 value_t_link = 1,
-                                 value_no_s_link = 0,
-                                 value_no_t_link = 0,
-                                 legacy_effect = 1,
-                                 legacy_length = 1,
+                                 value_s_link = 1L,
+                                 value_t_link = 1L,
+                                 value_no_s_link = 0L,
+                                 value_no_t_link = 0L,
+                                 legacy_effect = 1L,
+                                 legacy_length = 1L,
+                                 convert_to_integer = TRUE, 
+                                 rounding_factor = 100L,
                                  verbose = T,
                                  output = c('Main_matrix', 
                                             'STconmat',
                                             'STcon')) {
-  if (verbose) {
-    if(direction=="directed"){
-      cat("Your river will be considered as a directed graph","\n")}
-    if(direction=="undirected"){
-      cat("Your river will be considered as an undirected graph","\n")}
-    
-    # We select the corresponding distance matrix
-    if(weighting_links==T){
-      cat("Your links will be weighted with daily data",
-          "entered in the 'link_weights'","\n")
-      if(nrow(link_weights[[1]])!=nrow(interm_dataset[[1]]) & 
-         ncol(link_weights[[1]])!=ncol(interm_dataset[[1]])){
-        return(cat("!!!ERROR: Intermitence dataset and link_weights", 
-                   "must have the same dimensions!","\n"))}
-    }
-    if(weighting_links==F){cat("Your links will be normal,", "
-                             as defined in the LINK/NO_LINK","\n")}
-    
-    # We select the corresponding distance matrix
-    if(weighting==T){cat("Your connectivity will be Weighted,", 
-                         "connections will be multiplied by 'dist_matrices'","\n")}
-    if(weighting==F){cat("Your connectivity will be NON weighted, connections", "
-                       will not be multiplied by any distance matrix","\n")}
-    
-    if(legacy_length!=length(legacy_effect)){
-      return(cat("!!!ERROR: The length of your legacy effects is", 
-                 length(legacy_effect), "and your legacy length is", 
-                 legacy_length,"! They must be the same!", "\n"))}
-    
-    if(weighting==T & is.matrix(dist_matrices)==F){
-      return(cat("!!!ERROR: Your distance matrix must be a list object"))}
-  }
 
+  # Validate `direction`
+  assert_that(direction %in% c("directed", "undirected"), 
+              msg = "ERROR: 'direction' must be either 'directed' or 'undirected'.")
+  
+  if (verbose) {
+    message("Your river will be considered as a ", 
+            ifelse(direction == "directed", "directed", "undirected"), " graph.")
+  }
+  
+  # Validate `weighting_links`
+  assert_that(is.logical(weighting_links), 
+              msg = "ERROR: 'weighting_links' must be a logical (TRUE or FALSE).")
+  
+  # Validate `link_weights` if weighting is enabled
+  if (isTRUE(weighting_links)) {
+    assert_that(is.list(link_weights), 
+                msg = "ERROR: 'link_weights' must be a list when 'weighting_links' is TRUE.")
+    
+    assert_that(nrow(link_weights) == nrow(interm_dataset) && 
+                  ncol(link_weights) == ncol(interm_dataset),
+                msg = "ERROR: 'link_weights' and 'interm_dataset' must have the same dimensions.")
+    
+    if (verbose) message("Your links will be weighted with daily data entered in 'link_weights'.")
+  } else {
+    if (verbose) message("Your links will be unweighted, as defined in the LINK/NO_LINK structure.")
+  }
+  
+  # Validate `weighting`
+  assert_that(is.logical(weighting), 
+              msg = "ERROR: 'weighting' must be a logical (TRUE or FALSE).")
+  
+  if (isTRUE(weighting)) {
+    if (verbose) message("Your connectivity will be Weighted; connections will be multiplied by 'dist_matrices'.")
+    assert_that(is.matrix(dist_matrices), 
+                msg = "ERROR: 'dist_matrices' must be a matrix object when 'weighting' is TRUE.")
+  } else {
+    if (verbose) message("Your connectivity will be NON-weighted; connections will not be multiplied by any distance matrix.")
+  }
+  
+  # Validate `legacy_length` and `legacy_effect`
+  assert_that(is.numeric(legacy_length) && length(legacy_length) == 1, 
+              msg = "ERROR: 'legacy_length' must be a single numeric value.")
+  
+  assert_that(length(legacy_effect) == legacy_length, 
+              msg = paste("ERROR: The length of 'legacy_effect' is", length(legacy_effect), 
+                          "but 'legacy_length' is", legacy_length, ". They must be the same."))
+
+  assert_that(nrow(network_structure) == ncol(interm_dataset),
+              msg = "ERROR: number of rows in network structure must match number of columns in interm_dataset.")
+  
   ####_______________________________________________________________________
   # River network ####
   ####_______________________________________________________________________
@@ -185,7 +197,7 @@ spat_temp_index_edit <- function(interm_dataset,
                           dimnames = list(colnames(interm_dataset),
                                           rep(colnames(interm_dataset), 2)))
   ST_matrix_netwGraph_raw <- matrix(nrow = numn_nodes, ncol = numn_nodes, 
-                                    data = 0,
+                                    data = 0L,
                                     dimnames = list(colnames(interm_dataset),
                                                     colnames(interm_dataset)))
   # First we define the spatial connections of the matrix
@@ -210,16 +222,14 @@ spat_temp_index_edit <- function(interm_dataset,
     #for sites that are dry, 0s to all sites
     ST_matrix_netwGraph[time_step_1 == 1,] <- network_structure[time_step_1 == 1,]
     diag_backup <- diag(ST_matrix_netwGraph)
-    ST_matrix_netwGraph[time_step_1 == 0,] <- 0
+    ST_matrix_netwGraph[time_step_1 == 0,] <- 0L
     diag(ST_matrix_netwGraph) <- diag_backup #####REMARK Mathis: not sure why this is needed
     #It's equivalent to [-site_step] in the original code
     #ST_matrix_netwGraph[spa_connections[site_step],
     #c(spa_connections[1]:spa_connections[numn_nodes])[-site_step]] <- 0
     
     # FLuvial SPATIAL links ____________________________________________________
-    ## Here we fill the matrix section corresponding to the time_step based 
-    # on the river graph based on a dendritic. 
-    # We create the graph
+    ## Fill the matrix section corresponding to the time_step based on river graph 
     a <- igraph::graph_from_adjacency_matrix(ST_matrix_netwGraph, 
                                              mode = direction, 
                                              diag = FALSE)
@@ -228,22 +238,24 @@ spat_temp_index_edit <- function(interm_dataset,
     dist_matrix_day <- igraph::distances(a, mode = sense,
                                          algorithm = "unweighted")
     
+    # PROCESS SPATIAL STEP -----------------------------------------------------
     # Convert distances into binary connectivity (1 if connected, 0 if not)
-    All_river_paths <- fifelse(!is.infinite(dist_matrix_day), value_s_link, value_no_s_link)
+    All_river_paths <- fifelse(!is.infinite(dist_matrix_day), 
+                               value_s_link, value_no_s_link)
     
-    #weight the links base on daily information of flow or strength of the link.
+    # Weight the links base on daily information of flow or strength of the link.
     if (weighting_links == TRUE) {
       All_river_paths <- All_river_paths * as.numeric(day_link_weights)
     }
-    # We weight the sites for the distances between them (a pairwise matrix)
+    # Weigh the sites based on the distances between them (a pairwise matrix)
     if (weighting == TRUE) {
       All_river_paths <- All_river_paths * dist_matr
     }
     
-    # We add the "All_river_paths" filled for each node in the "big" matrix specific sites
+    # Add the "All_river_paths" filled for each node in the "big" matrix
     ST_matrix[, spa_connections] <- ST_matrix[, spa_connections] + All_river_paths
     
-    # # In the following lines we continue the party towards temporal steps-------
+    # PROCESS TEMPORAL STEPS ---------------------------------------------------
     # We create the matrix where we will drop the information of the shortest paths.
     All_river_paths <- matrix(nrow = length(time_step_1),
                               ncol = length(time_step_1),
@@ -263,7 +275,7 @@ spat_temp_index_edit <- function(interm_dataset,
       !is.infinite(dist_matrix_day[stable_indices_1, ]),
       value_t_link, value_no_t_link)
     
-    #Indirect dispersal for lost nodes (1->0) ################ NOT APPLYING THIS ASSUMPTION
+    #Indirect dispersal for lost nodes (1->0) 
     if (indirect_dispersal & (weighting == FALSE)) {
       All_river_paths[lost_indices, ] <- 
         All_river_paths[lost_indices, ] + 
@@ -294,9 +306,9 @@ spat_temp_index_edit <- function(interm_dataset,
     return(ST_matrix)
   }
   
-  # Once created the template we start to fill it for every day
-  ### We fill it for Days (or time)-1 because the last day does not have a 
-  #"future" from which to extract values. 
+  # Run function for every day
+  ### For time step -1 because the last day does not have a "future" from 
+  ### which to extract values. 
   ST_matrix <- lapply(1:(nsteps-1), function(day) {
     if (verbose) cat("We are at time unit", day, "of", (nsteps-1), "\n")
     spa_temp_index_daily(ST_matrix = ST_matrix_raw, 
@@ -314,6 +326,10 @@ spat_temp_index_edit <- function(interm_dataset,
   
   if (any(c('all', 'STconmat') %in% output)) {
     ST_matrix_collapsed_standardized <- ST_matrix_collapsed/c(nsteps-1)
+    if (convert_to_integer) {
+      ST_matrix_collapsed_standardized <- as.integer(
+        round(rounding_factor*ST_matrix_collapsed_standardized))
+    }
   } else {
     ST_matrix_collapsed_standardized <- NULL
   }
@@ -335,6 +351,11 @@ spat_temp_index_edit <- function(interm_dataset,
     }
     # We divide by the number of days so we obtain the "per day" values
     spt_conn <- spt_conn/c(nsteps-1)
+    
+    if (convert_to_integer) {
+      spt_conn <- as.integer(
+        round(rounding_factor*spt_conn))
+    }
   } else {
     spt_conn <- NULL
   }
@@ -342,6 +363,10 @@ spat_temp_index_edit <- function(interm_dataset,
   # OUTPUTS _______________________####
   if (!(any(c('all', 'Main_matrix') %in% output))) {
     ST_matrix <- NULL
+  } else {
+    if (convert_to_integer) {
+      ST_matrix<- as.integer(round(rounding_factor*ST_matrix))
+    }
   }
   
   Main_output <- list(

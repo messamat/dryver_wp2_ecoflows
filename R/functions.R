@@ -2881,11 +2881,11 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
   V(net_graph)$UID <- as.character(nodes_cat$UID)
   
   #Compute edge distances for distance matrices
-  E(net_graph)$weight <- net_dt$length_m
+  E(net_graph)$weight <- as.integer(net_dt$length_m)
   
-  #Compute distance matrix
+  #Compute distance matrix (in integer, lighter to handle -- one-meter difference does not matter)
   river_dist_mat <- igraph::distances(net_graph)
-    
+
   #Format intermittence data
   setDT(in_hydromod_drn$data_all) %>%
     setnames('reach_id', 'cat')
@@ -2903,7 +2903,8 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
   interm_dataset <- 
     merge(net_dt, in_hydromod_drn$data_all, by='cat') %>%
     rbind(end_point_interm, fill=T) %>%
-    .[is.na(isflowing), isflowing := 1] %>% #FILL NAs in original hydrological data
+    .[, isflowing := as.integer(isflowing)] %>%
+    .[is.na(isflowing), isflowing := 1L] %>% #FILL NAs in original hydrological data
     setorder(from) %>%
     dcast(date + nsim ~ from, value.var = 'isflowing')
   
@@ -2913,7 +2914,7 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
   #Create "reference river" datasets
   interm_ref <- interm_dataset %>%
     filter(nsim == 1) %>%
-    replace(.==0,1) 
+    replace(.==0, 1L) 
   
   return(list(
     interm_dataset = interm_dataset,
@@ -2929,7 +2930,7 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
 # in_preformatted_data <- tar_read(preformatted_data_STcon)[[in_drn]]
 # in_bio_dt <- tar_read(bio_dt)
 # in_nsim <- tar_read(hydromod_paths_dt)[country == in_drn,]$best_sim
-# 
+
 # unique_sampling_dates <- lapply(in_bio_dt, function(org_dt) {
 #   org_dt[country==in_drn, .(date)]
 # }) %>% rbindlist %>% unique
@@ -2953,12 +2954,15 @@ compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL,
     in_nsim <- unique(in_preformatted_data$interm_dataset$nsim)
   }
   
+  #Select reference data or 
+  #actual data with intermittence (for which a simulation is selected)
   interm_dt_sel <- if (ref) {in_preformatted_data$interm_ref
   } else {in_preformatted_data$interm_dataset[nsim %in% in_nsim,]}
   
   #Compute STcon for every date and previous window of time across simulations
   STcon_datelist <- lapply(in_dates$date, function(end_date) {
     if (verbose) print(end_date)
+    
     interm_sub <- interm_dt_sel[
       (date %in% seq(from=end_date-(window-1), to=end_date, by='day')),] %>%
       setorder(date)
@@ -2967,8 +2971,8 @@ compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL,
       value_s_link = value_t_link = 0.1
       value_no_s_link = value_no_t_link = 1
     } else {
-      value_no_s_link = value_no_t_link = 0
-      value_s_link = value_t_link = 1
+      value_no_s_link = value_no_t_link = 0L
+      value_s_link = value_t_link = 1L
     }
     
     STcon_list <- spat_temp_index_edit(
@@ -2999,24 +3003,37 @@ compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL,
 
 
 #------ postprocess_STcon ------------------------------------------------------
-# tar_load(STcon_rolling_list)
+# tar_load(STcon_undirected_list)
+# tar_load(STcon_directed_list)
 # tar_load(STcon_rolling_ref_list)
 # tar_load(preformatted_data_STcon)
 # 
 # in_country <- 'Croatia'
-# in_STcon <- STcon_rolling_list[[in_country]]
-# in_STcon_ref <- STcon_rolling_ref_list[[in_country]]
+# in_STcon <- STcon_undirected_list[[in_country]]
+# #in_STcon_ref <- STcon_directed_ref_list[[in_country]]
 # in_preformatted_data_STcon <- preformatted_data_STcon[[in_country]]
 # window_name <- 'STcon_m365'
 # date <- '2021-02-25'
 # standardize_STcon = FALSE
+# in_STcon_ref = NULL
+# in_net_shp_path <- tar_read(network_ssnready_shp_list)[[in_country]]
 
-postprocess_STcon <- function(in_STcon, 
+postprocess_STcon <- function(in_STcon, in_net_shp_path,
                               standardize_STcon = FALSE, in_STcon_ref = NULL) {
   
+  #Get original network data
+  net_dt <- vect(in_net_shp_path) %>%
+    as.data.table %>%
+    setorder(from)
+  
+  #Identify the outlet (NA in to_cat_shp)
+  outlet_from <- net_dt[which(is.na(net_dt$to_cat_shp)==T),]$to 
+  
+  #Compile STcon data in long format by window size, date, and ID
   STcon_dt <- lapply(names(in_STcon), function(window_name) {
     lapply(names(in_STcon[[window_name]]), function(date) {
       if (standardize_STcon & !is.null(in_STcon_ref)) {
+        #Standardize by STcon in a network without intermittence
         out_STcon <- (in_STcon[[window_name]][[date]]$STcon/
                         in_STcon_ref[[window_name]][[date]]$STcon)
       } else {
@@ -3025,12 +3042,21 @@ postprocess_STcon <- function(in_STcon,
       
       out_dt <- data.table(variable = window_name,
                            date = as.Date(date),
-                           UID = in_STcon[[window_name]][[date]]$IDs,
+                           from = in_STcon[[window_name]][[date]]$IDs,
                            value = out_STcon
-      )
+      ) %>% .[from != outlet_from,] #Remove outlet
     }) %>% rbindlist
-  }) %>% rbindlist 
+  }) %>% rbindlist %>%
+    merge(net_dt[, list(from=as.character(from), UID)], by='from') %>% #Replace from IDs with UID
+    .[, from := NULL]
   
+  #Compile STcon matrices by window size and date 
+  #Prepare UIDs to assign to col/rownames (removing outlet)
+  UIDs_order <- as.integer(in_STcon[[names(in_STcon)[1]]][[1]]$IDs) %>%
+    setdiff(outlet_from) %>%
+    match(net_dt$from) 
+  UIDs_to_assign <- net_dt[UIDs_order, UID]
+    
   STcon_mat <- lapply(names(in_STcon), function(window_name) {
     lapply(names(in_STcon[[window_name]]), function(date) {
       if (!is.null(in_STcon[[window_name]][[date]]$STconmat)) {
@@ -3041,9 +3067,16 @@ postprocess_STcon <- function(in_STcon,
           out_STconmat <- in_STcon[[window_name]][[date]]$STconmat
         }
         
+        #Remove outlet
+        out_STconmat <- out_STconmat[rownames(out_STconmat) != 
+                                       as.character(outlet_from), 
+                                     colnames(out_STconmat) != 
+                                       as.character(outlet_from)]
+        #Assign UIDs
+        colnames(out_STconmat) <- rownames(out_STconmat) <- UIDs_to_assign
+        
         data.table(variable = window_name,
                    date = as.Date(date),
-                   UID = in_STcon[[window_name]][[date]]$IDs,
                    STconmat = list(out_STconmat)
         )
       }
@@ -3056,8 +3089,11 @@ postprocess_STcon <- function(in_STcon,
   ))
 }
 
-#------ plot_STcon -------------------------------------------------------------
-
+#------ plot_STcon ------------------------------------------------------------
+# tar_load(STcon_list)
+# in_STcon_list <- 
+# in_date <- 
+# in_net_shp_path <- 
 
 
 #------ merge_alphadat ---------------------------------------------------------

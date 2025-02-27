@@ -1,6 +1,7 @@
 pkg_vec <- list(
   'ade4',
   'adespatial',
+  'assertthat',
   'dbscan',
   'dplyr',
   'future.apply',
