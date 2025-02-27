@@ -10,7 +10,7 @@ library(igraph)
 #library(riverconn)
 
 working_directory <- file.path(getwd(), "bin", "STcon_DRYvER")
-#setwd(working_directory)
+setwd(working_directory)
 
 # load functions
 source("functions_flow_intermittence_indicators.R")
@@ -91,7 +91,7 @@ nodes_cat <- shape_DRN %>%
 V(igr1)$UID <- as.character(nodes_cat$UID)
 
 #Compute edge distances for distance matrices
-E(igr1)$weight <- DRN_adj_table$length_m
+E(igr1)$weight <- as.integer(DRN_adj_table$length_m)
 
 # Using riverconn package (Damiano is the best) we set the directionality towards 11111 vertex. Our outlet.
 # This is a key step to ensure that the network ends where it needs to end! Otherwise MISTAKE! 
@@ -139,7 +139,7 @@ plotly::ggplotly(igraph_p, tooltip = "text")
 End_point <- flow_intermittence %>% 
   filter(reachID==flow_intermittence$reachID[1]) %>%# We select whatever reach
   rename("cat"="reachID") %>% 
-  mutate(cat="11111", value=1, UID= 'UID11111', from=4) %>% #Modify its values as we wish 
+  mutate(cat="11111", value=1L, UID= 'UID11111', from=4) %>% #Modify its values as we wish 
   select(dates, cat, UID, value, from) # select only this three values to merge them later
 
 # Now last step to "merge" everything together into the Intermittence dataset
@@ -160,6 +160,7 @@ interm_dataset <-
   select(dates, cat, UID, from, value) %>% 
   bind_rows(End_point)  %>%
   arrange(from) %>% 
+  mutate(value=as.integer(value)) %>%
   pivot_wider(id_cols = dates, names_from = from, values_from = value) %>% 
   mutate(dates=as.factor(dates))
 
@@ -168,7 +169,7 @@ interm_dataset <-
 
 # You cut the length of the intermittence according to whatever you want. In this case we select the first 
 # 30 days of the whole dataset. 
-FL_intermitence_cut <- as.data.frame(interm_dataset[1:10,]) # THIS IS THE MOST IMPORTANT POINT! WHERE YOU DEFINE THE TIME WINDOW!!!! 
+FL_intermitence_cut <- as.data.frame(interm_dataset[1:50,]) # THIS IS THE MOST IMPORTANT POINT! WHERE YOU DEFINE THE TIME WINDOW!!!! 
 
 # We built the matrix of the network structure for the STcon, which is the "base" on which connectivity will be assessed. 
 Network_structure <- as.data.frame(as.matrix(as_adjacency_matrix(igr1))) %>%
@@ -225,24 +226,24 @@ DirNonW_original <- spat_temp_index(
 tictoc::toc()
 
 
-interm_dataset = as.matrix(interm_dataset_campaigns_To_Run[[2]][, 2:interm_ncols])
-network_structure = as.matrix(Network_stru_campaigns_To_Run[[1]]) 
-direction="directed" 
-sense= "in"
-weighting= F
-dist_matrices = NULL # Weighting pairs
-weighting_links =F
-indirect_dispersal = TRUE
-standardize_neighbors = FALSE
-link_weights = NULL # Weighting links
-legacy_effect = 1 
-legacy_length = 1 # Legacy effects
-value_s_link=1
-value_t_link=1 # Values to links
-value_no_s_link=0
-value_no_t_link=0 # Values to links
-verbose = TRUE
-output = c('Main_matrix', 'STconmat','STcon')
+# interm_dataset = as.matrix(interm_dataset_campaigns_To_Run[[2]][, 2:interm_ncols])
+# network_structure = as.matrix(Network_stru_campaigns_To_Run[[1]]) 
+# direction="directed" 
+# sense= "in"
+# weighting= F
+# dist_matrices = NULL # Weighting pairs
+# weighting_links =F
+# indirect_dispersal = TRUE
+# standardize_neighbors = FALSE
+# link_weights = NULL # Weighting links
+# legacy_effect = 1 
+# legacy_length = 1 # Legacy effects
+# value_s_link=1
+# value_t_link=1 # Values to links
+# value_no_s_link=0
+# value_no_t_link=0 # Values to links
+# verbose = TRUE
+# output = c('Main_matrix', 'STconmat','STcon')
 
 tictoc::tic()
 DirNonW <- spat_temp_index_edit(
@@ -256,15 +257,60 @@ DirNonW <- spat_temp_index_edit(
   indirect_dispersal = TRUE,
   standardize_neighbors = FALSE,
   link_weights = NULL, # Weighting links
-  legacy_effect = 1, 
-  legacy_length = 1, # Legacy effects
-  value_s_link=1,
-  value_t_link=1, # Values to links
-  value_no_s_link=0,
-  value_no_t_link=0, # Values to links
-  verbose = TRUE
+  legacy_effect = 1L, 
+  legacy_length = 1L, # Legacy effects
+  value_s_link=1L,
+  value_t_link=1L, # Values to links
+  value_no_s_link=0L,
+  value_no_t_link=0L, # Values to links
+  verbose = FALSE
 )
 tictoc::toc()
+
+microbench <- microbenchmark::microbenchmark(
+  rounding = spat_temp_index_edit(
+    interm_dataset = as.matrix(interm_dataset_campaigns_To_Run[[1]][, 2:interm_ncols]),
+    network_structure = as.matrix(Network_stru_campaigns_To_Run[[1]]), 
+    direction="directed", 
+    sense= "in",
+    weighting= F,
+    dist_matrices = NULL, # Weighting pairs
+    weighting_links =F,
+    indirect_dispersal = TRUE,
+    standardize_neighbors = FALSE,
+    link_weights = NULL, # Weighting links
+    legacy_effect = 1L, 
+    legacy_length = 1L, # Legacy effects
+    value_s_link=1L,
+    value_t_link=1L, # Values to links
+    value_no_s_link=0L,
+    value_no_t_link=0L, # Values to links
+    convert_to_integer = T,
+    verbose = FALSE
+  ),
+  not_rounding = spat_temp_index_edit(
+    interm_dataset = as.matrix(interm_dataset_campaigns_To_Run[[1]][, 2:interm_ncols]),
+    network_structure = as.matrix(Network_stru_campaigns_To_Run[[1]]), 
+    direction="directed", 
+    sense= "in",
+    weighting= F,
+    dist_matrices = NULL, # Weighting pairs
+    weighting_links =F,
+    indirect_dispersal = TRUE,
+    standardize_neighbors = FALSE,
+    link_weights = NULL, # Weighting links
+    legacy_effect = 1L, 
+    legacy_length = 1L, # Legacy effects
+    value_s_link=1L,
+    value_t_link=1L, # Values to links
+    value_no_s_link=0L,
+    value_no_t_link=0L, # Values to links
+    convert_to_integer = F,
+    verbose = FALSE
+  ),
+  times = 20L
+)
+
 
 all(DirNonW_original$STcon[[1]] == DirNonW$STcon, na.rm=T)
 
