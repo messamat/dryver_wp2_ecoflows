@@ -437,8 +437,9 @@ analysis_targets <- list(
               window = in_window, 
               output = in_output,
               direction = 'directed',
-              sense = 'in',
-              weighting = TRUE)
+              routing_mode = 'in',
+              weighting = TRUE,
+              rounding_factor = 1)
           }) %>% setNames(paste0('STcon_m', window_size_list)) #60, 90, 180, 
         })
       setNames(out_STcon_list, names(preformatted_data_STcon))
@@ -475,8 +476,9 @@ analysis_targets <- list(
               window = in_window, 
               output = in_output,
               direction = 'undirected',
-              sense = 'all',
-              weighting = TRUE)
+              routing_mode = 'all',
+              weighting = TRUE,
+              rounding_factor = 1)
           }) %>% setNames(paste0('STcon_m', window_size_list)) #60, 90, 180, 
         })
       setNames(out_STcon_list, names(preformatted_data_STcon))
@@ -690,7 +692,7 @@ list(preformatting_targets, mapped_hydrotargets,
 #                                 window = in_window,
 #                                 output = in_output,
 #                                 direction = 'directed',
-#                                 sense = 'in',
+#                                 routing_mode = 'in',
 #                                 weighting = FALSE)
 #         }) %>% setNames(paste0('STcon_m', window_size_list))
 #       })

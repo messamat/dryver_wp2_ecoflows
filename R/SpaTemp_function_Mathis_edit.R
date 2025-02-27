@@ -1,118 +1,96 @@
-#_______________________________________________________________________________#
-#_______________________________________________________________________________#
-#______________ spat_temp_index function _______________________________________#
-#_______________________________________________________________________________#
-#_______________________________________________________________________________#
-
-# We present the function "spat_temp_index" a function to calculate Spatiotemporal
-#connectiviy indices based on spatiotemporal graph networks. The aim of this 
-#function is to provide a methodological framework from which to calculate these 
-#indices based on high-frequency (or frequency-based) information obtained from natural ecosystems. 
-
-# The current script is a modification of the original function introduced in
-# the article titled: 
-#Navigating through space and time: a methodological approach to quantify 
-#spatiotemporal connectivity using flow intermittence data as a study case.
-#David Cunillera-Montcusi, Jose Maria Fernandez-Calero, Sebastian Polsterl, 
-#Julia Valera, Roger Argelich, Nuria Cid, Nuria Bonada, Miguel Canedo-Arguelles
-
-# The original script was written by David Cunillera-Montcusi and modified
-# by Mathis Messager
-# Feedback: david.cunillera@dcm.cat and mathis.messager@mail.mcgill.ca
-
-# Intermitence_dataset ____________#
-# See below, an example of the type of matrix that must be entered in the function 
-#as interm_dataset
-#data.frame(
-#MonitoredDays= c("Day1","Day2","Day3","Day4"), # An identifier for the monitored 
-#days from ORDERED from the "oldest" to the "newest"
-#StreamSite1=c(0,1,1,1), # More upstream site water presence record (1= water presence, 0= water absence)
-#StreamSite2=c(0,1,1,1), # Following monitored site water presence record in descending order 
-#StreamSite3=c(0,1,1,1), # Following monitored site water presence record in descending order 
-#StreamSite4=c(0,0,0,1), # Following monitored site water presence record in descending order 
-#StreamSite5=c(0,1,0,1), # Following monitored site water presence record in descending order 
-#)
-# This information is KEY to preserve the structure and functioning of the function.
-#The system does not necessarily need to quantify water absence/presence 
-#but each cell value must represent a feature defining connectivity "on" or "off" 
-#and that can be transmitted to build ecologically meaningful links in a
-#spatiotemporal graph. 
-
-# Sites coordinates ____________#
-# The coordinates of the sites must be located at columns 3 and 4 of the 
-# data.frame in order to be read properly.
-
-# LINK and NO-LINK values ____________#
-# The meaning of a "LINK" (Input matrix value= 1) or a "NO-LINK" (Input matrix value= 0) 
-# can be modified inside the function according
-#to the different interpretations that one once to give to the values (e.g. do 
-#we want to quantify connectivity? dispersal resistance?)
-#see the above mentioned paper to see an specific example. 
-
-# Set direction ____________#
-# direction can be either "directed" or "undirected". This feature will modify 
-# the way the graph is being controlled. 
-
-# sense ____________#
-# Sense is referring to the direction that will be considered for the graph 
-# connectivity when directed. Specially for centrality metrics. 
-# It can be either "in", "out", "all". See ?igraph or ?igraph::closeness
+#' Calculate Spatiotemporal Connectivity Index
+#'
+#' This function calculates spatiotemporal connectivity indices based on 
+#' spatiotemporal graph networks. The aim is to provide a methodological framework 
+#' for calculating these indices based on high-frequency information obtained 
+#' from natural ecosystems.
+#'
+#' The system does not necessarily need to quantify water absence/presence 
+#' but each cell value must represent a feature defining connectivity "on" or "off" 
+#' and that can be transmitted to build ecologically meaningful links in a
+#' spatiotemporal graph. 
+#'
+#' @param sites_status_matrix A matrix representing the status of the site (wet/dry, 
+#' active/inactive). 
+#' The dataset should have columns for each site and rows for each monitored day.
+#' @param network_structure A square matrix representing the basic connections among 
+#' sites (adjacency matrix): for a given site (row), each adjacent connected 
+#' site (column) is given a value of 1, all others 0. Must have the same number
+#' of rows and columns as there are columns in site_status_matrix.
+#' @param direction The direction of the graph, either "directed" or "undirected".
+#' @param routing_mode The direction for graph connectivity when directed, 
+#' can be "in" (routing from upstream if directed), "out" (routing from 
+#' downstream if directed), or "all". See ?igraph or ?igraph::closeness
 # for a better understanding. 
+#' @param weighting Logical; whether to weight the connectivity based on distances.
+#' @param dist_matrix A distance matrix representing the distances between sites.
+#' Can be any type of distance (euclidean, environmental, topographic, ...) 
+#' between pairs of sites
+#' @param weighting_links Logical; whether to use specific data for each time 
+#' unit to quantify connections.
+#' @param link_weights A list of data frames with the same structure as 
+#' `site_status_mat`, providing daily flow data.
+#' @param indirect_dispersal Logical; whether to consider indirect dispersal 
+#' for lost nodes (i.e., a bump in dispersal before disconnection).
+#' @param standardize_neighbors Logical; whether to standardize STCon based 
+#' on the number of possible connections (i.e., number of upstream neighbors
+#' for downstream nodes when routing_mode==in, as downstream nodes will
+#' necessarily have higher values everything being equal).
+#' @param value_s_link Numeric; value attributed to each spatial link.
+#' @param value_t_link Numeric; value attributed to each temporal link.
+#' @param value_no_s_link Numeric; value attributed to spatial disconnections.
+#' @param value_no_t_link Numeric; value attributed to temporal disconnections.
+#' @param legacy_effect Numeric; weight given to the link/no-link values for each time unit.
+#' It is a vector of length legacy_length with values ranging from 0 to 1 to
+#' modulate the relevance of a connection through time.
+#' @param legacy_length Numeric; number of time units considered for legacy effects.
+#' Set to 1 by default (i.e., the connectivity of time T1 will only be considered for T2).
+#' If value is set at legacy_length=3, the connectivity of T1 will be considered 
+#' for T2, T3, and T4.
+#' @param convert_to_integer Logical; whether to convert the output to integers 
+#' to minimize storage of outputs.
+#' @param rounding_factor Numeric; factor used for rounding the output before 
+#' converting to integer (can be a fraction of 1 when distances are large so that
+#' STCon < 2*10^9 to be converted).
+#' @param verbose Logical; whether to print messages during the function execution.
+#' @param output A character vector specifying the output components: 
+#' 'Main_matrix', 'STconmat', 'STcon'.
+#'
+#' @return A list containing the spatiotemporal connectivity matrix, 
+#' the collapsing matrix (STconmat), and the standardized connectivity (STcon).
+#' @export
+#'
+#' @references
+#' The current script is a modification of the original function introduced in:
+#' Cunillera-Montcusi, D., Fernandez-Calero, J. M., Polsterl, S., Valera, J., 
+#' Argelich, R., Cid, N., Bonada, N., & Canedo-Arguelles, M. (2023). 
+#' Navigating through space and time: a methodological approach to quantify 
+#' spatiotemporal connectivity using flow intermittence data as a study case.
+#'
+#' @authors 
+#' David Cunillera-Montcusi (\email{david.cunillera@dcm.cat}), original developer
+#' Mathis Messager (\email{mathis.messager@mail.mcgill.ca}), code optimization
+#'
+#' @examples
+#' \dontrun{
+#' site_status_mat <- data.frame(
+#'   MonitoredDays = c("Day1", "Day2", "Day3", "Day4"),
+#'   StreamSite1 = c(0, 1, 1, 1),
+#'   StreamSite2 = c(0, 1, 1, 1),
+#'   StreamSite3 = c(0, 1, 1, 1),
+#'   StreamSite4 = c(0, 0, 0, 1),
+#'   StreamSite5 = c(0, 1, 0, 1)
+#' )
+#' network_structure <- matrix(1, ncol = 5, nrow = 5)
+#' compute_stcon(site_status_mat, network_structure, direction = "directed")
+#' }
 
-# Weighting ____________#
-# weighting either FALSE or TRUE --> The value of the weight is defined by the 
-# matrix added (must be in a distance matrix format) and 
-#can consider any type of distance between pairs of monitored sites 
-# (euclidean, environmental, topographic, ...)
-#dist_matrices--> corresponds to the attached matrix representing the 
-# "distances" between sites. 
-
-# network_structurecture ____________#
-# Network structure is a matrix that corresponds to the "basic" connections that 
-# can be possible. An adjacency matrix where all sites are connected among them. 
-# Should be equivalent to the network that you would expect from a "fully"
-# connected network. 
-
-# weighting_links=FALSE & link_weights ____________#
-# In case that instead of using the values used as "LINKS/NO-LINKS" that are 
-# "qualitative" we have specific data for every time unit that can be used to 
-# quantify the connections between sites (e.g. flow data, wind strenght etcetera). 
-# This information can be incorporated by selecting weighting_links=TRUE and then 
-# providing a list of data.frames with exactly the same information as the 
-# "Intermitence_dataset", having the same amount of rows and columns (e.g. dauly 
-# flow data in each site).
-
-# LINKS / NO-LINKS  ____________#
-# value_LINK is the value attributed for each "effective link", which is a
-# connection between two nodes (a line)
-# - value_s_link for spatial links
-# - value_t_link for temporal links
-# value_NO_link is the value for each "effective disconnection", which is a 
-# "connection"void" between (a white space)
-# - value_NO_s_link for spatial links
-# - value_NO_t_link for temporal links
-
-# Legacy effects & Legacy length  ____________#
-#Legacy effects are a way to quantify spatiotemporal connectivity during several
-#time units at the same time. This means that we  can quantify temporal links for 
-#more than 1 time unit and modify the weight or relevance that each time unit has. 
-#For example: 
-# - Legacy length defines the "number" of time units considered. By default it is 
-#set to 1 which means that the function will consider only 1 time unit 
-#(the connectivity of time T1 will only be considered for T2). If value is set 
-# at legacy length=3 the connectivity of 
-#T1 will be considered for T2, T3, and T4 (the connections present at T1 will 
-# be also considered for the 3 following T).
-# - Legacy effect defines the weight given to the LINK / NO-LINK values for each 
-#time unit. It is a vector with values ranging from
-#0 to 1 that will modulate the relevance of a connection through time. 
-
-spat_temp_index_edit <- function(interm_dataset, 
+compute_stcon <- function(site_status_mat, 
                                  network_structure,
                                  direction,
-                                 sense = "out",
+                                 routing_mode = "out",
                                  weighting = FALSE,
-                                 dist_matrices,
+                                 dist_matrix,
                                  weighting_links = FALSE,
                                  link_weights,
                                  indirect_dispersal = TRUE,
@@ -148,9 +126,9 @@ spat_temp_index_edit <- function(interm_dataset,
     assert_that(is.list(link_weights), 
                 msg = "ERROR: 'link_weights' must be a list when 'weighting_links' is TRUE.")
     
-    assert_that(nrow(link_weights) == nrow(interm_dataset) && 
-                  ncol(link_weights) == ncol(interm_dataset),
-                msg = "ERROR: 'link_weights' and 'interm_dataset' must have the same dimensions.")
+    assert_that(nrow(link_weights) == nrow(site_status_mat) && 
+                  ncol(link_weights) == ncol(site_status_mat),
+                msg = "ERROR: 'link_weights' and 'site_status_mat' must have the same dimensions.")
     
     if (verbose) message("Your links will be weighted with daily data entered in 'link_weights'.")
   } else {
@@ -162,9 +140,9 @@ spat_temp_index_edit <- function(interm_dataset,
               msg = "ERROR: 'weighting' must be a logical (TRUE or FALSE).")
   
   if (isTRUE(weighting)) {
-    if (verbose) message("Your connectivity will be Weighted; connections will be multiplied by 'dist_matrices'.")
-    assert_that(is.matrix(dist_matrices), 
-                msg = "ERROR: 'dist_matrices' must be a matrix object when 'weighting' is TRUE.")
+    if (verbose) message("Your connectivity will be Weighted; connections will be multiplied by 'dist_matrix'.")
+    assert_that(is.matrix(dist_matrix), 
+                msg = "ERROR: 'dist_matrix' must be a matrix object when 'weighting' is TRUE.")
   } else {
     if (verbose) message("Your connectivity will be NON-weighted; connections will not be multiplied by any distance matrix.")
   }
@@ -177,29 +155,29 @@ spat_temp_index_edit <- function(interm_dataset,
               msg = paste("ERROR: The length of 'legacy_effect' is", length(legacy_effect), 
                           "but 'legacy_length' is", legacy_length, ". They must be the same."))
 
-  assert_that(nrow(network_structure) == ncol(interm_dataset),
-              msg = "ERROR: number of rows in network structure must match number of columns in interm_dataset.")
+  assert_that(nrow(network_structure) == ncol(site_status_mat),
+              msg = "ERROR: number of rows in network structure must match number of columns in site_status_mat.")
   
   ####_______________________________________________________________________
   # River network ####
   ####_______________________________________________________________________
   # We calculate the number of nodes of our network (used along the function)  
-  numn_nodes <- ncol(interm_dataset)
-  nsteps <- nrow(interm_dataset)
+  numn_nodes <- ncol(site_status_mat)
+  nsteps <- nrow(site_status_mat)
   
-  if(weighting==TRUE){dist_matr <- dist_matrices}
+  if(weighting==TRUE){dist_matr <- dist_matrix}
   
   # We built the matrix corresponding to the num. of nodes multiplied by the
   # DAYS of HOBOS that we have
   ### This matrix is the "giant" template where we will put all the values.
   ST_matrix_raw <- matrix(nrow = numn_nodes, ncol = numn_nodes*2, 
                           data = value_no_s_link, 
-                          dimnames = list(colnames(interm_dataset),
-                                          rep(colnames(interm_dataset), 2)))
+                          dimnames = list(colnames(site_status_mat),
+                                          rep(colnames(site_status_mat), 2)))
   ST_matrix_netwGraph_raw <- matrix(nrow = numn_nodes, ncol = numn_nodes, 
                                     data = 0L,
-                                    dimnames = list(colnames(interm_dataset),
-                                                    colnames(interm_dataset)))
+                                    dimnames = list(colnames(site_status_mat),
+                                                    colnames(site_status_mat)))
   # First we define the spatial connections of the matrix
   ### Also known as the rows or columns at which we have to add the values of 
   #the connections 
@@ -212,8 +190,8 @@ spat_temp_index_edit <- function(interm_dataset,
     # We obtain the time steps:
     ## time_step_1 is the present
     ## time_step_2 is the following step (the close future)
-    time_step_1 <- interm_dataset[day, ]
-    time_step_2 <- interm_dataset[day+1,]
+    time_step_1 <- site_status_mat[day, ]
+    time_step_2 <- site_status_mat[day+1,]
     if(weighting_links==T){day_link_weights <- link_weights[day,2:interm_ncols]}
     
     #Simple fluvial network_____________________________________________________
@@ -235,7 +213,7 @@ spat_temp_index_edit <- function(interm_dataset,
                                              diag = FALSE)
     
     # Compute shortest path distances for all node pairs
-    dist_matrix_day <- igraph::distances(a, mode = sense,
+    dist_matrix_day <- igraph::distances(a, mode = routing_mode,
                                          algorithm = "unweighted")
     
     # PROCESS SPATIAL STEP -----------------------------------------------------
@@ -352,7 +330,7 @@ spat_temp_index_edit <- function(interm_dataset,
     #than "node 10". IF WE FOLLOW THE RIVER DOWNSTREAM!
     if (standardize_neighbors) {
       aa <- graph_from_adjacency_matrix(network_structure, mode = direction)
-      leng_correct <- neighborhood_size(aa, order = numn_nodes, mode = sense) - 1 #to remove the connection to itself
+      leng_correct <- neighborhood_size(aa, order = numn_nodes, mode = routing_mode) - 1 #to remove the connection to itself
       spt_conn <- spt_conn/leng_correct
     }
     

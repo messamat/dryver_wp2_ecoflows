@@ -2900,7 +2900,7 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
   # Merge shapefile with flow intermittence data
   # Merge the Endpoint site and "pivot_wide" the table to obtain the TRUE intermittence table, 
   # where each row corresponds to a day (dates as factors) and columns to all nodes of the network.
-  interm_dataset <- 
+  sites_status_matrix <- 
     merge(net_dt, in_hydromod_drn$data_all, by='cat') %>%
     rbind(end_point_interm, fill=T) %>%
     .[, isflowing := as.integer(isflowing)] %>%
@@ -2912,12 +2912,12 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
   network_structure <- as.matrix(as_adjacency_matrix(net_graph)) 
   
   #Create "reference river" datasets
-  interm_ref <- interm_dataset %>%
+  interm_ref <- sites_status_matrix %>%
     filter(nsim == 1) %>%
     replace(.==0, 1L) 
   
   return(list(
-    interm_dataset = interm_dataset,
+    sites_status_matrix = sites_status_matrix,
     network_structure = network_structure,
     river_dist_mat = river_dist_mat,
     interm_ref = interm_ref
@@ -2938,27 +2938,28 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
 # window <- 10
 # direction <- 'undirected'
 # weighting <- TRUE
-# sense <- 'in'
+# routing_mode <- 'in'
 # output <- 'all'
 # verbose <- F
 # ref = F
 
 compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL, 
                                   in_dates, window, output,
-                                  direction, sense, weighting, verbose = F,
+                                  direction, routing_mode, weighting, rounding_factor,
+                                  verbose = F,
                                   ...) {
   
   #Make sure that date has been modeled
-  in_dates <- in_dates[date <= max(in_preformatted_data$interm_dataset$date)]
+  in_dates <- in_dates[date <= max(in_preformatted_data$sites_status_matrix$date)]
   
   if (isTRUE(in_nsim == 'all')) { #Wrap conditional statement to avoid error in in_nsim == NULL
-    in_nsim <- unique(in_preformatted_data$interm_dataset$nsim)
+    in_nsim <- unique(in_preformatted_data$sites_status_matrix$nsim)
   }
   
   #Select reference data or 
   #actual data with intermittence (for which a simulation is selected)
   interm_dt_sel <- if (ref) {in_preformatted_data$interm_ref
-  } else {in_preformatted_data$interm_dataset[nsim %in% in_nsim,]}
+  } else {in_preformatted_data$sites_status_matrix[nsim %in% in_nsim,]}
   
   #Compute STcon for every date and previous window of time across simulations
   STcon_datelist <- lapply(in_dates$date, function(end_date) {
@@ -2976,13 +2977,13 @@ compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL,
       value_s_link = value_t_link = 1L
     }
     
-    STcon_list <- spat_temp_index_edit(
-      interm_dataset = as.matrix(interm_sub[, !c('date', 'nsim'), with = FALSE]),
+    STcon_list <- compute_stcon(
+      sites_status_matrix = as.matrix(interm_sub[, !c('date', 'nsim'), with = FALSE]),
       network_structure = in_preformatted_data$network_structure, 
       direction = direction, 
-      sense = sense,
+      routing_mode = routing_mode,
       weighting = weighting,
-      dist_matrices = in_preformatted_data$river_dist_mat, # Weighting pairs
+      dist_matrix = in_preformatted_data$river_dist_mat, # Weighting pairs
       indirect_dispersal = FALSE,
       standardize_neighbors = FALSE,
       value_s_link = value_s_link,
@@ -2990,7 +2991,7 @@ compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL,
       value_no_s_link = value_no_s_link,
       value_no_t_link = value_no_t_link, # Values to links
       convert_to_integer = T,
-      rounding_factor = 1, #Because the summed numbers are so big with distances in meters
+      rounding_factor = rounding_factor, #Because the summed numbers are so big with distances in meters
       output = output,
       verbose = verbose
     ) %>%
