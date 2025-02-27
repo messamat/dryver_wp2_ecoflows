@@ -3097,23 +3097,36 @@ postprocess_STcon <- function(in_STcon, in_net_shp_path,
 # tar_load(STcon_directed_formatted)
 # in_country <- 'France'
 # in_STcon_list <- STcon_directed_formatted[['France']]
-# in_date <-in_STcon_list$STcon_dt[1, date]
+# in_date <-in_STcon_list$STcon_dt[1000, date]
 # in_net_shp_path = tar_read(network_ssnready_shp_list)[[in_country]]
 
-plot_STcon <- function(in_STcon_list, in_date, in_net_shp_path) {
+plot_STcon <- function(in_STcon_list, in_date, in_window=10, 
+                       in_net_shp_path, reverse_weighted_stcon = TRUE) {
   
-  stcon_sel <- in_STcon_list$STcon_dt[date == in_date,]
+  stcon_sel <- in_STcon_list$STcon_dt[
+    (date == in_date) & (variable == paste0('STcon_m', in_window)),]
   
- # st_contains_properly()
- # in_net_shp_path
-  ggplot()+
-    geom_segment(data=merge(edges_DaFr, STcon_to_join, by = 'UID'), 
-                 aes(x=X1_coord,y=Y1_coord, xend=X2_coord, yend=Y2_coord,
-                     colour=log10(STcon)), 
-                 arrow =arrow(length=unit(0.01,"cm"), ends="last"), linewidth=1.3, alpha=1)+
-    geom_point(data=nodes_df,aes(x=x, y=y),fill="grey",shape=21,alpha=0.5)+
-    scale_color_viridis()+
+  
+  net_v_stcon <- vect(in_net_shp_path) %>%
+    merge(stcon_sel, by='UID')
+  
+  net_v_stcon$inverse_stcon <-  1 - (
+    (net_v_stcon$value-min(net_v_stcon$value))/
+      (max(net_v_stcon$value)-min(net_v_stcon$value))
+  )
+  
+  out_p <- ggplot(data=net_v_stcon)+
+    scale_color_distiller(palette='Spectral') +
     theme_classic()
+  
+  if (reverse_weighted_stcon) {
+    out_p <- out_p +
+      geom_sf(aes(color=inverse_stcon)) 
+  } else {
+    out_p <- out_p + geom_sf(aes(color=value)) 
+  }
+
+  return(out_p)
 }
 
 
@@ -3122,7 +3135,7 @@ plot_STcon <- function(in_STcon_list, in_date, in_net_shp_path) {
 # in_sprich <- tar_read(sprich)
 # in_hydrostats_comb <- tar_read(hydrostats_comb)
 
-merge_alphadat <- function(in_sprich, in_hydrostats_comb) {
+merge_allvars <- function(in_sprich, in_hydrostats_comb) {
   sprich_hydro <- lapply(unique(in_sprich$drn), function(in_country) {
     in_hydrostats_isflowing <- in_hydrostats_comb[[
       paste0('hydrostats_', in_country, '_isflowing')]][['sites']] %>%

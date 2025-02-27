@@ -13,6 +13,7 @@
 #' @param sites_status_matrix A matrix representing the status of the site (wet/dry, 
 #' active/inactive). 
 #' The dataset should have columns for each site and rows for each monitored day.
+#' Warning: no other columns should be included (e.g., date, other IDs)
 #' @param network_structure A square matrix representing the basic connections among 
 #' sites (adjacency matrix): for a given site (row), each adjacent connected 
 #' site (column) is given a value of 1, all others 0. Must have the same number
@@ -89,7 +90,7 @@
 compute_stcon <- function(sites_status_matrix, 
                           network_structure,
                           direction,
-                          routing_mode = "out",
+                          routing_mode = "in",
                           weighting = FALSE,
                           dist_matrix,
                           weighting_links = FALSE,
@@ -188,7 +189,7 @@ compute_stcon <- function(sites_status_matrix,
   spa_temp_index_daily <- function(ST_matrix, ST_matrix_netwGraph, day) {
     #print(ST_matrix[1,])
     
-    # We obtain the time steps:
+    # Get site status data for current and next time steps
     ## time_step_1 is the present
     ## time_step_2 is the following step (the close future)
     time_step_1 <- sites_status_matrix[day, ]
@@ -196,7 +197,7 @@ compute_stcon <- function(sites_status_matrix,
     if(weighting_links==T){day_link_weights <- link_weights[day,2:interm_ncols]}
     
     #Simple fluvial network_____________________________________________________
-    #Create an adjacancy matrix for time step 1 whereby:
+    #Create an adjacency matrix for time step 1 whereby:
     #for sites that are wet, get the normal structure (direct connection to sites)
     #for sites that are dry, 0s to all sites
     ST_matrix_netwGraph[time_step_1 == 1,] <- network_structure[time_step_1 == 1,]
@@ -208,7 +209,7 @@ compute_stcon <- function(sites_status_matrix,
     #c(spa_connections[1]:spa_connections[numn_nodes])[-site_step]] <- 0
     
     # FLuvial SPATIAL links ____________________________________________________
-    ## Fill the matrix section corresponding to the time_step based on river graph (i)graph::)
+    ## Fill the matrix section corresponding to the time_step based on river graph (igraph::)
     a <- graph_from_adjacency_matrix(ST_matrix_netwGraph, 
                                      mode = direction, 
                                      diag = FALSE)
@@ -325,10 +326,9 @@ compute_stcon <- function(sites_status_matrix,
   if (any(c('all', 'STcon') %in% output)) {
     spt_conn <- apply(ST_matrix_collapsed_standardized, 1, sum)
     
-    # "leng_correct" is a reverse vector (from big to small) used to correct
-    # the fact that uperstream nodes will have higher values when considering its 
-    #number of connections. As I am "node 1" my number of connections will be higher
-    #than "node 10". IF WE FOLLOW THE RIVER DOWNSTREAM!
+    # "leng_correct" corrects the baseline connectivity of nodes due to their
+    # position in the network. For example, with "out" routing mode, upstream
+    # nodes will have higher values when considering their number of connections.
     if (standardize_neighbors) {
       aa <- graph_from_adjacency_matrix(network_structure, mode = direction)
       leng_correct <- neighborhood_size(aa, order = numn_nodes, mode = routing_mode) - 1 #to remove the connection to itself
