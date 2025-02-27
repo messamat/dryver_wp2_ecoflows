@@ -2848,7 +2848,7 @@ create_ssn_europe <- function(in_network_path,
 
 
 #------ prepare_data_for_STcon ---------------------------------------------------
-# in_country <- in_drn <- 'Croatia'
+# in_country <- in_drn <- 'Finland'
 # in_hydromod_drn <- tar_read(hydromod_comb)[[paste0(
 #   "hydromod_dt_", in_country, '_isflowing')]]
 # in_net_shp_path <- tar_read(network_ssnready_shp_list)[[in_drn]]
@@ -2894,7 +2894,7 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
   # this point will be added with the same frequency of any other reach
   end_point_interm <- in_hydromod_drn$data_all %>%
     .[cat == .[1, cat],] %>% #select whatever reach
-    .[, `:=`(UID = 11111,  from=4, value=1)] %>% #format
+    .[, `:=`(UID = 11111,  from = outlet_to, value = 1)] %>% #format
     .[, .(date, UID, isflowing, from, nsim)] 
   
   # Merge shapefile with flow intermittence data
@@ -2943,7 +2943,8 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
 
 compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL, 
                                   in_dates, window, output,
-                                  direction, weighting, sense, verbose = F) {
+                                  direction, sense, weighting, verbose = F,
+                                  ...) {
   
   #Make sure that date has been modeled
   in_dates <- in_dates[date <= max(in_preformatted_data$interm_dataset$date)]
@@ -2973,8 +2974,8 @@ compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL,
     STcon_list <- spat_temp_index_edit(
       interm_dataset = as.matrix(interm_sub[, !c('date', 'nsim'), with = FALSE]),
       network_structure = in_preformatted_data$network_structure, 
-      direction ="directed", 
-      sense = "out",
+      direction = direction, 
+      sense = sense,
       weighting = weighting,
       dist_matrices = in_preformatted_data$river_dist_mat, # Weighting pairs
       indirect_dispersal = FALSE,

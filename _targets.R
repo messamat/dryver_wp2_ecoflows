@@ -409,7 +409,7 @@ analysis_targets <- list(
   ,
   
   tar_target(
-    STcon_rolling_list, 
+    STcon_directed_list, 
     {
       out_STcon_list <- future_lapply(
         names(preformatted_data_STcon), function(in_country) {
@@ -420,7 +420,45 @@ analysis_targets <- list(
           }) %>% rbindlist %>% unique
           in_dates <- unique_sampling_dates
           
-          window_size_list <- c(10, 30, 365) #, 30, 365) #60, 90, 180 
+          window_size_list <- c(10, 365) #30, 60, 90, 180,
+          lapply(window_size_list, function(in_window) { 
+            print(in_window)
+            if (in_window == 365) {
+              in_output <- 'all'
+            } else {
+              in_output <- 'STcon'
+            }
+            
+            compute_STcon_rolling(
+              in_preformatted_data = preformatted_data_STcon[[in_country]], 
+              ref = FALSE,
+              in_nsim = hydromod_paths_dt[country == in_country,]$best_sim,
+              in_dates = in_dates, 
+              window = in_window, 
+              output = in_output,
+              direction = 'directed',
+              sense = 'in',
+              weighting = TRUE)
+          }) %>% setNames(paste0('STcon_m', window_size_list)) #60, 90, 180, 
+        })
+      setNames(out_STcon_list, names(preformatted_data_STcon))
+    }
+  )
+  ,
+  
+  tar_target(
+    STcon_undirected_list, 
+    {
+      out_STcon_list <- future_lapply(
+        names(preformatted_data_STcon), function(in_country) {
+          print(in_country)
+          
+          unique_sampling_dates <- lapply(bio_dt, function(org_dt) {
+            org_dt[country==in_country, .(date)]
+          }) %>% rbindlist %>% unique
+          in_dates <- unique_sampling_dates
+          
+          window_size_list <- c(10, 365) #30, 60, 90, 180,
           lapply(window_size_list, function(in_window) { 
             print(in_window)
             if (in_window == 365) {
@@ -437,6 +475,7 @@ analysis_targets <- list(
               window = in_window, 
               output = in_output,
               direction = 'undirected',
+              sense = 'all',
               weighting = TRUE)
           }) %>% setNames(paste0('STcon_m', window_size_list)) #60, 90, 180, 
         })
@@ -445,42 +484,43 @@ analysis_targets <- list(
   )
   ,
   
-  tar_target(
-    STcon_rolling_ref_list,
-    {
-      out_STcon_list <- future_lapply(
-        names(preformatted_data_STcon), function(in_country) {
-          print(in_country)
-
-          unique_sampling_dates <- lapply(bio_dt, function(org_dt) {
-            org_dt[country==in_country, .(date)]
-          }) %>% rbindlist %>% unique
-          in_dates <- unique_sampling_dates
-
-          window_size_list <- c(10, 30, 365) #60, 90, 180
-          lapply(window_size_list, function(in_window) {
-            print(in_window)
-
-            if (in_window == 365) {
-              in_output <- 'all'
-            } else {
-              in_output <- 'STcon'
-            }
-
-            compute_STcon_rolling(in_preformatted_data = preformatted_data_STcon[[in_country]],
-                                  ref = TRUE,
-                                  in_nsim = NULL,
-                                  in_dates = in_dates,
-                                  window = in_window,
-                                  output = in_output,
-                                  direction = 'directed',
-                                  weighting = FALSE)
-          }) %>% setNames(paste0('STcon_m', window_size_list))
-        })
-      setNames(out_STcon_list, names(preformatted_data_STcon))
-    }
-  )
-  ,
+  # tar_target(
+  #   STcon_rolling_ref_list,
+  #   {
+  #     out_STcon_list <- future_lapply(
+  #       names(preformatted_data_STcon), function(in_country) {
+  #         print(in_country)
+  # 
+  #         unique_sampling_dates <- lapply(bio_dt, function(org_dt) {
+  #           org_dt[country==in_country, .(date)]
+  #         }) %>% rbindlist %>% unique
+  #         in_dates <- unique_sampling_dates
+  # 
+  #         window_size_list <-  c(10, 365) #30, 60, 90, 180,
+  #         lapply(window_size_list, function(in_window) {
+  #           print(in_window)
+  # 
+  #           if (in_window == 365) {
+  #             in_output <- 'all'
+  #           } else {
+  #             in_output <- 'STcon'
+  #           }
+  # 
+  #           compute_STcon_rolling(in_preformatted_data = preformatted_data_STcon[[in_country]],
+  #                                 ref = TRUE,
+  #                                 in_nsim = NULL,
+  #                                 in_dates = in_dates,
+  #                                 window = in_window,
+  #                                 output = in_output,
+  #                                 direction = 'directed',
+  #                                 sense = 'in',
+  #                                 weighting = FALSE)
+  #         }) %>% setNames(paste0('STcon_m', window_size_list))
+  #       })
+  #     setNames(out_STcon_list, names(preformatted_data_STcon))
+  #   }
+  # )
+  # ,
   
   #Create Spatial Stream Network (SSN) objects
   tar_target(
