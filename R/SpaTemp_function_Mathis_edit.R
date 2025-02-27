@@ -16,7 +16,7 @@
 #' @param network_structure A square matrix representing the basic connections among 
 #' sites (adjacency matrix): for a given site (row), each adjacent connected 
 #' site (column) is given a value of 1, all others 0. Must have the same number
-#' of rows and columns as there are columns in site_status_matrix.
+#' of rows and columns as there are columns in sites_status_matrix.
 #' @param direction The direction of the graph, either "directed" or "undirected".
 #' @param routing_mode The direction for graph connectivity when directed, 
 #' can be "in" (routing from upstream if directed), "out" (routing from 
@@ -29,7 +29,7 @@
 #' @param weighting_links Logical; whether to use specific data for each time 
 #' unit to quantify connections.
 #' @param link_weights A list of data frames with the same structure as 
-#' `site_status_mat`, providing daily flow data.
+#' `sites_status_matrix`, providing daily flow data.
 #' @param indirect_dispersal Logical; whether to consider indirect dispersal 
 #' for lost nodes (i.e., a bump in dispersal before disconnection).
 #' @param standardize_neighbors Logical; whether to standardize STCon based 
@@ -74,40 +74,41 @@
 #' @examples
 #' \dontrun{
 #' site_status_mat <- data.frame(
-#'   MonitoredDays = c("Day1", "Day2", "Day3", "Day4"),
-#'   StreamSite1 = c(0, 1, 1, 1),
-#'   StreamSite2 = c(0, 1, 1, 1),
-#'   StreamSite3 = c(0, 1, 1, 1),
-#'   StreamSite4 = c(0, 0, 0, 1),
-#'   StreamSite5 = c(0, 1, 0, 1)
+#'  MonitoredDays = c("Day1", "Day2", "Day3", "Day4"),
+#'  StreamSite1 = c(0, 1, 1, 1),
+#'  StreamSite2 = c(0, 1, 1, 1),
+#'  StreamSite3 = c(0, 1, 1, 1),
+#'  StreamSite4 = c(0, 0, 0, 1),
+#'  StreamSite5 = c(0, 1, 0, 1)
 #' )
 #' network_structure <- matrix(1, ncol = 5, nrow = 5)
-#' compute_stcon(site_status_mat, network_structure, direction = "directed")
-#' }
+#' compute_stcon(site_status_mat[,2:ncol(site_status_mat)],
+#'              network_structure,
+#'              direction = "directed")
 
-compute_stcon <- function(site_status_mat, 
-                                 network_structure,
-                                 direction,
-                                 routing_mode = "out",
-                                 weighting = FALSE,
-                                 dist_matrix,
-                                 weighting_links = FALSE,
-                                 link_weights,
-                                 indirect_dispersal = TRUE,
-                                 standardize_neighbors = FALSE,
-                                 value_s_link = 1L,
-                                 value_t_link = 1L,
-                                 value_no_s_link = 0L,
-                                 value_no_t_link = 0L,
-                                 legacy_effect = 1L,
-                                 legacy_length = 1L,
-                                 convert_to_integer = TRUE, 
-                                 rounding_factor = 100L,
-                                 verbose = T,
-                                 output = c('Main_matrix', 
-                                            'STconmat',
-                                            'STcon')) {
-
+compute_stcon <- function(sites_status_matrix, 
+                          network_structure,
+                          direction,
+                          routing_mode = "out",
+                          weighting = FALSE,
+                          dist_matrix,
+                          weighting_links = FALSE,
+                          link_weights,
+                          indirect_dispersal = TRUE,
+                          standardize_neighbors = FALSE,
+                          value_s_link = 1L,
+                          value_t_link = 1L,
+                          value_no_s_link = 0L,
+                          value_no_t_link = 0L,
+                          legacy_effect = 1L,
+                          legacy_length = 1L,
+                          convert_to_integer = TRUE, 
+                          rounding_factor = 100L,
+                          verbose = T,
+                          output = c('Main_matrix', 
+                                     'STconmat',
+                                     'STcon')) {
+  
   # Validate `direction`
   assert_that(direction %in% c("directed", "undirected"), 
               msg = "ERROR: 'direction' must be either 'directed' or 'undirected'.")
@@ -126,9 +127,9 @@ compute_stcon <- function(site_status_mat,
     assert_that(is.list(link_weights), 
                 msg = "ERROR: 'link_weights' must be a list when 'weighting_links' is TRUE.")
     
-    assert_that(nrow(link_weights) == nrow(site_status_mat) && 
-                  ncol(link_weights) == ncol(site_status_mat),
-                msg = "ERROR: 'link_weights' and 'site_status_mat' must have the same dimensions.")
+    assert_that(nrow(link_weights) == nrow(sites_status_matrix) && 
+                  ncol(link_weights) == ncol(sites_status_matrix),
+                msg = "ERROR: 'link_weights' and 'sites_status_matrix' must have the same dimensions.")
     
     if (verbose) message("Your links will be weighted with daily data entered in 'link_weights'.")
   } else {
@@ -154,16 +155,16 @@ compute_stcon <- function(site_status_mat,
   assert_that(length(legacy_effect) == legacy_length, 
               msg = paste("ERROR: The length of 'legacy_effect' is", length(legacy_effect), 
                           "but 'legacy_length' is", legacy_length, ". They must be the same."))
-
-  assert_that(nrow(network_structure) == ncol(site_status_mat),
-              msg = "ERROR: number of rows in network structure must match number of columns in site_status_mat.")
+  
+  assert_that(nrow(network_structure) == ncol(sites_status_matrix),
+              msg = "ERROR: number of rows in network structure must match number of columns in sites_status_matrix.")
   
   ####_______________________________________________________________________
   # River network ####
   ####_______________________________________________________________________
   # We calculate the number of nodes of our network (used along the function)  
-  numn_nodes <- ncol(site_status_mat)
-  nsteps <- nrow(site_status_mat)
+  numn_nodes <- ncol(sites_status_matrix)
+  nsteps <- nrow(sites_status_matrix)
   
   if(weighting==TRUE){dist_matr <- dist_matrix}
   
@@ -172,12 +173,12 @@ compute_stcon <- function(site_status_mat,
   ### This matrix is the "giant" template where we will put all the values.
   ST_matrix_raw <- matrix(nrow = numn_nodes, ncol = numn_nodes*2, 
                           data = value_no_s_link, 
-                          dimnames = list(colnames(site_status_mat),
-                                          rep(colnames(site_status_mat), 2)))
+                          dimnames = list(colnames(sites_status_matrix),
+                                          rep(colnames(sites_status_matrix), 2)))
   ST_matrix_netwGraph_raw <- matrix(nrow = numn_nodes, ncol = numn_nodes, 
                                     data = 0L,
-                                    dimnames = list(colnames(site_status_mat),
-                                                    colnames(site_status_mat)))
+                                    dimnames = list(colnames(sites_status_matrix),
+                                                    colnames(sites_status_matrix)))
   # First we define the spatial connections of the matrix
   ### Also known as the rows or columns at which we have to add the values of 
   #the connections 
@@ -190,8 +191,8 @@ compute_stcon <- function(site_status_mat,
     # We obtain the time steps:
     ## time_step_1 is the present
     ## time_step_2 is the following step (the close future)
-    time_step_1 <- site_status_mat[day, ]
-    time_step_2 <- site_status_mat[day+1,]
+    time_step_1 <- sites_status_matrix[day, ]
+    time_step_2 <- sites_status_matrix[day+1,]
     if(weighting_links==T){day_link_weights <- link_weights[day,2:interm_ncols]}
     
     #Simple fluvial network_____________________________________________________
@@ -207,14 +208,14 @@ compute_stcon <- function(site_status_mat,
     #c(spa_connections[1]:spa_connections[numn_nodes])[-site_step]] <- 0
     
     # FLuvial SPATIAL links ____________________________________________________
-    ## Fill the matrix section corresponding to the time_step based on river graph 
-    a <- igraph::graph_from_adjacency_matrix(ST_matrix_netwGraph, 
-                                             mode = direction, 
-                                             diag = FALSE)
+    ## Fill the matrix section corresponding to the time_step based on river graph (i)graph::)
+    a <- graph_from_adjacency_matrix(ST_matrix_netwGraph, 
+                                     mode = direction, 
+                                     diag = FALSE)
     
-    # Compute shortest path distances for all node pairs
-    dist_matrix_day <- igraph::distances(a, mode = routing_mode,
-                                         algorithm = "unweighted")
+    # Compute shortest path distances for all node pairs (igraph::)
+    dist_matrix_day <- distances(a, mode = routing_mode,
+                                 algorithm = "unweighted")
     
     # PROCESS SPATIAL STEP -----------------------------------------------------
     # Convert distances into binary connectivity (1 if connected, 0 if not)
@@ -317,7 +318,7 @@ compute_stcon <- function(site_status_mat,
   } else {
     STconmat <- NULL
   }
-
+  
   ####_______________________________________________________________________
   # STcon calculation ####
   ####_______________________________________________________________________
