@@ -169,7 +169,7 @@ interm_dataset <-
 
 # You cut the length of the intermittence according to whatever you want. In this case we select the first 
 # 30 days of the whole dataset. 
-FL_intermitence_cut <- as.data.frame(interm_dataset[1:50,]) # THIS IS THE MOST IMPORTANT POINT! WHERE YOU DEFINE THE TIME WINDOW!!!! 
+FL_intermitence_cut <- as.data.frame(interm_dataset[1:20,]) # THIS IS THE MOST IMPORTANT POINT! WHERE YOU DEFINE THE TIME WINDOW!!!! 
 
 # We built the matrix of the network structure for the STcon, which is the "base" on which connectivity will be assessed. 
 Network_structure <- as.data.frame(as.matrix(as_adjacency_matrix(igr1))) %>%
@@ -207,7 +207,7 @@ interm_ncols <- ncol(interm_dataset_campaigns_To_Run[[1]])
 # Here we STCON things! 
 tictoc::tic()
 DirNonW_original <- spat_temp_index(
-  interm_dataset = interm_dataset_campaigns_To_Run[2],
+  interm_dataset = interm_dataset_campaigns_To_Run[1],
   Sites_coordinates=Sites_coordinates_campaigns_To_Run[1],
   Network_stru = Network_stru_campaigns_To_Run[1], 
   direction="directed", 
@@ -266,51 +266,6 @@ DirNonW <- spat_temp_index_edit(
   verbose = FALSE
 )
 tictoc::toc()
-
-microbench <- microbenchmark::microbenchmark(
-  rounding = spat_temp_index_edit(
-    interm_dataset = as.matrix(interm_dataset_campaigns_To_Run[[1]][, 2:interm_ncols]),
-    network_structure = as.matrix(Network_stru_campaigns_To_Run[[1]]), 
-    direction="directed", 
-    sense= "in",
-    weighting= F,
-    dist_matrices = NULL, # Weighting pairs
-    weighting_links =F,
-    indirect_dispersal = TRUE,
-    standardize_neighbors = FALSE,
-    link_weights = NULL, # Weighting links
-    legacy_effect = 1L, 
-    legacy_length = 1L, # Legacy effects
-    value_s_link=1L,
-    value_t_link=1L, # Values to links
-    value_no_s_link=0L,
-    value_no_t_link=0L, # Values to links
-    convert_to_integer = T,
-    verbose = FALSE
-  ),
-  not_rounding = spat_temp_index_edit(
-    interm_dataset = as.matrix(interm_dataset_campaigns_To_Run[[1]][, 2:interm_ncols]),
-    network_structure = as.matrix(Network_stru_campaigns_To_Run[[1]]), 
-    direction="directed", 
-    sense= "in",
-    weighting= F,
-    dist_matrices = NULL, # Weighting pairs
-    weighting_links =F,
-    indirect_dispersal = TRUE,
-    standardize_neighbors = FALSE,
-    link_weights = NULL, # Weighting links
-    legacy_effect = 1L, 
-    legacy_length = 1L, # Legacy effects
-    value_s_link=1L,
-    value_t_link=1L, # Values to links
-    value_no_s_link=0L,
-    value_no_t_link=0L, # Values to links
-    convert_to_integer = F,
-    verbose = FALSE
-  ),
-  times = 20L
-)
-
 
 all(DirNonW_original$STcon[[1]] == DirNonW$STcon, na.rm=T)
 

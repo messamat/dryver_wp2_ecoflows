@@ -327,8 +327,9 @@ spat_temp_index_edit <- function(interm_dataset,
   if (any(c('all', 'STconmat') %in% output)) {
     ST_matrix_collapsed_standardized <- ST_matrix_collapsed/c(nsteps-1)
     if (convert_to_integer) {
-      ST_matrix_collapsed_standardized <- as.integer(
-        round(rounding_factor*ST_matrix_collapsed_standardized))
+      ST_matrix_collapsed_standardized <- round(
+        rounding_factor*ST_matrix_collapsed_standardized)
+      storage.mode(ST_matrix_collapsed_standardized) <- "integer"
     }
   } else {
     ST_matrix_collapsed_standardized <- NULL
@@ -365,7 +366,8 @@ spat_temp_index_edit <- function(interm_dataset,
     ST_matrix <- NULL
   } else {
     if (convert_to_integer) {
-      ST_matrix<- as.integer(round(rounding_factor*ST_matrix))
+      ST_matrix <- round(rounding_factor*ST_matrix)
+      storage.mode(ST_matrix) <- "integer"
     }
   }
   
