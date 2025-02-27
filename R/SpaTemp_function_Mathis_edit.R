@@ -324,22 +324,27 @@ spat_temp_index_edit <- function(interm_dataset,
   # These pairwise matrix is called the STconmat.   
   ST_matrix_collapsed <- ST_matrix[,spa_connections] + ST_matrix[,temp_connections]
   
-  if (any(c('all', 'STconmat') %in% output)) {
+  if (any(c('all', 'STconmat', 'STcon') %in% output)) {
+    #Divide by the number of days so we obtain the "per day" values
     ST_matrix_collapsed_standardized <- ST_matrix_collapsed/c(nsteps-1)
+  }
+  
+  if (any(c('all', 'STconmat') %in% output)) {
     if (convert_to_integer) {
       ST_matrix_collapsed_standardized <- round(
         rounding_factor*ST_matrix_collapsed_standardized)
       storage.mode(ST_matrix_collapsed_standardized) <- "integer"
     }
+    STconmat <- ST_matrix_collapsed_standardized
   } else {
-    ST_matrix_collapsed_standardized <- NULL
+    STconmat <- NULL
   }
 
   ####_______________________________________________________________________
   # STcon calculation ####
   ####_______________________________________________________________________
   if (any(c('all', 'STcon') %in% output)) {
-    spt_conn <- apply(ST_matrix_collapsed, 1, sum)
+    spt_conn <- apply(ST_matrix_collapsed_standardized, 1, sum)
     
     # "leng_correct" is a reverse vector (from big to small) used to correct
     # the fact that uperstream nodes will have higher values when considering its 
@@ -350,8 +355,6 @@ spat_temp_index_edit <- function(interm_dataset,
       leng_correct <- neighborhood_size(aa, order = numn_nodes, mode = sense) - 1 #to remove the connection to itself
       spt_conn <- spt_conn/leng_correct
     }
-    # We divide by the number of days so we obtain the "per day" values
-    spt_conn <- spt_conn/c(nsteps-1)
     
     if (convert_to_integer) {
       spt_conn <- as.integer(
@@ -371,13 +374,13 @@ spat_temp_index_edit <- function(interm_dataset,
     }
   }
   
-  Main_output <- list(
+  main_output <- list(
     Main_matrix = ST_matrix,
-    STconmat = ST_matrix_collapsed_standardized,
+    STconmat = STconmat,
     STcon = spt_conn  
   )
   
-  return(Main_output)
+  return(main_output)
   ####_______________________________________________________________________
   
 }# Function

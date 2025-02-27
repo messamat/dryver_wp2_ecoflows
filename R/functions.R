@@ -2926,21 +2926,22 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
 
 
 #------ compute_STcon_rolling ---------------------------------------------------
-# in_drn <- 'France'
+# in_drn <- 'Croatia'
 # in_preformatted_data <- tar_read(preformatted_data_STcon)[[in_drn]]
 # in_bio_dt <- tar_read(bio_dt)
 # in_nsim <- tar_read(hydromod_paths_dt)[country == in_drn,]$best_sim
-
+# 
 # unique_sampling_dates <- lapply(in_bio_dt, function(org_dt) {
 #   org_dt[country==in_drn, .(date)]
 # }) %>% rbindlist %>% unique
 # in_dates <- unique_sampling_dates
 # window <- 10
-# direction <- 'directed'
+# direction <- 'undirected'
 # weighting <- TRUE
+# sense <- 'in'
 # output <- 'all'
 # verbose <- F
-# ref = T
+# ref = F
 
 compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL, 
                                   in_dates, window, output,
@@ -2988,6 +2989,8 @@ compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL,
       value_t_link = value_t_link, # Values to links
       value_no_s_link = value_no_s_link,
       value_no_t_link = value_no_t_link, # Values to links
+      convert_to_integer = T,
+      rounding_factor = 1, #Because the summed numbers are so big with distances in meters
       output = output,
       verbose = verbose
     ) %>%
@@ -3090,10 +3093,27 @@ postprocess_STcon <- function(in_STcon, in_net_shp_path,
 }
 
 #------ plot_STcon ------------------------------------------------------------
-# tar_load(STcon_list)
-# in_STcon_list <- 
-# in_date <- 
-# in_net_shp_path <- 
+# tar_load(STcon_directed_formatted)
+# in_country <- 'France'
+# in_STcon_list <- STcon_directed_formatted[['France']]
+# in_date <-in_STcon_list$STcon_dt[1, date]
+# in_net_shp_path = tar_read(network_ssnready_shp_list)[[in_country]]
+
+plot_STcon <- function(in_STcon_list, in_date, in_net_shp_path) {
+  
+  stcon_sel <- in_STcon_list$STcon_dt[date == in_date,]
+  
+ # st_contains_properly()
+ # in_net_shp_path
+  ggplot()+
+    geom_segment(data=merge(edges_DaFr, STcon_to_join, by = 'UID'), 
+                 aes(x=X1_coord,y=Y1_coord, xend=X2_coord, yend=Y2_coord,
+                     colour=log10(STcon)), 
+                 arrow =arrow(length=unit(0.01,"cm"), ends="last"), linewidth=1.3, alpha=1)+
+    geom_point(data=nodes_df,aes(x=x, y=y),fill="grey",shape=21,alpha=0.5)+
+    scale_color_viridis()+
+    theme_classic()
+}
 
 
 #------ merge_alphadat ---------------------------------------------------------

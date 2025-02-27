@@ -44,7 +44,7 @@ hydro_combi <- expand.grid(
   stringsAsFactors = FALSE)
 
 
-perf_ratio <- 0.8 #Set how much you want to push your computer (% of cores and RAM) 
+perf_ratio <- 0.8 #Set how much you want to push your computer (% of cores and RAM)
 nthreads <- min(nrow(drn_dt), round(parallel::detectCores(logical=F)*perf_ratio))
 future::plan("future::multisession", workers=nthreads)
 total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
@@ -420,7 +420,7 @@ analysis_targets <- list(
           }) %>% rbindlist %>% unique
           in_dates <- unique_sampling_dates
           
-          window_size_list <- c(10, 90) #30, 60, 90, 180,
+          window_size_list <- c(10) #30, 60, 90, 180, 365
           lapply(window_size_list, function(in_window) { 
             print(in_window)
             if (in_window == 90) {
@@ -458,7 +458,7 @@ analysis_targets <- list(
           }) %>% rbindlist %>% unique
           in_dates <- unique_sampling_dates
           
-          window_size_list <- c(10, 90) #30, 60, 90, 180,
+          window_size_list <- c(10) #30, 60, 90, 180, 365
           lapply(window_size_list, function(in_window) { 
             print(in_window)
             if (in_window == 90) {
