@@ -44,11 +44,11 @@ hydro_combi <- expand.grid(
   stringsAsFactors = FALSE)
 
 
-perf_ratio <- 0.8 #Set how much you want to push your computer (% of cores and RAM)
-nthreads <- min(nrow(drn_dt), round(parallel::detectCores(logical=F)*perf_ratio))
-future::plan("future::multisession", workers=nthreads)
-total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
-options(future.globals.maxSize = perf_ratio*total_ram)
+# perf_ratio <- 0.8 #Set how much you want to push your computer (% of cores and RAM)
+# nthreads <- min(nrow(drn_dt), round(parallel::detectCores(logical=F)*perf_ratio))
+# future::plan("future::multisession", workers=nthreads)
+# total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
+# options(future.globals.maxSize = perf_ratio*total_ram)
 
 #--------------------------  Define targets plan -------------------------------
 #-------------- Preformatting targets ------------------------------------------
@@ -311,6 +311,10 @@ preformatting_targets <- list(
       snap_river_sites(in_sites_path = site_points_gpkg_list[[in_country]], 
                        in_network_path = network_ssnready_gpkg_list[[in_country]],
                        custom_proj = F,
+                       in_sites_unique_id = 'id',
+                       in_network_unique_id = 'UID',
+                       in_sites_idcol_tomatch = 'reach_id',
+                       in_network_idcol_tomatch = 'cat_cor',
                        overwrite = T)
     }) %>% setNames(names(site_points_gpkg_list))
   ),
@@ -331,6 +335,8 @@ preformatting_targets <- list(
       snap_barrier_sites(in_sites_path = barrier_points_gpkg_list[[in_country]], 
                          in_network_path = network_ssnready_gpkg_list[[in_country]],
                          out_snapped_sites_path=NULL, 
+                         in_sites_idcol = 'GUID',
+                         attri_to_join = c('cat_cor', 'UID'),
                          custom_proj = F,
                          overwrite = T)
     }) %>% setNames(names(site_points_gpkg_list))

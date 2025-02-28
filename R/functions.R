@@ -526,7 +526,7 @@ dist_proj <- function(x) {
          " +ellps=WGS84 +datum=WGS84 +units=m +no_defs")
 }
 
-#------ snap sites to nearest segment ---------------------------------------------
+#------ snap_points_inner ------------------------------------------------------
 snap_points_inner <- function(in_pts,
                               in_target,
                               sites_idcol,
@@ -544,7 +544,7 @@ snap_points_inner <- function(in_pts,
   
   #Join attributes of nearest line to that point
   if (!is.null(attri_to_join)) {
-    if (attri_to_join == 'all') { 
+    if ('all' %in% attri_to_join) { 
       sitesnap_p[, names(in_target)] <- terra::nearby(
         sitesnap_p, in_target, k=1, centroids=FALSE)[,'k1'] %>% #Could grab the nth nearest or place a distance limit
         as.data.frame(in_target)[.,] 
@@ -1154,10 +1154,10 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
 # in_biodt <- tar_read(bio_dt)[['dia_biof']][country == in_country,]
 # in_metacols <- metacols
 # level='local'
-# 
-# calc_spdiv(in_biodt, in_metacols, level = 'local')
 
-#Compute nestedness and turnover based on temporal beta diversity
+#calc_spdiv(in_biodt, in_metacols, level = 'local')
+
+#Compute nestedness and turnover based on temporal beta diversity between t and t-1
 #https://www.rdocumentation.org/packages/adespatial/versions/0.3-24/topics/beta.div.comp
 comp_richrepl_inner <- function(dt, spcols, beta_div_coef, quant) {
   sub_dt <- copy(dt)
@@ -1208,7 +1208,7 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
   if (level == 'local') {
     #Compute species richness
     biodt_div <-in_biodt[, list(richness = rowSums(.SD > 0)
-    ), by=.(site, campaign, organism), .SDcols = spcols] %>%
+    ), by=.(site, campaign, date, organism), .SDcols = spcols] %>%
       .[, mean_richness := mean(richness), by=site]
     
     #Keep only sites x campaigns with species
@@ -1264,7 +1264,7 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
   } else if (level == 'regional') {
     out_dt <- t(decomp[[1]]) %>%
       data.table %>%
-      .[, organism := in_biodt[1, .(organism)]]
+      .[, organism := in_biodt[1, .(organism)]] 
   }
   
   return(out_dt)
@@ -2321,6 +2321,7 @@ reassign_netids <- function(rivnet_path, strahler_dt,
 # in_sites_dt <- tar_read(sites_dt)[country == in_drn,]
 # in_network_path <- tar_read(network_ssnready_gpkg_list)[[in_drn]]
 # in_hydromod_drn <- tar_read_raw((paste0('hydromod_dt_', in_drn, '_', varname)))
+# in_network_idcol = 'cat_cor'
 
 compute_hydrostats_drn <- function(in_network_path,
                                    in_sites_dt,
@@ -2483,23 +2484,28 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
 
 
 #------ snap_sites -------------------------------------------------------------
-# drn <- 'Croatia'
+# drn <- 'Czech'
 # in_sites_path <- tar_read(site_points_gpkg_list)[[drn]]
 # in_network_path <- tar_read(network_ssnready_gpkg_list)[[drn]]
 # out_snapped_sites_path = NULL
 # overwrite = T
 # custom_proj = F
-# in_sites_idcol = 'reach_id'
-# in_network_idcol = 'cat_cor'
+# in_sites_unique_id = 'id'
+# in_network_unique_id = 'UID'
+# in_sites_idcol_tomatch = 'reach_id'
+# in_network_idcol_tomatch = 'cat_cor'
+# proj_back = F
 
 snap_river_sites <- function(in_sites_path, 
                              in_network_path,
                              out_snapped_sites_path=NULL, 
                              custom_proj = F,
                              proj_back = F,
-                             overwrite = F,
-                             in_sites_idcol = 'reach_id',
-                             in_network_idcol = 'cat_cor') {
+                             in_sites_unique_id = 'id',
+                             in_network_unique_id = 'UID',
+                             in_sites_idcol_tomatch = 'reach_id',
+                             in_network_idcol_tomatch = 'cat_cor',
+                             overwrite = F) {
   
   if (is.null(out_snapped_sites_path)) {
     out_snapped_sites_path <- sub(
@@ -2551,22 +2557,23 @@ snap_river_sites <- function(in_sites_path,
     sitesp_proj <- terra::project(sitesp, crs(target_proj))
     
     #Snap each site to the nearest point on the reach that it is paired with
+    sites_unique_id_list <- as.data.frame(sitesp_proj)[[in_sites_unique_id]]
     sitesnap_p <- lapply(
-      sitesp_proj$id, 
+      sites_unique_id_list, 
       function(in_pt_id) {
-        #print(in_pt_id)
-        pt <- unique(sitesp_proj[sitesp_proj$id == in_pt_id,])
+        pt <- unique(sitesp_proj[sites_unique_id_list == in_pt_id,])
         tar <- target_proj[
-          target_proj[[in_network_idcol]] == pt[[in_sites_idcol]][[1]],]
+          target_proj[[in_network_idcol_tomatch]] == pt[[in_sites_idcol_tomatch]][[1]],]
         
         if (!is.empty(tar) && nrow(pt) > 0) {
-          out_p <- snap_points_inner(in_pts = pt,
-                                     in_target = tar,
-                                     sites_idcol = 'id',
-                                     attri_to_join = in_network_idcol
+          out_p <- snap_points_inner(
+            in_pts = pt,
+            in_target = tar,
+            sites_idcol = in_sites_unique_id,
+            attri_to_join = c(in_network_idcol_tomatch, in_network_unique_id)
           )
-        }
-        return(out_p)
+        } 
+       return(out_p)
       }) %>%
       vect(.)
     
@@ -2642,10 +2649,10 @@ subset_amber <- function(amber_path, in_hydromod_paths_dt, out_dir,
 
 snap_barrier_sites <- function(in_sites_path, 
                                in_network_path,
+                               in_sites_idcol,
+                               attri_to_join,
                                out_snapped_sites_path=NULL, 
                                custom_proj = T,
-                               idcol = 'id',
-                               attri_to_join = 'cat_cor',
                                overwrite = F) {
   
   if (is.null(out_snapped_sites_path)) {
@@ -2672,8 +2679,8 @@ snap_barrier_sites <- function(in_sites_path,
     sitesnap_p <- snap_points_inner(
       in_pts = sitesp_proj,
       in_target =  target,
-      sites_idcol = 'GUID',
-      attri_to_join= 'UID'
+      sites_idcol = in_sites_idcol,
+      attri_to_join = attri_to_join
     )
     
     #Reproject points to original proj
@@ -2713,7 +2720,7 @@ create_ssn_europe <- function(in_network_path,
                         paste0(out_ssn_name, '_lsn')
   )
   
-  #Build landscape network -----------------------------------------------------
+  #Build landscape network (lsn) -----------------------------------------------
   #Read input network
   net_eu <- lapply(names(in_network_path), function(in_country) {
     net_proj <- st_read(in_network_path[[in_country]]) %>%
@@ -3132,11 +3139,23 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
 
 #------ merge_alphadat ---------------------------------------------------------
 # in_country <- 'Croatia'
-# in_sprich <- tar_read(sprich)
+# in_spdiv_local <- tar_read(spdiv_local)
 # in_hydrostats_comb <- tar_read(hydrostats_comb)
+# in_STcon_directed <- tar_read(STcon_directed_formatted)
+# 
+# tar_load(spdiv_drn)
+# tar_load(env_dt)
+# 
+# tar_load(bio_dt)
+# site_dates <- lapply(bio_dt, function(dt) {
+#   unique(dt[, c('campaign', 'site', 'country', 'date', 'organism'), with=F])
+# }) %>% rbindlist %>% unique
+# spdiv_local <- merge(spdiv_local, site_dates, by=c('campaign', 'site',
+#                                                    'country', 'organism'))
 
-merge_allvars <- function(in_sprich, in_hydrostats_comb) {
-  sprich_hydro <- lapply(unique(in_sprich$drn), function(in_country) {
+merge_allvars_sites <- function(in_sprich, in_hydrostats_comb) {
+  
+  hydro_compiled <- lapply(unique(spdiv_local$country), function(in_country) {
     in_hydrostats_isflowing <- in_hydrostats_comb[[
       paste0('hydrostats_', in_country, '_isflowing')]][['sites']] %>%
       setDT %>%
@@ -3147,15 +3166,15 @@ merge_allvars <- function(in_sprich, in_hydrostats_comb) {
       setDT %>%
       setnames('id', 'site')
     
-    
-    cols_to_keep <- names(in_hydrostats_isflowing)[
+    cols_to_keep_hydrostats <- names(in_hydrostats_isflowing)[
       (!names(in_hydrostats_isflowing) %in% names(in_hydrostats_qsim)) |
         (names(in_hydrostats_isflowing) %in% c('date','site'))] 
     
-    sprich_hydro_drn <- merge(in_sprich[drn==in_country,],
-                              in_hydrostats_isflowing[, cols_to_keep, with=F],
-                              by=c('date', 'site')) %>%
-      merge(in_hydrostats_qsim, by=c('date', 'site'))
+    hydro_compiled <- merge(in_hydrostats_isflowing[, cols_to_keep_hydrostats, with=F],
+                              in_hydrostats_qsim, by=c('date', 'site'))
+    
+    in_STcon_directed[[in_country]]$STcon_dt %>%
+      dcast()
     
     return(sprich_hydro_drn)  
   }) %>% rbindlist
