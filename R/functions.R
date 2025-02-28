@@ -2525,7 +2525,7 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
 
 
 #------ snap_sites -------------------------------------------------------------
-# drn <- 'Czech'
+# drn <- 'Croatia'
 # in_sites_path <- tar_read(site_points_gpkg_list)[[drn]]
 # in_network_path <- tar_read(network_ssnready_gpkg_list)[[drn]]
 # out_snapped_sites_path = NULL
@@ -2911,7 +2911,7 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
     as.data.table
   
   #Identify the outlet (NA in to_cat_shp)
-  outlet_to <- net_dt[which(is.na(net_dt$to_cat_shp)==T),]$to 
+  outlet_to <- net_dt[is.na(net_dt$to_cat_shp),]$to 
   
   #Create the graph from the DRN_adj_list (from - to)
   net_graph <- igraph::graph_from_edgelist(
@@ -3012,7 +3012,13 @@ compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL,
   #Select reference data or 
   #actual data with intermittence (for which a simulation is selected)
   interm_dt_sel <- if (ref) {in_preformatted_data$interm_ref
-  } else {in_preformatted_data$sites_status_matrix[nsim %in% in_nsim,]}
+  } else {
+    if (!is.null(in_nsim)) {
+      in_preformatted_data$sites_status_matrix[nsim %in% in_nsim,]
+    } else {
+      in_preformatted_data$sites_status_matrix
+    }
+  }
   
   #Compute STcon for every date and previous window of time across simulations
   compute_stcon_date_wrapper <- function(end_date, nsim_sel) {
@@ -3049,15 +3055,18 @@ compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL,
       verbose = verbose
     ) %>%
       append(
-        list(IDs = names(interm_dt_sel[, !c('date', 'nsim'), with = FALSE]),
-             nsim = nsim_sel)
+        list(IDs = names(interm_dt_sel[, !c('date', 'nsim'), with = FALSE]))
       )
+    
+    if (!is.null(nsim_sel)) {
+      STcon_list <- append(STcon_list, list(nsim = nsim_sel))
+    }
     
     return(STcon_list)
   }
   
   #If multiple nsims to run
-  if (length(in_nsim) > 0) {
+  if (!is.null(in_nsim)) {
     STcon_datelist <-  lapply(in_nsim, function(nsim_sel) {
       lapply(in_dates$date, function(end_date) {
         compute_stcon_date_wrapper(end_date, nsim_sel)
@@ -3066,7 +3075,7 @@ compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL,
   } else {
     #otherwise, simply run function for every focus date
     STcon_datelist <- lapply(in_dates$date, function(end_date) { 
-      compute_stcon_date_wrapper(end_date, nsim_sel = in_nsim)
+      compute_stcon_date_wrapper(end_date)
     }) %>% setNames(in_dates$date)
   }
   
@@ -3099,28 +3108,25 @@ postprocess_STcon <- function(in_STcon, in_net_shp_path,
     setorder(from)
   
   #Identify the outlet (NA in to_cat_shp)
-  outlet_from <- net_dt[which(is.na(net_dt$to_cat_shp)==T),]$to 
+  outlet_from <- net_dt[is.na(net_dt$to_cat_shp),]$to 
   
   #Compile STcon data in long format by window size, hydrological simulation, date, and ID
   STcon_dt <- lapply(names(in_STcon), function(window_name) {
     lapply(names(in_STcon[[window_name]]), function(nsim_sel) {
-      lapply(names(in_STcon[[window_name]][[nsim_sel]]), function(date) {
         if (standardize_STcon & !is.null(in_STcon_ref)) {
           #Standardize by STcon in a network without intermittence
-          out_STcon <- (in_STcon[[window_name]][[nsim_sel]][[date]]$STcon/
-                          in_STcon_ref[[window_name]][[nsim_sel]][[date]]$STcon)
+          out_STcon <- (in_STcon[[window_name]][[date]]$STcon/
+                          in_STcon_ref[[window_name]][[date]]$STcon)
         } else {
-          out_STcon <- in_STcon[[window_name]][[nsim_sel]][[date]]$STcon
+          out_STcon <- in_STcon[[window_name]][[date]]$STcon
         }
         
         out_dt <- data.table(variable = window_name,
                              date = as.Date(date),
-                             from = in_STcon[[window_name]][[nsim_sel]][[date]]$IDs,
-                             nsim = nsim_sel,
+                             from = in_STcon[[window_name]][[date]]$IDs,
                              stcon_value = out_STcon
         ) %>% .[from != outlet_from,] #Remove outlet
       }) %>% rbindlist
-    }) %>% rbindlist 
   }) %>% rbindlist %>%
     merge(net_dt[, list(from=as.character(from), UID)], by='from') %>% #Replace from IDs with UID
     .[, from := NULL]
@@ -3134,13 +3140,12 @@ postprocess_STcon <- function(in_STcon, in_net_shp_path,
   
   STcon_mat <- lapply(names(in_STcon), function(window_name) {
     lapply(names(in_STcon[[window_name]]), function(nsim_sel) {
-      lapply(names(in_STcon[[window_name]][[nsim_sel]]), function(date) {
-        if (!is.null(in_STcon[[window_name]][[nsim_sel]][[date]]$STconmat)) {
+        if (!is.null(in_STcon[[window_name]][[date]]$STconmat)) {
           if (standardize_STcon & !is.null(in_STcon_ref)) {
-            out_STconmat <- (in_STcon[[window_name]][[nsim_sel]][[date]]$STconmat/
-                               in_STcon_ref[[window_name]][[nsim_sel]][[date]]$STconmat)
+            out_STconmat <- (in_STcon[[window_name]][[date]]$STconmat/
+                               in_STcon_ref[[window_name]][[date]]$STconmat)
           } else {
-            out_STconmat <- in_STcon[[window_name]][[nsim_sel]][[date]]$STconmat
+            out_STconmat <- in_STcon[[window_name]][[date]]$STconmat
           }
           
           #Remove outlet
@@ -3157,7 +3162,6 @@ postprocess_STcon <- function(in_STcon, in_net_shp_path,
           )
         }
       }) %>% rbindlist
-    }) %>% rbindlist 
   }) %>% rbindlist
   
   return(list(
