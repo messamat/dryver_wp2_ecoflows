@@ -116,7 +116,7 @@ hsaValidHydroYear <- function(hy, x = NULL, n = 365, na.th = 0.005) {
 
 
 #------ get_nc_var_present -----------------------------------------------------
-get_nc_var_present <- function(nc, varname, reachID, dates, selected_sims=1:20) {
+get_nc_var_present <- function(nc, varname, reachID, dates, selected_sims=NULL) {
   nc_data <- ncvar_get(nc, varname)
   
   dates_format <- hsaHydroYearSeasons(
@@ -287,140 +287,149 @@ compute_ecdf_multimerge <- function(in_dt, ecdf_columns, grouping_columns,
 
 #------ compute_hydrostats_intermittence ---------------------------------------
 compute_hydrostats_intermittence <- function(in_hydromod_dt,
-                                             in_sites_dt) {
+                                             in_sites_dt,
+                                             scale = 'all') {
   # -- Compute network-wide statistics ---------------------------------------
-  #minimum 7-day and 30-day average over previous year
-  #average in previous 10, 30, 45, 60, 90, 120, 180, 365, 365*5, 365*10 
-  
-  total_reach_length <- unique(in_hydromod_dt, by='reach_id')[, sum(reach_length)]
-  
-  #RelFlow: Proportion of network length with flowing conditions (opposite of RelInt)
-  relF_dt <- in_hydromod_dt[isflowing == 1,
-                            list(relF = sum(reach_length)/total_reach_length)
-                            , by=.(date, nsim)] %>%
-    setorder(date)
-  
-  #ggplot(relF_dt, aes(x=date, y=relF, color=nsim)) + geom_line()
-  
-  #Compute min 7-day and 30-day relF
-  relF_dt[, `:=`(
-    relF7mean = frollmean(x=relF, n=7, align='center', na.rm=T),
-    relF30mean = frollmean(x=relF, n=30, align='center', na.rm=T)
-  ), by = nsim] %>%
-    .[, `:=`(
-      relF7mean_yrmin = frollapply(relF7mean, n=365, FUN=min, align='right'),
-      relF30mean_yrmin = frollapply(relF30mean, n=365, FUN=min, align='right')
-    ), by = nsim]
-  
-  #Compute previous mean over many windows
-  meanstep <- c(10, 30, 60, 90, 120, 180, 365, 365*5, 365*10)
-  relF_dt[, paste0("relF", meanstep, "past") := frollmean(relF, meanstep, na.rm=T), 
-          by = nsim]
-  
-  #PatchC: Patchiness of steady and intermittent flow conditions?
-  #proportion of model-derived reach length with changing flow conditions 
-  #compared to downstream reaches
-  #-> not sure how to compute it. Hard to access JAM source files
-  
-  #Size of flowing connected patch
+  if (scale %in% c('all', 'drn')) {
+    #minimum 7-day and 30-day average over previous year
+    #average in previous 10, 30, 45, 60, 90, 120, 180, 365, 365*5, 365*10 
+    
+    total_reach_length <- unique(in_hydromod_dt, by='reach_id')[, sum(reach_length)]
+    
+    #RelFlow: Proportion of network length with flowing conditions (opposite of RelInt)
+    relF_dt <- in_hydromod_dt[isflowing == 1,
+                              list(relF = sum(reach_length)/total_reach_length)
+                              , by=.(date)] %>%
+      setorder(date)
+    
+    #ggplot(relF_dt, aes(x=date, y=relF)) + geom_line()
+    
+    #Compute min 7-day and 30-day relF
+    relF_dt[, `:=`(
+      relF7mean = frollmean(x=relF, n=7, align='center', na.rm=T),
+      relF30mean = frollmean(x=relF, n=30, align='center', na.rm=T)
+    )] %>%
+      .[, `:=`(
+        relF7mean_yrmin = frollapply(relF7mean, n=365, FUN=min, align='right'),
+        relF30mean_yrmin = frollapply(relF30mean, n=365, FUN=min, align='right')
+      )]
+    
+    #Compute previous mean over many windows
+    meanstep <- c(10, 30, 60, 90, 120, 180, 365, 365*5, 365*10)
+    relF_dt[, paste0("relF", meanstep, "past") := frollmean(relF, meanstep, na.rm=T)]
+    
+    #PatchC: Patchiness of steady and intermittent flow conditions?
+    #proportion of model-derived reach length with changing flow conditions 
+    #compared to downstream reaches
+    #-> not sure how to compute it. Hard to access JAM source files
+    
+    #Size of flowing connected patch
+  }
   
   # -- Compute statistics for specific reaches -------------------------------
   # DurD: DryDuration
   # PDurD: DryDuration_relative_to_longterm
   # FreD: Drying frequency - absolute or relative number of drying events per time interval
   # PFreD: FreD_relative_to_longterm
+  if (scale %in% c('all', 'site')) {
+    hydromod_dt_sites <- in_hydromod_dt[reach_id %in% unique(in_sites_dt$reach_id),] %>%
+      setorderv(c('reach_id', 'date'))
+    
+    #Compute duration of no-flow periods and time since last no-flow period #PrdD: prior days to last dry/pool/flowing event
+    hydromod_dt_sites[, `:=`(noflow_period = rleid(isflowing==0), #Compute no-flow periods
+                             last_noflow = zero_lomf(isflowing==0, first=FALSE) #Compute row index of last no flow day
+    ), by=.(reach_id)] %>%
+      .[isflowing == 1, noflow_period := NA] %>% 
+      .[last_noflow ==0, last_noflow := NA] %>%
+      .[!is.na(noflow_period), noflow_period_dur := .N,  #Compute duration of each no-flow period
+        by = .(noflow_period, reach_id)] %>%
+      .[, last_noflowdate := .SD[last_noflow, date], by = .(reach_id)] %>% #Convert to data
+      .[, PrdD := difftime(date, last_noflowdate, units='days'), #Compute duration of each no-flow period
+        by = .(reach_id)] %>%
+      .[, last_noflow := NULL]
+    
+    # ggplot(hydromod_dt_sites, aes(x=date, y=time_to_lastzero)) +
+    #   geom_line() +
+    #   facet_wrap(~id)
+    
+    #Compute monthly statistics --------------------------------------------------
+    # qstats_absolute <- hydromod_dt_sites[,
+    #                             list(
+    #                               DurD = sum(isflowing==0),
+    #                               FreD = length(na.omit(unique(noflow_period, na.rm=T))) #faster than uniqueN
+    #                             ),
+    #                             by = .(month, hy, reach_id)
+    # ]
+    # 
+    # monthly_qstats_relative <- compute_ecdf_multimerge(
+    #   in_dt = qstats_absolute,
+    #   ecdf_columns = c('DurD', 'FreD'),
+    #   grouping_columns = c('reach_id', 'month'), 
+    #   keep_column = 'hy',
+    #   na.rm=TRUE)
+    
+    #Compute moving-window statistics --------------------------------------------
+    rollingstep_short <- c(10, 30, 60, 90, 120, 180)
+    rollingstep_long <- c(365, 365*5, 365*10)
+    rollingstep <- c(rollingstep_short, rollingstep_long)
+    hydromod_dt_sites[, paste0("DurD", rollingstep, "past") :=  
+                        frollapply(isflowing, n=rollingstep, 
+                                   FUN=function(x) sum(x==0), 
+                                   align='right'), by = .(reach_id)
+    ]
+    hydromod_dt_sites[, paste0("FreD", rollingstep, "past") := 
+                        frollapply(noflow_period, n=rollingstep, 
+                                   FUN = function(x) { #45% faster than using na.omit; 75% faster than uniqueN
+                                     ux <- unique(x[!is.na(x)])
+                                     length(ux)
+                                   },
+                                   align='right')  
+                      , by = .(reach_id)
+    ]
+    
+    #Compute ecdf value by day of year for moving windows
+    rolling_column_names_short <- expand.grid(c('DurD', 'FreD'), 
+                                              rollingstep_short) %>%
+      setDT %>% 
+      .[, paste0(Var1, Var2, 'past')]
+    
+    hydromod_dt_sites <- compute_ecdf_multimerge(
+      in_dt = hydromod_dt_sites,
+      ecdf_columns = rolling_column_names_short,
+      grouping_columns = c('reach_id', 'doy'), 
+      keep_column = 'date',
+      na.rm=TRUE)
+    
+    #Compute ecdf value across entire records for moving windows > 365 days
+    rolling_column_names_long <- expand.grid(c('DurD', 'FreD'), 
+                                             rollingstep_long) %>% 
+      setDT %>% 
+      .[, paste0(Var1, Var2, 'past')]
+    
+    hydromod_dt_sites <- compute_ecdf_multimerge(
+      in_dt = hydromod_dt_sites,
+      ecdf_columns = rolling_column_names_long,
+      grouping_columns = c('reach_id'), 
+      keep_column = 'date',
+      na.rm=TRUE)
+    
+    hydromod_dt_sites <- merge(in_sites_dt[, .(id, reach_id)], 
+                               hydromod_dt_sites, 
+                               by = 'reach_id', all.x = T, all.y = F,
+                               allow.cartesian = T) %>%
+      setorderv(c('reach_id', 'date'))
+  }
   
-  hydromod_dt_sites <- in_hydromod_dt[reach_id %in% unique(in_sites_dt$reach_id),] %>%
-    setorderv(c('nsim', 'reach_id', 'date'))
+  # Output -----------------------------
+  out_list <- list()
+  if (scale %in% c('all', 'site')) {
+    out_list <- append(out_list, list(site = hydromod_dt_sites))
+  }
+  if (scale %in% c('all', 'drn')) {
+    out_list <- append(out_list, list(drn = relF_dt))
+  }
   
-  #Compute duration of no-flow periods and time since last no-flow period #PrdD: prior days to last dry/pool/flowing event
-  hydromod_dt_sites[, `:=`(noflow_period = rleid(isflowing==0), #Compute no-flow periods
-                           last_noflow = zero_lomf(isflowing==0, first=FALSE) #Compute row index of last no flow day
-  ), by=.(nsim, reach_id)] %>%
-    .[isflowing == 1, noflow_period := NA] %>% 
-    .[last_noflow ==0, last_noflow := NA] %>%
-    .[!is.na(noflow_period), noflow_period_dur := .N,  #Compute duration of each no-flow period
-      by = .(noflow_period, nsim, reach_id)] %>%
-    .[, last_noflowdate := .SD[last_noflow, date], by = .(nsim, reach_id)] %>% #Convert to data
-    .[, PrdD := difftime(date, last_noflowdate, units='days'), #Compute duration of each no-flow period
-      by = .(nsim, reach_id)] %>%
-    .[, last_noflow := NULL]
-  
-  # ggplot(hydromod_dt_sites[nsim==1,], aes(x=date, y=time_to_lastzero,color=nsim)) +
-  #   geom_line() +
-  #   facet_wrap(~id)
-  
-  #Compute monthly statistics --------------------------------------------------
-  # qstats_absolute <- hydromod_dt_sites[,
-  #                             list(
-  #                               DurD = sum(isflowing==0),
-  #                               FreD = length(na.omit(unique(noflow_period, na.rm=T))) #faster than uniqueN
-  #                             ),
-  #                             by = .(month, hy, reach_id, nsim)
-  # ]
-  # 
-  # monthly_qstats_relative <- compute_ecdf_multimerge(
-  #   in_dt = qstats_absolute,
-  #   ecdf_columns = c('DurD', 'FreD'),
-  #   grouping_columns = c('nsim', 'reach_id', 'month'), 
-  #   keep_column = 'hy',
-  #   na.rm=TRUE)
-  
-  #Compute moving-window statistics --------------------------------------------
-  rollingstep_short <- c(10, 30, 60, 90, 120, 180)
-  rollingstep_long <- c(365, 365*5, 365*10)
-  rollingstep <- c(rollingstep_short, rollingstep_long)
-  hydromod_dt_sites[, paste0("DurD", rollingstep, "past") :=  
-                      frollapply(isflowing, n=rollingstep, 
-                                 FUN=function(x) sum(x==0), 
-                                 align='right'), by = .(reach_id, nsim)
-  ]
-  hydromod_dt_sites[, paste0("FreD", rollingstep, "past") := 
-                      frollapply(noflow_period, n=rollingstep, 
-                                 FUN = function(x) { #45% faster than using na.omit; 75% faster than uniqueN
-                                   ux <- unique(x[!is.na(x)])
-                                   length(ux)
-                                 },
-                                 align='right')  
-                    , by = .(reach_id, nsim)
-  ]
-  
-  #Compute ecdf value by day of year for moving windows
-  rolling_column_names_short <- expand.grid(c('DurD', 'FreD'), 
-                                            rollingstep_short) %>%
-    setDT %>% 
-    .[, paste0(Var1, Var2, 'past')]
-  
-  hydromod_dt_sites <- compute_ecdf_multimerge(
-    in_dt = hydromod_dt_sites,
-    ecdf_columns = rolling_column_names_short,
-    grouping_columns = c('nsim', 'reach_id', 'doy'), 
-    keep_column = 'date',
-    na.rm=TRUE)
-  
-  #Compute ecdf value across entire records for moving windows > 365 days
-  rolling_column_names_long <- expand.grid(c('DurD', 'FreD'), 
-                                           rollingstep_long) %>% 
-    setDT %>% 
-    .[, paste0(Var1, Var2, 'past')]
-  
-  hydromod_dt_sites <- compute_ecdf_multimerge(
-    in_dt = hydromod_dt_sites,
-    ecdf_columns = rolling_column_names_long,
-    grouping_columns = c('nsim', 'reach_id'), 
-    keep_column = 'date',
-    na.rm=TRUE)
-  
-  hydromod_dt_sites <- merge(in_sites_dt[, .(id, reach_id)], 
-                             hydromod_dt_sites, 
-                             by = 'reach_id', all.x = T, all.y = F,
-                             allow.cartesian = T) %>%
-    setorderv(c('nsim', 'reach_id', 'date'))
-  
-  return(list(
-    network = relF_dt,
-    sites = hydromod_dt_sites
-  ))
+  return(out_list)
 }
 
 #------ compute_hydrostats_q ---------------------------------------------------
@@ -790,26 +799,20 @@ define_hydromod_paths <- function(in_hydromod_dir) {
       'Albarine_2022-12-16_option0.nc',
       "Bukkosdi_2022-12-16_option0.nc", #_run8_final
       "Genal_2023-01-18_option0.nc"
-    ),
-    sel_sim_filename = c(
-      "Butiznica_2022-12-15_option0_run8_final.nc",
-      "Velicka_2023-02-01_option0_run9_final.nc",
-      "Lepsamaanjoki_2022-12-16_option0_run20_final.nc",
-      "Albarine_2022-12-16_option0_run3_final.nc",
-      "Bukkosdi_2022-12-16_option0_run8_final.nc", 
-      "Genal_2023-01-18_option0_run15_final.nc"
     )
   ) %>%
-    .[, `:=`(all_sims_path = file.path(in_hydromod_dir, catchment, 
+    .[, `:=`(all_sims_path = file.path(in_hydromod_dir, 'data', catchment, 
                                        "Results_present_period", all_sims_filename),
-             sel_sim_path = file.path(in_hydromod_dir, catchment, 
-                                      "Results_present_period", sel_sim_filename),
-             catchment_path = file.path(in_hydromod_dir, catchment,
+             sel_sim_path = file.path(in_hydromod_dir, 
+                                      'flow_intermittence_discharge_baseflow_1960_2022',
+                                      paste0(catchment, 
+                                             '_flow_intermittence_1960_oct2022_corr.nc')),
+             catchment_path = file.path(in_hydromod_dir, 'data',catchment,
                                         "watershed_small_catchment.shp"),
-             network_path = file.path(in_hydromod_dir, catchment,
+             network_path = file.path(in_hydromod_dir, 'data', catchment,
                                       "river_network.shp"),
-             reaches_path = file.path(in_hydromod_dir, catchment, "reach.par"),
-             sites_reachids = file.path(in_hydromod_dir, catchment,
+             reaches_path = file.path(in_hydromod_dir,'data', catchment, "reach.par"),
+             sites_reachids = file.path(in_hydromod_dir, 'data', catchment,
                                         paste0(catchment, 
                                                '_sampling_sites_ReachIDs.csv')))]
   
@@ -817,7 +820,7 @@ define_hydromod_paths <- function(in_hydromod_dir) {
 }
 
 #------ get_drn_hydromod -------------------------------------------------------
-get_drn_hydromod <- function(hydromod_path, varname, selected_sims) {
+get_drn_hydromod <- function(hydromod_path, varname, selected_sims=NULL) {
   nc <- nc_open(hydromod_path) # open netcdf file
   reachID <- ncvar_get(nc, "reachID") # get list of reaches IDs
   dates <- ncvar_get(nc, "date") # get dates of simulation period
@@ -2320,7 +2323,7 @@ reassign_netids <- function(rivnet_path, strahler_dt,
   return(out_path)
 }
 #------ compute_hydrostats_drn -------------------------------------------------
-# in_drn <- 'Hungary'
+# in_drn <- 'Finland'
 # varname <-  'isflowing' #qsim
 # in_sites_dt <- tar_read(sites_dt)[country == in_drn,]
 # in_network_path <- tar_read(network_ssnready_gpkg_list)[[in_drn]]
@@ -2353,9 +2356,27 @@ compute_hydrostats_drn <- function(in_network_path,
       merge(in_hydromod_drn$dates_format[, .(date, month, hy, doy)],
             by='date', all.x=T, all.y=F)
     
-    q_stats <- compute_hydrostats_intermittence(
-      in_hydromod_dt = intermod_dt,
-      in_sites_dt = in_sites_dt)
+    if ('nsim' %in% names(intermod_dt)) {
+      q_stats <- list()
+      q_stats$drn <- intermod_dt[, 
+                                 compute_hydrostats_intermittence(
+                                   in_hydromod_dt = .SD,
+                                   in_sites_dt = in_sites_dt,
+                                   scale = 'drn')$drn, 
+                                 by = nsim] 
+      
+      q_stats$site <- intermod_dt[, 
+                                  compute_hydrostats_intermittence(
+                                    in_hydromod_dt = .SD,
+                                    in_sites_dt = in_sites_dt,
+                                    scale = 'site')$site
+                                  , by = nsim]
+    } else {
+      q_stats <-compute_hydrostats_intermittence(
+        in_hydromod_dt = intermod_dt,
+        in_sites_dt = in_sites_dt)
+    }
+    
   }
   
   #-------------------- Compute discharge statistics ---------------------------
@@ -2378,12 +2399,12 @@ compute_hydrostats_drn <- function(in_network_path,
 }
 
 #------ format_sites_dt ----------------------------------------------------------
-# in_country <- 'Finland'
+# in_country <- 'Spain'
 # in_path <- tar_read(hydromod_paths_dt)[country == in_country, sites_reachids]
-# check <- format_site_dt(in_path, in_country)
-# print(check)
+# #check <- format_site_dt(in_path, in_country)
+# in_env_dt <- tar_read(env_dt)
 
-format_site_dt <- function(in_path, in_country) {
+format_site_dt <- function(in_path, in_env_dt, in_country) {
   sites_dt <- fread(in_path) %>%
     setnames(tolower(names(.))) %>%
     .[, reach_id := as.integer(reach_id)]
@@ -2400,13 +2421,6 @@ format_site_dt <- function(in_path, in_country) {
                str_pad(width=2, side='left', pad = 0) %>%
                paste0('VEL', .)]
   } 
-  
-  if (in_country == 'France') {
-    #Update reach_ids based on documentation in WP1 
-    #"data\wp1\Results_present_period_final\intermittence_indicators\results until sampling sites of each DRN (small catchment)\Albarine\readme.txt"
-    sites_dt[id=='VI01', reach_id := 2438600]
-    sites_dt[id=='AL01', reach_id := 2455400]
-  }
   
   if (in_country == 'Finland') {
     sites_dt[, id := sub('FIN', '', id) %>%
@@ -2428,7 +2442,30 @@ format_site_dt <- function(in_path, in_country) {
     sites_dt[, id := sub('spa', 'GEN', id)]
   }
   
-  return(sites_dt[, .(id, lat, lon, reach_id)])
+  #Fill missing sites info from WP1 with info from field data
+  #For Hungary and Spain
+  sites_dt_filled <- in_env_dt[drn==in_country, .(site, latitude, longitude)] %>%
+    setnames(c('latitude', 'longitude'), c('latitude_field', 'longitude_field')) %>%
+    unique %>%
+    merge(sites_dt, by.x='site', by.y='id', all.x=T) %>%
+    .[is.na(lat), `:=`(lat = latitude_field, lon = longitude_field)] %>%
+    .[, `:=`(latitude_field = NULL, longitude_field = NULL)]
+  
+  sites_dt_filled[, reach_id := fcase(
+    site=='BUK01', 657801L,
+    site=='BUK36', 665000L,
+    site=='GEN05', 5780L,
+    site=='GEN11', 5594L,
+    site=='GEN12', 5588L,
+    site=='GEN17', 5882L,
+    site=='GEN23', 5732L,
+    site=='GEN26', 5392L,
+    site=='VI01', 2438600L, #based on documentation in WP1 
+    site=='AL01', 2455400L, #based on documentation in WP1 
+    default=reach_id
+  )]
+  
+  return(sites_dt_filled[, .(site, lat, lon, reach_id)])
 }
 
 #------ create_sites_gpkg --------------------------------------------------------
@@ -2494,7 +2531,7 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
 # out_snapped_sites_path = NULL
 # overwrite = T
 # custom_proj = F
-# in_sites_unique_id = 'id'
+# in_sites_unique_id = 'site'
 # in_network_unique_id = 'UID'
 # in_sites_idcol_tomatch = 'reach_id'
 # in_network_idcol_tomatch = 'cat_cor'
@@ -2505,7 +2542,7 @@ snap_river_sites <- function(in_sites_path,
                              out_snapped_sites_path=NULL, 
                              custom_proj = F,
                              proj_back = F,
-                             in_sites_unique_id = 'id',
+                             in_sites_unique_id = 'site',
                              in_network_unique_id = 'UID',
                              in_sites_idcol_tomatch = 'reach_id',
                              in_network_idcol_tomatch = 'cat_cor',
@@ -2906,26 +2943,31 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
   end_point_interm <- in_hydromod_drn$data_all %>%
     .[cat == .[1, cat],] %>% #select whatever reach
     .[, `:=`(UID = 11111,  from = outlet_to, value = 1)] %>% #format
-    .[, .(date, UID, isflowing, from, nsim)] 
+    .[, .(date, UID, isflowing, from)] 
   
   # Merge shapefile with flow intermittence data
   # Merge the Endpoint site and "pivot_wide" the table to obtain the TRUE intermittence table, 
   # where each row corresponds to a day (dates as factors) and columns to all nodes of the network.
+  nsims <- isTRUE('nsim' %in% in_hydromod_drn$data_all)
+  
+  cast_formula <- if (nsims) {as.formula('date + nsim ~ from')} else {'date ~ from'}
   sites_status_matrix <- 
     merge(net_dt, in_hydromod_drn$data_all, by='cat') %>%
     rbind(end_point_interm, fill=T) %>%
     .[, isflowing := as.integer(isflowing)] %>%
     .[is.na(isflowing), isflowing := 1L] %>% #FILL NAs in original hydrological data
     setorder(from) %>%
-    dcast(date + nsim ~ from, value.var = 'isflowing')
+    dcast(formula = cast_formula, value.var = 'isflowing')
   
   # We built the matrix of the network structure for the STcon, which is the "base" on which connectivity will be assessed. 
   network_structure <- as.matrix(as_adjacency_matrix(net_graph)) 
   
   #Create "reference river" datasets
   interm_ref <- sites_status_matrix %>%
-    filter(nsim == 1) %>%
     replace(.==0, 1L) 
+  if (nsims) {
+    interm_ref <- filter(interm_ref, nsim==1)
+  }
   
   return(list(
     sites_status_matrix = sites_status_matrix,
@@ -3179,16 +3221,14 @@ merge_allvars_sites <- function(in_sprich, in_hydrostats_comb) {
   
   hydro_con_compiled <- lapply(
     unique(in_spdiv_local$country), function(in_country) {
-      print(in_country)
+      #print(in_country)
       in_hydrostats_isflowing <- in_hydrostats_comb[[
         paste0('hydrostats_', in_country, '_isflowing')]][['sites']] %>%
-        setDT %>%
-        setnames('id', 'site', skip_absent = T)
+        setDT
       
       in_hydrostats_qsim <- in_hydrostats_comb[[
         paste0('hydrostats_', in_country, '_qsim')]] %>%
-        setDT %>%
-        setnames('id', 'site', skip_absent = T)
+        setDT
       
       cols_to_keep_hydrostats <- names(in_hydrostats_isflowing)[
         (!names(in_hydrostats_isflowing) %in% names(in_hydrostats_qsim)) |
@@ -3201,13 +3241,29 @@ merge_allvars_sites <- function(in_sprich, in_hydrostats_comb) {
       out_dt <- merge(
         in_hydrostats_isflowing[, cols_to_keep_hydrostats, with=F],
         in_hydrostats_qsim, by=c('date', 'site')) %>%
-        merge(in_sites_ssn_dt[, .(id, UID)], by.x='site', by.y='id') %>%
-        merge(STcon_cast, by=c('date', 'UID', 'nsim'), all.x=F)
+        merge(in_sites_ssn_dt[, .(id, UID)], ., by='site') %>%
+        merge(STcon_cast, by=c('date', 'UID', 'nsim'), all.x=T)
       
       return(out_dt)  
-    }) %>% rbindlist
+    }) %>% rbindlist 
   
+  spdiv_hydro_con <- merge(in_spdiv_local, hydro_con_compiled,
+                           by=c('date', 'site'), all.x=T)
   
+  check <- in_spdiv_local[paste(date, site) %in% (
+    unique(in_spdiv_local[, .(date, site)])[order(date),][, paste(date, site)] %>%
+      .[!((.) %in% unique(hydro_con_compiled[, .(date, site)])[, paste(date, site)])]
+  ),]
+  
+  check_sub <- check[date<'2022-05-01' & !duplicated(paste(site, date)),]
+  
+  hydro_con_compiled[date=='2021-02-01',]
+  
+  in_sites_ssn_dt[id=='BUK01',]
+  unique(in_sites_ssn_dt$id)
+  tar_load(sites_dt)
+  sites_dt[id=='BUK01',]
+  unique(sites_dt$id)
   
   return(sprich_hydro)
 }

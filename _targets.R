@@ -24,7 +24,7 @@ source("R/SpaTemp_function_Mathis_edit.R")
 # }
 source("bin/03_diversity_metrics.R") #From 
 
-hydromod_present_dir <- file.path('data', 'wp1', 'Results_present_period_final', 'data')
+hydromod_present_dir <- file.path('data', 'wp1', 'Results_present_period_final')
 bio_dir <- file.path('data', 'wp2', '01_WP2 final data')
 #datdir <- file.path('data', 'data_annika')
 resdir <- 'results'
@@ -44,11 +44,11 @@ hydro_combi <- expand.grid(
   stringsAsFactors = FALSE)
 
 
-perf_ratio <- 0.8 #Set how much you want to push your computer (% of cores and RAM)
-nthreads <- min(nrow(drn_dt), round(parallel::detectCores(logical=F)*perf_ratio))
-future::plan("future::multisession", workers=nthreads)
-total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
-options(future.globals.maxSize = perf_ratio*total_ram)
+# perf_ratio <- 0.8 #Set how much you want to push your computer (% of cores and RAM)
+# nthreads <- min(nrow(drn_dt), round(parallel::detectCores(logical=F)*perf_ratio))
+# future::plan("future::multisession", workers=nthreads)
+# total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
+# options(future.globals.maxSize = perf_ratio*total_ram)
 
 #--------------------------  Define targets plan -------------------------------
 #-------------- Preformatting targets ------------------------------------------
@@ -146,6 +146,7 @@ preformatting_targets <- list(
   tar_target(
     sites_dt,
     hydromod_paths_dt[, format_site_dt(in_path = sites_reachids, 
+                                       in_env_dt = env_dt,
                                        in_country = country),
                       by = country] 
   ),
@@ -370,9 +371,9 @@ mapped_hydrotargets <- tarchetypes::tar_map(
   tar_target(
     hydromod_dt,
     get_drn_hydromod(hydromod_path = hydromod_paths_dt[country==in_country,
-                                                       all_sims_path],
-                     varname = in_varname,
-                     selected_sims = 1:20)
+                                                       sel_sim_path],
+                     varname = in_varname)
+                     #selected_sims = 1:20)
   ),
   
   tar_target(
