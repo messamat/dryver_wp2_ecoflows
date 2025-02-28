@@ -163,15 +163,15 @@ compute_stcon <- function(sites_status_matrix,
   ####_______________________________________________________________________
   # River network ####
   ####_______________________________________________________________________
-  # We calculate the number of nodes of our network (used along the function)  
+  # Calculate the number of nodes of our network (used along the function)  
   numn_nodes <- ncol(sites_status_matrix)
   nsteps <- nrow(sites_status_matrix)
   
   if(weighting==TRUE){dist_matr <- dist_matrix}
   
-  # We built the matrix corresponding to the num. of nodes multiplied by the
-  # DAYS of HOBOS that we have
-  ### This matrix is the "giant" template where we will put all the values.
+  # Build the matrix corresponding to the num. of nodes multiplied by the number
+  #of time steps
+  ### This matrix is the template where we will put all the values.
   ST_matrix_raw <- matrix(nrow = numn_nodes, ncol = numn_nodes*2, 
                           data = value_no_s_link, 
                           dimnames = list(colnames(sites_status_matrix),
@@ -180,9 +180,8 @@ compute_stcon <- function(sites_status_matrix,
                                     data = 0L,
                                     dimnames = list(colnames(sites_status_matrix),
                                                     colnames(sites_status_matrix)))
-  # First we define the spatial connections of the matrix
-  ### Also known as the rows or columns at which we have to add the values of 
-  #the connections 
+  # Define the spatial connections of the matrix
+  ### i.e., the rows or columns where we have to add the values of the connections 
   spa_connections <- seq_len(numn_nodes)
   temp_connections <- spa_connections + numn_nodes
   
@@ -223,7 +222,7 @@ compute_stcon <- function(sites_status_matrix,
     All_river_paths <- fifelse(!is.infinite(dist_matrix_day), 
                                value_s_link, value_no_s_link)
     
-    # Weight the links base on daily information of flow or strength of the link.
+    # Weigh the links based on daily information of flow or strength of the link.
     if (weighting_links == TRUE) {
       All_river_paths <- All_river_paths * as.numeric(day_link_weights)
     }
@@ -236,7 +235,7 @@ compute_stcon <- function(sites_status_matrix,
     ST_matrix[, spa_connections] <- ST_matrix[, spa_connections] + All_river_paths
     
     # PROCESS TEMPORAL STEPS ---------------------------------------------------
-    # We create the matrix where we will drop the information of the shortest paths.
+    # Create the matrix to drop the information of the shortest paths.
     All_river_paths <- matrix(nrow = length(time_step_1),
                               ncol = length(time_step_1),
                               data = value_no_t_link)
@@ -330,8 +329,9 @@ compute_stcon <- function(sites_status_matrix,
     # position in the network. For example, with "out" routing mode, upstream
     # nodes will have higher values when considering their number of connections.
     if (standardize_neighbors) {
-      aa <- graph_from_adjacency_matrix(network_structure, mode = direction)
-      leng_correct <- neighborhood_size(aa, order = numn_nodes, mode = routing_mode) - 1 #to remove the connection to itself
+      leng_correct <- network_structure %>%
+        graph_from_adjacency_matrix(mode = direction) %>%
+        neighborhood_size(order = numn_nodes, mode = routing_mode) - 1 #to remove the connection to itself
       spt_conn <- spt_conn/leng_correct
     }
     
