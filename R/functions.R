@@ -2969,7 +2969,7 @@ compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL,
   } else {in_preformatted_data$sites_status_matrix[nsim %in% in_nsim,]}
   
   #Compute STcon for every date and previous window of time across simulations
-  STcon_datelist <- lapply(in_dates$date, function(end_date) {
+  compute_stcon_date_wrapper <- function(end_date, nsim_sel) {
     if (verbose) print(end_date)
     
     interm_sub <- interm_dt_sel[
@@ -3003,11 +3003,26 @@ compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL,
       verbose = verbose
     ) %>%
       append(
-        list(IDs = names(interm_dt_sel[, !c('date', 'nsim'), with = FALSE]))
+        list(IDs = names(interm_dt_sel[, !c('date', 'nsim'), with = FALSE]),
+             nsim = nsim_sel)
       )
     
     return(STcon_list)
-  }) %>% setNames(in_dates$date)
+  }
+  
+  #If multiple nsims to run
+  if (length(in_nsim) > 0) {
+    STcon_datelist <-  lapply(in_nsim, function(nsim_sel) {
+      lapply(in_dates$date, function(end_date) {
+        compute_stcon_date_wrapper(end_date, nsim_sel)
+        }) %>% setNames(in_dates$date)
+    }) %>% setNames(in_nsim)
+  } else {
+    #otherwise, simply run function for every focus date
+    STcon_datelist <- lapply(in_dates$date, function(end_date) { 
+      compute_stcon_date_wrapper(end_date, nsim_sel = in_nsim)
+      }) %>% setNames(in_dates$date)
+  }
   
   return(STcon_datelist)
 }
@@ -3054,7 +3069,8 @@ postprocess_STcon <- function(in_STcon, in_net_shp_path,
       out_dt <- data.table(variable = window_name,
                            date = as.Date(date),
                            from = in_STcon[[window_name]][[date]]$IDs,
-                           value = out_STcon
+                           nsim = in_STcon[[window_name]][[date]]$nsim,
+                           stcon_value = out_STcon
       ) %>% .[from != outlet_from,] #Remove outlet
     }) %>% rbindlist
   }) %>% rbindlist %>%
@@ -3118,8 +3134,8 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
     merge(stcon_sel, by='UID')
   
   net_v_stcon$inverse_stcon <-  1 - (
-    (net_v_stcon$value-min(net_v_stcon$value))/
-      (max(net_v_stcon$value)-min(net_v_stcon$value))
+    (net_v_stcon$stcon_value-min(net_v_stcon$stcon_value))/
+      (max(net_v_stcon$stcon_value)-min(net_v_stcon$stcon_value))
   )
   
   out_p <- ggplot(data=net_v_stcon)+
@@ -3130,19 +3146,20 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
     out_p <- out_p +
       geom_sf(aes(color=inverse_stcon)) 
   } else {
-    out_p <- out_p + geom_sf(aes(color=value)) 
+    out_p <- out_p + geom_sf(aes(color=stcon_value)) 
   }
 
   return(out_p)
 }
 
 
-#------ merge_alphadat ---------------------------------------------------------
+#------ merge_allvars_sites ----------------------------------------------------
 # in_country <- 'Croatia'
 # in_spdiv_local <- tar_read(spdiv_local)
 # in_hydrostats_comb <- tar_read(hydrostats_comb)
 # in_STcon_directed <- tar_read(STcon_directed_formatted)
-# 
+# in_ssn_eu <- tar_read(ssn_eu)
+
 # tar_load(spdiv_drn)
 # tar_load(env_dt)
 # 
@@ -3154,6 +3171,7 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
 #                                                    'country', 'organism'))
 
 merge_allvars_sites <- function(in_sprich, in_hydrostats_comb) {
+  in_sites_ssn_dt <- as.data.table(in_ssn_eu$ssn$obs)
   
   hydro_compiled <- lapply(unique(spdiv_local$country), function(in_country) {
     in_hydrostats_isflowing <- in_hydrostats_comb[[
@@ -3170,12 +3188,14 @@ merge_allvars_sites <- function(in_sprich, in_hydrostats_comb) {
       (!names(in_hydrostats_isflowing) %in% names(in_hydrostats_qsim)) |
         (names(in_hydrostats_isflowing) %in% c('date','site'))] 
     
+    STcon_cast <- in_STcon_directed[[in_country]]$STcon_dt %>%
+      dcast(date+UID~variable, value.var = 'value')
+    
     hydro_compiled <- merge(in_hydrostats_isflowing[, cols_to_keep_hydrostats, with=F],
-                              in_hydrostats_qsim, by=c('date', 'site'))
-    
-    in_STcon_directed[[in_country]]$STcon_dt %>%
-      dcast()
-    
+                              in_hydrostats_qsim, by=c('date', 'site')) %>%
+      merge(in_sites_ssn_dt[, .(id, UID)], by.x='site', by.y='id') %>%
+      merge(STcon_cast, by='UID', all.x=F)
+      
     return(sprich_hydro_drn)  
   }) %>% rbindlist
   
