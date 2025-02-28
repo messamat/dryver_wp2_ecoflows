@@ -1067,7 +1067,11 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
     print(in_path)
     out_dt <- fread(in_path) %>% 
       .[, organism := in_name] %>%
-      setnames(tolower(names(.)))
+      setnames(tolower(names(.))) 
+    
+    if ('country' %in% names(out_dt)) {
+      out_dt[country == 'Czech Republic', country := 'Czech']
+    }
     
     if (is.character(out_dt$date)) {
       out_dt[, date := as.Date(date, '%d.%m.%Y')]
@@ -2573,7 +2577,7 @@ snap_river_sites <- function(in_sites_path,
             attri_to_join = c(in_network_idcol_tomatch, in_network_unique_id)
           )
         } 
-       return(out_p)
+        return(out_p)
       }) %>%
       vect(.)
     
@@ -2892,7 +2896,7 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
   
   #Compute distance matrix (in integer, lighter to handle -- one-meter difference does not matter)
   river_dist_mat <- igraph::distances(net_graph)
-
+  
   #Format intermittence data
   setDT(in_hydromod_drn$data_all) %>%
     setnames('reach_id', 'cat')
@@ -3015,13 +3019,13 @@ compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL,
     STcon_datelist <-  lapply(in_nsim, function(nsim_sel) {
       lapply(in_dates$date, function(end_date) {
         compute_stcon_date_wrapper(end_date, nsim_sel)
-        }) %>% setNames(in_dates$date)
+      }) %>% setNames(in_dates$date)
     }) %>% setNames(in_nsim)
   } else {
     #otherwise, simply run function for every focus date
     STcon_datelist <- lapply(in_dates$date, function(end_date) { 
       compute_stcon_date_wrapper(end_date, nsim_sel = in_nsim)
-      }) %>% setNames(in_dates$date)
+    }) %>% setNames(in_dates$date)
   }
   
   return(STcon_datelist)
@@ -3033,12 +3037,12 @@ compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL,
 # tar_load(STcon_directed_list)
 # tar_load(STcon_rolling_ref_list)
 # tar_load(preformatted_data_STcon)
-# 
+
 # in_country <- 'Croatia'
 # in_STcon <- STcon_undirected_list[[in_country]]
 # #in_STcon_ref <- STcon_directed_ref_list[[in_country]]
 # in_preformatted_data_STcon <- preformatted_data_STcon[[in_country]]
-# window_name <- 'STcon_m365'
+# window_name <- 'STcon_m10'
 # date <- '2021-02-25'
 # standardize_STcon = FALSE
 # in_STcon_ref = NULL
@@ -3055,59 +3059,63 @@ postprocess_STcon <- function(in_STcon, in_net_shp_path,
   #Identify the outlet (NA in to_cat_shp)
   outlet_from <- net_dt[which(is.na(net_dt$to_cat_shp)==T),]$to 
   
-  #Compile STcon data in long format by window size, date, and ID
+  #Compile STcon data in long format by window size, hydrological simulation, date, and ID
   STcon_dt <- lapply(names(in_STcon), function(window_name) {
-    lapply(names(in_STcon[[window_name]]), function(date) {
-      if (standardize_STcon & !is.null(in_STcon_ref)) {
-        #Standardize by STcon in a network without intermittence
-        out_STcon <- (in_STcon[[window_name]][[date]]$STcon/
-                        in_STcon_ref[[window_name]][[date]]$STcon)
-      } else {
-        out_STcon <- in_STcon[[window_name]][[date]]$STcon
-      }
-      
-      out_dt <- data.table(variable = window_name,
-                           date = as.Date(date),
-                           from = in_STcon[[window_name]][[date]]$IDs,
-                           nsim = in_STcon[[window_name]][[date]]$nsim,
-                           stcon_value = out_STcon
-      ) %>% .[from != outlet_from,] #Remove outlet
-    }) %>% rbindlist
+    lapply(names(in_STcon[[window_name]]), function(nsim_sel) {
+      lapply(names(in_STcon[[window_name]][[nsim_sel]]), function(date) {
+        if (standardize_STcon & !is.null(in_STcon_ref)) {
+          #Standardize by STcon in a network without intermittence
+          out_STcon <- (in_STcon[[window_name]][[nsim_sel]][[date]]$STcon/
+                          in_STcon_ref[[window_name]][[nsim_sel]][[date]]$STcon)
+        } else {
+          out_STcon <- in_STcon[[window_name]][[nsim_sel]][[date]]$STcon
+        }
+        
+        out_dt <- data.table(variable = window_name,
+                             date = as.Date(date),
+                             from = in_STcon[[window_name]][[nsim_sel]][[date]]$IDs,
+                             nsim = nsim_sel,
+                             stcon_value = out_STcon
+        ) %>% .[from != outlet_from,] #Remove outlet
+      }) %>% rbindlist
+    }) %>% rbindlist 
   }) %>% rbindlist %>%
     merge(net_dt[, list(from=as.character(from), UID)], by='from') %>% #Replace from IDs with UID
     .[, from := NULL]
   
   #Compile STcon matrices by window size and date 
   #Prepare UIDs to assign to col/rownames (removing outlet)
-  UIDs_order <- as.integer(in_STcon[[names(in_STcon)[1]]][[1]]$IDs) %>%
+  UIDs_order <- as.integer(in_STcon[[1]][[1]][[1]]$IDs) %>%
     setdiff(outlet_from) %>%
     match(net_dt$from) 
   UIDs_to_assign <- net_dt[UIDs_order, UID]
-    
+  
   STcon_mat <- lapply(names(in_STcon), function(window_name) {
-    lapply(names(in_STcon[[window_name]]), function(date) {
-      if (!is.null(in_STcon[[window_name]][[date]]$STconmat)) {
-        if (standardize_STcon & !is.null(in_STcon_ref)) {
-          out_STconmat <- (in_STcon[[window_name]][[date]]$STconmat/
-                             in_STcon_ref[[window_name]][[date]]$STconmat)
-        } else {
-          out_STconmat <- in_STcon[[window_name]][[date]]$STconmat
+    lapply(names(in_STcon[[window_name]]), function(nsim_sel) {
+      lapply(names(in_STcon[[window_name]][[nsim_sel]]), function(date) {
+        if (!is.null(in_STcon[[window_name]][[nsim_sel]][[date]]$STconmat)) {
+          if (standardize_STcon & !is.null(in_STcon_ref)) {
+            out_STconmat <- (in_STcon[[window_name]][[nsim_sel]][[date]]$STconmat/
+                               in_STcon_ref[[window_name]][[nsim_sel]][[date]]$STconmat)
+          } else {
+            out_STconmat <- in_STcon[[window_name]][[nsim_sel]][[date]]$STconmat
+          }
+          
+          #Remove outlet
+          out_STconmat <- out_STconmat[rownames(out_STconmat) != 
+                                         as.character(outlet_from), 
+                                       colnames(out_STconmat) != 
+                                         as.character(outlet_from)]
+          #Assign UIDs
+          colnames(out_STconmat) <- rownames(out_STconmat) <- UIDs_to_assign
+          
+          data.table(variable = window_name,
+                     date = as.Date(date),
+                     STconmat = list(out_STconmat)
+          )
         }
-        
-        #Remove outlet
-        out_STconmat <- out_STconmat[rownames(out_STconmat) != 
-                                       as.character(outlet_from), 
-                                     colnames(out_STconmat) != 
-                                       as.character(outlet_from)]
-        #Assign UIDs
-        colnames(out_STconmat) <- rownames(out_STconmat) <- UIDs_to_assign
-        
-        data.table(variable = window_name,
-                   date = as.Date(date),
-                   STconmat = list(out_STconmat)
-        )
-      }
-    }) %>% rbindlist
+      }) %>% rbindlist
+    }) %>% rbindlist 
   }) %>% rbindlist
   
   return(list(
@@ -3148,7 +3156,7 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
   } else {
     out_p <- out_p + geom_sf(aes(color=stcon_value)) 
   }
-
+  
   return(out_p)
 }
 
@@ -3160,44 +3168,46 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
 # in_STcon_directed <- tar_read(STcon_directed_formatted)
 # in_ssn_eu <- tar_read(ssn_eu)
 
+
+#############################
 # tar_load(spdiv_drn)
 # tar_load(env_dt)
-# 
 # tar_load(bio_dt)
-# site_dates <- lapply(bio_dt, function(dt) {
-#   unique(dt[, c('campaign', 'site', 'country', 'date', 'organism'), with=F])
-# }) %>% rbindlist %>% unique
-# spdiv_local <- merge(spdiv_local, site_dates, by=c('campaign', 'site',
-#                                                    'country', 'organism'))
 
 merge_allvars_sites <- function(in_sprich, in_hydrostats_comb) {
   in_sites_ssn_dt <- as.data.table(in_ssn_eu$ssn$obs)
   
-  hydro_compiled <- lapply(unique(spdiv_local$country), function(in_country) {
-    in_hydrostats_isflowing <- in_hydrostats_comb[[
-      paste0('hydrostats_', in_country, '_isflowing')]][['sites']] %>%
-      setDT %>%
-      setnames('id', 'site')
-    
-    in_hydrostats_qsim <- in_hydrostats_comb[[
-      paste0('hydrostats_', in_country, '_qsim')]] %>%
-      setDT %>%
-      setnames('id', 'site')
-    
-    cols_to_keep_hydrostats <- names(in_hydrostats_isflowing)[
-      (!names(in_hydrostats_isflowing) %in% names(in_hydrostats_qsim)) |
-        (names(in_hydrostats_isflowing) %in% c('date','site'))] 
-    
-    STcon_cast <- in_STcon_directed[[in_country]]$STcon_dt %>%
-      dcast(date+UID~variable, value.var = 'value')
-    
-    hydro_compiled <- merge(in_hydrostats_isflowing[, cols_to_keep_hydrostats, with=F],
-                              in_hydrostats_qsim, by=c('date', 'site')) %>%
-      merge(in_sites_ssn_dt[, .(id, UID)], by.x='site', by.y='id') %>%
-      merge(STcon_cast, by='UID', all.x=F)
+  hydro_con_compiled <- lapply(
+    unique(in_spdiv_local$country), function(in_country) {
+      print(in_country)
+      in_hydrostats_isflowing <- in_hydrostats_comb[[
+        paste0('hydrostats_', in_country, '_isflowing')]][['sites']] %>%
+        setDT %>%
+        setnames('id', 'site', skip_absent = T)
       
-    return(sprich_hydro_drn)  
-  }) %>% rbindlist
+      in_hydrostats_qsim <- in_hydrostats_comb[[
+        paste0('hydrostats_', in_country, '_qsim')]] %>%
+        setDT %>%
+        setnames('id', 'site', skip_absent = T)
+      
+      cols_to_keep_hydrostats <- names(in_hydrostats_isflowing)[
+        (!names(in_hydrostats_isflowing) %in% names(in_hydrostats_qsim)) |
+          (names(in_hydrostats_isflowing) %in% c('date','site'))] 
+      
+      STcon_cast <- in_STcon_directed[[in_country]]$STcon_dt %>%
+        dcast(date+UID+nsim~variable, value.var = 'stcon_value') %>%
+        .[, nsim := as.integer(nsim)]
+      
+      out_dt <- merge(
+        in_hydrostats_isflowing[, cols_to_keep_hydrostats, with=F],
+        in_hydrostats_qsim, by=c('date', 'site')) %>%
+        merge(in_sites_ssn_dt[, .(id, UID)], by.x='site', by.y='id') %>%
+        merge(STcon_cast, by=c('date', 'UID', 'nsim'), all.x=F)
+      
+      return(out_dt)  
+    }) %>% rbindlist
+  
+  
   
   return(sprich_hydro)
 }

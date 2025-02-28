@@ -44,11 +44,11 @@ hydro_combi <- expand.grid(
   stringsAsFactors = FALSE)
 
 
-# perf_ratio <- 0.8 #Set how much you want to push your computer (% of cores and RAM)
-# nthreads <- min(nrow(drn_dt), round(parallel::detectCores(logical=F)*perf_ratio))
-# future::plan("future::multisession", workers=nthreads)
-# total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
-# options(future.globals.maxSize = perf_ratio*total_ram)
+perf_ratio <- 0.8 #Set how much you want to push your computer (% of cores and RAM)
+nthreads <- min(nrow(drn_dt), round(parallel::detectCores(logical=F)*perf_ratio))
+future::plan("future::multisession", workers=nthreads)
+total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
+options(future.globals.maxSize = perf_ratio*total_ram)
 
 #--------------------------  Define targets plan -------------------------------
 #-------------- Preformatting targets ------------------------------------------
@@ -426,10 +426,10 @@ analysis_targets <- list(
           }) %>% rbindlist %>% unique
           in_dates <- unique_sampling_dates
           
-          window_size_list <- c(10) #30, 60, 90, 180, 365
+          window_size_list <- c(10, 30, 90, 365) #30, 60, 90, 180, 365
           lapply(window_size_list, function(in_window) { 
             print(in_window)
-            if (in_window == 90) {
+            if (in_window == 365) {
               in_output <- 'all'
             } else {
               in_output <- 'STcon'
@@ -465,10 +465,10 @@ analysis_targets <- list(
           }) %>% rbindlist %>% unique
           in_dates <- unique_sampling_dates
           
-          window_size_list <- c(10) #30, 60, 90, 180, 365
+          window_size_list <- c(10, 30, 90, 365) #30, 60, 90, 180, 365
           lapply(window_size_list, function(in_window) { 
             print(in_window)
-            if (in_window == 90) {
+            if (in_window == 365) {
               in_output <- 'all'
             } else {
               in_output <- 'STcon'

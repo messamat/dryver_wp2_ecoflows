@@ -8,7 +8,7 @@
 #' The system does not necessarily need to quantify water absence/presence 
 #' but each cell value must represent a feature defining connectivity "on" or "off" 
 #' and that can be transmitted to build ecologically meaningful links in a
-#' spatiotemporal graph. 
+#' spatiotemporal graph. Requires: assertthat, data.table, igraph, magrittr, purrr
 #'
 #' @param sites_status_matrix A matrix representing the status of the site (wet/dry, 
 #' active/inactive). 
@@ -22,7 +22,7 @@
 #' @param routing_mode The direction for graph connectivity when directed, 
 #' can be "in" (routing from upstream if directed), "out" (routing from 
 #' downstream if directed), or "all". See ?igraph or ?igraph::closeness
-# for a better understanding. 
+#' for a better understanding. 
 #' @param weighting Logical; whether to weight the connectivity based on distances.
 #' @param dist_matrix A distance matrix representing the distances between sites.
 #' Can be any type of distance (euclidean, environmental, topographic, ...) 
@@ -167,8 +167,6 @@ compute_stcon <- function(sites_status_matrix,
   numn_nodes <- ncol(sites_status_matrix)
   nsteps <- nrow(sites_status_matrix)
   
-  if(weighting==TRUE){dist_matr <- dist_matrix}
-  
   # Build the matrix corresponding to the num. of nodes multiplied by the number
   #of time steps
   ### This matrix is the template where we will put all the values.
@@ -223,13 +221,10 @@ compute_stcon <- function(sites_status_matrix,
                                value_s_link, value_no_s_link)
     
     # Weigh the links based on daily information of flow or strength of the link.
-    if (weighting_links == TRUE) {
-      All_river_paths <- All_river_paths * as.numeric(day_link_weights)
+    if (weighting_links) {All_river_paths <- All_river_paths*as.numeric(day_link_weights)
     }
     # Weigh the sites based on the distances between them (a pairwise matrix)
-    if (weighting == TRUE) {
-      All_river_paths <- All_river_paths * dist_matr
-    }
+    if (weighting) {All_river_paths <- All_river_paths * dist_matrix}
     
     # Add the "All_river_paths" filled for each node in the "big" matrix
     ST_matrix[, spa_connections] <- ST_matrix[, spa_connections] + All_river_paths
@@ -264,7 +259,7 @@ compute_stcon <- function(sites_status_matrix,
     
     #Apply weights 
     if (weighting_links) {All_river_paths <- All_river_paths * day_link_weights}
-    if (weighting) {All_river_paths <- All_river_paths * dist_matr}
+    if (weighting) {All_river_paths <- All_river_paths * dist_matrix}
     
     #Apply legacy effects and update ST_matrix
     for (leg_eff in seq_len(legacy_length)) {
