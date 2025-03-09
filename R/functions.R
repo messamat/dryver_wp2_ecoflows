@@ -2896,7 +2896,7 @@ create_ssn_europe <- function(in_network_path,
 
 
 #------ prepare_data_for_STcon ---------------------------------------------------
-# in_country <- in_drn <- 'Finland'
+# in_country <- in_drn <- 'Croatia'
 # in_hydromod_drn <- tar_read(hydromod_comb)[[paste0(
 #   "hydromod_dt_", in_country, '_isflowing')]]
 # in_net_shp_path <- tar_read(network_ssnready_shp_list)[[in_drn]]
@@ -2948,11 +2948,11 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
   # Merge shapefile with flow intermittence data
   # Merge the Endpoint site and "pivot_wide" the table to obtain the TRUE intermittence table, 
   # where each row corresponds to a day (dates as factors) and columns to all nodes of the network.
-  nsims <- isTRUE('nsim' %in% in_hydromod_drn$data_all)
+  nsims <- isTRUE('nsim' %in% names(in_hydromod_drn$data_all))
   
   cast_formula <- if (nsims) {as.formula('date + nsim ~ from')} else {'date ~ from'}
   sites_status_matrix <- 
-    merge(net_dt, in_hydromod_drn$data_all, by='cat') %>%
+    merge(net_dt, in_hydromod_drn$data_all, by='cat', all.x=T) %>%
     rbind(end_point_interm, fill=T) %>%
     .[, isflowing := as.integer(isflowing)] %>%
     .[is.na(isflowing), isflowing := 1L] %>% #FILL NAs in original hydrological data
@@ -2982,7 +2982,7 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
 # in_drn <- 'Croatia'
 # in_preformatted_data <- tar_read(preformatted_data_STcon)[[in_drn]]
 # in_bio_dt <- tar_read(bio_dt)
-# in_nsim <- tar_read(hydromod_paths_dt)[country == in_drn,]$best_sim
+# in_nsim <- NULL#tar_read(hydromod_paths_dt)[country == in_drn,]$best_sim
 # 
 # unique_sampling_dates <- lapply(in_bio_dt, function(org_dt) {
 #   org_dt[country==in_drn, .(date)]
@@ -3021,7 +3021,7 @@ compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL,
   }
   
   #Compute STcon for every date and previous window of time across simulations
-  compute_stcon_date_wrapper <- function(end_date, nsim_sel) {
+  compute_stcon_date_wrapper <- function(end_date, nsim_sel=NULL) {
     if (verbose) print(end_date)
     
     interm_sub <- interm_dt_sel[

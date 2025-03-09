@@ -44,11 +44,11 @@ hydro_combi <- expand.grid(
   stringsAsFactors = FALSE)
 
 
-# perf_ratio <- 0.8 #Set how much you want to push your computer (% of cores and RAM)
-# nthreads <- min(nrow(drn_dt), round(parallel::detectCores(logical=F)*perf_ratio))
-# future::plan("future::multisession", workers=nthreads)
-# total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
-# options(future.globals.maxSize = perf_ratio*total_ram)
+perf_ratio <- 0.7 #Set how much you want to push your computer (% of cores and RAM)
+nthreads <- min(nrow(drn_dt), round(parallel::detectCores(logical=F)*perf_ratio))
+future::plan("future::multisession", workers=nthreads)
+total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
+options(future.globals.maxSize = perf_ratio*total_ram)
 
 #--------------------------  Define targets plan -------------------------------
 #-------------- Preformatting targets ------------------------------------------
@@ -312,7 +312,7 @@ preformatting_targets <- list(
       snap_river_sites(in_sites_path = site_points_gpkg_list[[in_country]], 
                        in_network_path = network_ssnready_gpkg_list[[in_country]],
                        custom_proj = F,
-                       in_sites_unique_id = 'id',
+                       in_sites_unique_id = 'site',
                        in_network_unique_id = 'UID',
                        in_sites_idcol_tomatch = 'reach_id',
                        in_network_idcol_tomatch = 'cat_cor',
@@ -439,7 +439,7 @@ analysis_targets <- list(
             compute_STcon_rolling(
               in_preformatted_data = preformatted_data_STcon[[in_country]], 
               ref = FALSE,
-              in_nsim = hydromod_paths_dt[country == in_country,]$best_sim,
+              #in_nsim = hydromod_paths_dt[country == in_country,]$best_sim,
               in_dates = in_dates, 
               window = in_window, 
               output = in_output,
@@ -478,7 +478,7 @@ analysis_targets <- list(
             compute_STcon_rolling(
               in_preformatted_data = preformatted_data_STcon[[in_country]], 
               ref = FALSE,
-              in_nsim = hydromod_paths_dt[country == in_country,]$best_sim,
+              #in_nsim = hydromod_paths_dt[country == in_country,]$best_sim, 
               in_dates = in_dates, 
               window = in_window, 
               output = in_output,
