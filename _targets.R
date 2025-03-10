@@ -1,11 +1,6 @@
 #Small changes to implement before next run
 #L22 functions: capitalize S in spain
 #L56 and L158 functions: catch metacols regardless of capitalization
-#Standardize country names across all input datasets
-#Standardize metacols across all input datasets
-#site names in "data/wp1/Results_present_period_final/data/Genal/Genal_sampling_sites_ReachIDs.csv" are incorrect
-#Need to know how sites were snapped to network "C:\DRYvER_wp2\WP2 - Predicting biodiversity changes in DRNs\Coordinates\Shapefiles with sites moved to the river network\Croatia_near_coords.shp"
-#3s flow acc for Europe: https://data.hydrosheds.org/file/hydrosheds-v1-acc/eu_acc_3s.zip
 
 #Make sure that biological data are standardized by area to get densities
 #Get ancillary catchment data
@@ -261,7 +256,7 @@ preformatting_targets <- list(
   )
   ,
   
-  #Copy gpkg to shapefiles for sharing
+  #Copy gpkg to shapefiles for sharing (and removing extraneous UIDs)
   tar_target(
     network_ssnready_shp_list,
     lapply(network_ssnready_gpkg_list, function(path) {
@@ -289,7 +284,8 @@ preformatting_targets <- list(
                       in_sites_dt = sites_dt,
                       out_dir = file.path('results', 'gis'),
                       geom = 'reaches',
-                      in_network_path_list = network_ssnready_gpkg_list,
+                      in_network_path_list = network_ssnready_shp_list,
+                      in_network_idcol = 'cat',
                       overwrite = T)
   )
   ,
@@ -311,12 +307,12 @@ preformatting_targets <- list(
     site_snapped_gpkg_list,
     lapply(names(site_points_gpkg_list), function(in_country) {
       snap_river_sites(in_sites_path = site_points_gpkg_list[[in_country]], 
-                       in_network_path = network_ssnready_gpkg_list[[in_country]],
+                       in_network_path = network_ssnready_shp_list[[in_country]],
                        custom_proj = F,
                        in_sites_unique_id = 'site',
                        in_network_unique_id = 'UID',
                        in_sites_idcol_tomatch = 'reach_id',
-                       in_network_idcol_tomatch = 'cat_cor',
+                       in_network_idcol_tomatch = 'cat',
                        overwrite = T)
     }) %>% setNames(names(site_points_gpkg_list))
   ),
@@ -335,10 +331,10 @@ preformatting_targets <- list(
     barrier_snapped_gpkg_list,
     lapply(names(barrier_points_gpkg_list), function(in_country) {
       snap_barrier_sites(in_sites_path = barrier_points_gpkg_list[[in_country]], 
-                         in_network_path = network_ssnready_gpkg_list[[in_country]],
+                         in_network_path = network_ssnready_shp_list[[in_country]],
                          out_snapped_sites_path=NULL, 
                          in_sites_idcol = 'GUID',
-                         attri_to_join = c('cat_cor', 'UID'),
+                         attri_to_join = c('cat', 'UID'),
                          custom_proj = F,
                          overwrite = T)
     }) %>% setNames(names(site_points_gpkg_list))
@@ -380,10 +376,16 @@ mapped_hydrotargets <- tarchetypes::tar_map(
   tar_target(
     hydrostats,
     compute_hydrostats_drn(
-      in_network_path = network_ssnready_gpkg_list[[in_country]],
+      in_network_path = network_ssnready_shp_list[[in_country]],
       in_sites_dt = sites_dt[country == in_country,],
       varname = in_varname,
-      in_hydromod_drn = hydromod_dt)
+      in_hydromod_drn = hydromod_dt,
+      in_network_idcol = 'cat')
+  ),
+  
+  tar_target(
+    hydrostats_sub,
+    subset_hydrostats(hydrostats, in_country = in_country, in_bio_dt = bio_dt)
   )
 )
 
@@ -394,11 +396,12 @@ combined_hydrotargets <- list(
     command = list(!!!.x)
   ),
   tar_combine(
-    hydrostats_comb,
-    mapped_hydrotargets[['hydrostats']],
+    hydrostats_sub_comb,
+    mapped_hydrotargets[['hydrostats_sub']],
     command = list(!!!.x)
   )
 )
+
 
 #Compute local species richness
 analysis_targets <- list(
@@ -515,7 +518,7 @@ analysis_targets <- list(
   #Create Spatial Stream Network (SSN) objects
   tar_target(
     ssn_eu,
-    create_ssn_europe(in_network_path = network_ssnready_gpkg_list,
+    create_ssn_europe(in_network_path = network_ssnready_shp_list,
                       in_sites_path = site_snapped_gpkg_list,
                       in_barriers_path = barrier_snapped_gpkg_list,
                       in_hydromod = hydromod_comb,
@@ -557,6 +560,11 @@ analysis_targets <- list(
   # )
   # ,
   # 
+  #Visualize and create a table of correlations between predictors and responses, and among predictors
+  
+  
+  #
+  
   #   tar_target(
   #     alpha_cor_plots_wrap,
   #     plot_alpha_cor(alphadat_merged,

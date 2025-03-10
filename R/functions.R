@@ -413,7 +413,7 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
       keep_column = 'date',
       na.rm=TRUE)
     
-    hydromod_dt_sites <- merge(in_sites_dt[, .(id, reach_id)], 
+    hydromod_dt_sites <- merge(in_sites_dt[, .(site, reach_id)], 
                                hydromod_dt_sites, 
                                by = 'reach_id', all.x = T, all.y = F,
                                allow.cartesian = T) %>%
@@ -2323,18 +2323,18 @@ reassign_netids <- function(rivnet_path, strahler_dt,
   return(out_path)
 }
 #------ compute_hydrostats_drn -------------------------------------------------
-# in_drn <- 'Finland'
-# varname <-  'isflowing' #qsim
+# in_drn <- 'Czech'
+# varname <-  'qsim' #'isflowing' #qsim
 # in_sites_dt <- tar_read(sites_dt)[country == in_drn,]
 # in_network_path <- tar_read(network_ssnready_gpkg_list)[[in_drn]]
 # in_hydromod_drn <- tar_read_raw((paste0('hydromod_dt_', in_drn, '_', varname)))
-# in_network_idcol = 'cat_cor'
+# in_network_idcol = 'cat'
 
 compute_hydrostats_drn <- function(in_network_path,
                                    in_sites_dt,
                                    varname,
                                    in_hydromod_drn,
-                                   in_network_idcol = 'cat_cor') {
+                                   in_network_idcol = 'cat') {
   setDT(in_hydromod_drn$data_all)
   setDT(in_hydromod_drn$dates_format) 
   
@@ -2389,13 +2389,32 @@ compute_hydrostats_drn <- function(in_network_path,
             by='date', all.x=T, all.y=F)
     
     q_stats <- compute_hydrostats_q(in_hydromod_dt = hydromod_dt_sites) %>%
-      merge(in_sites_dt[, .(id, reach_id)], .,
+      merge(in_sites_dt[, .(site, reach_id)], .,
             by = 'reach_id', all.x = T, all.y = F,
             allow.cartesian = T) %>%
       setorderv(c('reach_id', 'date'))
   }
   
   return(q_stats)
+}
+
+#------ subset_hydrostats ------------------------------------------------------
+# in_country <- in_drn <- 'Czech'
+# hydrostats <- tar_read_raw(paste0("hydrostats_", in_country, '_qsim'))
+# in_bio_dt <- tar_read(bio_dt)
+
+subset_hydrostats <- function(hydrostats, in_country, in_bio_dt) {
+  unique_sampling_dates <- lapply(in_bio_dt, function(org_dt) {
+    org_dt[country==in_country, .(date)]
+  }) %>% rbindlist %>% unique
+  
+  if ('drn' %in% names(hydrostats)) {
+    hydrostats[['site']] <- hydrostats[['site']][date %in% unique_sampling_dates$date,]
+    hydrostats[['drn']] <- hydrostats[['drn']][date %in% unique_sampling_dates$date,]
+  } else {
+    hydrostats <- hydrostats[date %in% unique_sampling_dates$date,]
+  }
+  return(hydrostats)
 }
 
 #------ format_sites_dt ----------------------------------------------------------
@@ -2481,7 +2500,7 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
                               out_dir, 
                               geom,
                               in_network_path_list = NULL,
-                              in_network_idcol = 'cat_cor',
+                              in_network_idcol = 'cat',
                               overwrite = FALSE) {
   if (!dir.exists(out_dir)) {
     dir.create(out_dir)
@@ -2534,7 +2553,7 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
 # in_sites_unique_id = 'site'
 # in_network_unique_id = 'UID'
 # in_sites_idcol_tomatch = 'reach_id'
-# in_network_idcol_tomatch = 'cat_cor'
+# in_network_idcol_tomatch = 'cat'
 # proj_back = F
 
 snap_river_sites <- function(in_sites_path, 
@@ -2545,7 +2564,7 @@ snap_river_sites <- function(in_sites_path,
                              in_sites_unique_id = 'site',
                              in_network_unique_id = 'UID',
                              in_sites_idcol_tomatch = 'reach_id',
-                             in_network_idcol_tomatch = 'cat_cor',
+                             in_network_idcol_tomatch = 'cat',
                              overwrite = F) {
   
   if (is.null(out_snapped_sites_path)) {
@@ -2737,7 +2756,7 @@ snap_barrier_sites <- function(in_sites_path,
 }
 
 #------ create_ssn_europe ------------------------------------------------------
-# in_network_path = tar_read(network_ssnready_gpkg_list)
+#in_network_path = tar_read(network_ssnready_shp_list)
 # in_sites_path = tar_read(site_snapped_gpkg_list)
 # in_barriers_path = tar_read(barrier_snapped_gpkg_list)
 # in_hydromod = tar_read(hydromod_comb)
@@ -2764,7 +2783,8 @@ create_ssn_europe <- function(in_network_path,
   #Build landscape network (lsn) -----------------------------------------------
   #Read input network
   net_eu <- lapply(names(in_network_path), function(in_country) {
-    net_proj <- st_read(in_network_path[[in_country]]) %>%
+    #print(in_country)
+    net_proj <- in_network_path[[in_country]] %>%
       st_cast("LINESTRING") %>%
       #Make sure that the geometry column is equally named regardless 
       #of file format (see https://github.com/r-spatial/sf/issues/719)
@@ -2779,7 +2799,7 @@ create_ssn_europe <- function(in_network_path,
                          date < as.Date('2021-10-01', '%Y-%m-%d'),  #Link q data
                          list(mean_qsim = mean(qsim, na.rm=T)), 
                          by=reach_id],
-                       by.x = 'cat_cor', by.y = 'reach_id')
+                       by.x = 'cat', by.y = 'reach_id')
     return(net_hydro)
   }) %>% do.call(rbind, .)
   
@@ -2902,7 +2922,7 @@ create_ssn_europe <- function(in_network_path,
 # in_net_shp_path <- tar_read(network_ssnready_shp_list)[[in_drn]]
 
 prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
-  net <- vect(in_net_shp_path)
+  net <- in_net_shp_path
   
   #Build the adjacency list to built the graph
   net_dt <- net  %>% 
@@ -3104,7 +3124,7 @@ postprocess_STcon <- function(in_STcon, in_net_shp_path,
                               standardize_STcon = FALSE, in_STcon_ref = NULL) {
   
   #Get original network data
-  net_dt <- vect(in_net_shp_path) %>%
+  net_dt <- in_net_shp_path %>%
     as.data.table %>%
     setorder(from)
   
@@ -3114,20 +3134,20 @@ postprocess_STcon <- function(in_STcon, in_net_shp_path,
   #Compile STcon data in long format by window size, hydrological simulation, date, and ID
   STcon_dt <- lapply(names(in_STcon), function(window_name) {
     lapply(names(in_STcon[[window_name]]), function(date) {
-        if (standardize_STcon & !is.null(in_STcon_ref)) {
-          #Standardize by STcon in a network without intermittence
-          out_STcon <- (in_STcon[[window_name]][[date]]$STcon/
-                          in_STcon_ref[[window_name]][[date]]$STcon)
-        } else {
-          out_STcon <- in_STcon[[window_name]][[date]]$STcon
-        }
-        
-        out_dt <- data.table(variable = window_name,
-                             date = as.Date(date),
-                             from = in_STcon[[window_name]][[date]]$IDs,
-                             stcon_value = out_STcon
-        ) %>% .[from != outlet_from,] #Remove outlet
-      }) %>% rbindlist
+      if (standardize_STcon & !is.null(in_STcon_ref)) {
+        #Standardize by STcon in a network without intermittence
+        out_STcon <- (in_STcon[[window_name]][[date]]$STcon/
+                        in_STcon_ref[[window_name]][[date]]$STcon)
+      } else {
+        out_STcon <- in_STcon[[window_name]][[date]]$STcon
+      }
+      
+      out_dt <- data.table(variable = window_name,
+                           date = as.Date(date),
+                           from = in_STcon[[window_name]][[date]]$IDs,
+                           stcon_value = out_STcon
+      ) %>% .[from != outlet_from,] #Remove outlet
+    }) %>% rbindlist
   }) %>% rbindlist %>%
     merge(net_dt[, list(from=as.character(from), UID)], by='from') %>% #Replace from IDs with UID
     .[, from := NULL]
@@ -3141,28 +3161,28 @@ postprocess_STcon <- function(in_STcon, in_net_shp_path,
   
   STcon_mat <- lapply(names(in_STcon), function(window_name) {
     lapply(names(in_STcon[[window_name]]), function(date) {
-        if (!is.null(in_STcon[[window_name]][[date]]$STconmat)) {
-          if (standardize_STcon & !is.null(in_STcon_ref)) {
-            out_STconmat <- (in_STcon[[window_name]][[date]]$STconmat/
-                               in_STcon_ref[[window_name]][[date]]$STconmat)
-          } else {
-            out_STconmat <- in_STcon[[window_name]][[date]]$STconmat
-          }
-          
-          #Remove outlet
-          out_STconmat <- out_STconmat[rownames(out_STconmat) != 
-                                         as.character(outlet_from), 
-                                       colnames(out_STconmat) != 
-                                         as.character(outlet_from)]
-          #Assign UIDs
-          colnames(out_STconmat) <- rownames(out_STconmat) <- UIDs_to_assign
-          
-          data.table(variable = window_name,
-                     date = as.Date(date),
-                     STconmat = list(out_STconmat)
-          )
+      if (!is.null(in_STcon[[window_name]][[date]]$STconmat)) {
+        if (standardize_STcon & !is.null(in_STcon_ref)) {
+          out_STconmat <- (in_STcon[[window_name]][[date]]$STconmat/
+                             in_STcon_ref[[window_name]][[date]]$STconmat)
+        } else {
+          out_STconmat <- in_STcon[[window_name]][[date]]$STconmat
         }
-      }) %>% rbindlist
+        
+        #Remove outlet
+        out_STconmat <- out_STconmat[rownames(out_STconmat) != 
+                                       as.character(outlet_from), 
+                                     colnames(out_STconmat) != 
+                                       as.character(outlet_from)]
+        #Assign UIDs
+        colnames(out_STconmat) <- rownames(out_STconmat) <- UIDs_to_assign
+        
+        data.table(variable = window_name,
+                   date = as.Date(date),
+                   STconmat = list(out_STconmat)
+        )
+      }
+    }) %>% rbindlist
   }) %>% rbindlist
   
   return(list(
@@ -3185,7 +3205,7 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
     (date == in_date) & (variable == paste0('STcon_m', in_window)),]
   
   
-  net_v_stcon <- vect(in_net_shp_path) %>%
+  net_v_stcon <- in_net_shp_path %>%
     merge(stcon_sel, by='UID')
   
   net_v_stcon$inverse_stcon <-  1 - (
@@ -3211,70 +3231,73 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
 #------ merge_allvars_sites ----------------------------------------------------
 # in_country <- 'Croatia'
 # in_spdiv_local <- tar_read(spdiv_local)
-# in_hydrostats_comb <- tar_read(hydrostats_comb)
+# in_hydrostats_sub_comb <- tar_read(hydrostats_sub_comb)
 # in_STcon_directed <- tar_read(STcon_directed_formatted)
 # in_ssn_eu <- tar_read(ssn_eu)
 
-
-#############################
 # tar_load(spdiv_drn)
 # tar_load(env_dt)
 # tar_load(bio_dt)
 
-merge_allvars_sites <- function(in_sprich, in_hydrostats_comb) {
+merge_allvars_sites <- function(in_sprich, in_hydrostats_sub_comb) {
   in_sites_ssn_dt <- as.data.table(in_ssn_eu$ssn$obs)
   
   hydro_con_compiled <- lapply(
     unique(in_spdiv_local$country), function(in_country) {
-      #print(in_country)
-      in_hydrostats_isflowing <- in_hydrostats_comb[[
-        paste0('hydrostats_', in_country, '_isflowing')]][['sites']] %>%
+      print(in_country)
+      
+      hydrostats_isflowing <- in_hydrostats_sub_comb[[
+        paste0('hydrostats_sub_', in_country, '_isflowing')]][['site']] %>%
         setDT
       
-      in_hydrostats_qsim <- in_hydrostats_comb[[
-        paste0('hydrostats_', in_country, '_qsim')]] %>%
+      hydrostats_qsim <- in_hydrostats_sub_comb[[
+        paste0('hydrostats_sub_', in_country, '_qsim')]] %>%
         setDT
       
-      cols_to_keep_hydrostats <- names(in_hydrostats_isflowing)[
-        (!names(in_hydrostats_isflowing) %in% names(in_hydrostats_qsim)) |
-          (names(in_hydrostats_isflowing) %in% c('date','site'))] 
+      cols_to_keep_hydrostats <- names(hydrostats_isflowing)[
+        (!names(hydrostats_isflowing) %in% names(hydrostats_qsim)) |
+          (names(hydrostats_isflowing) %in% c('date','site'))] 
       
       STcon_cast <- in_STcon_directed[[in_country]]$STcon_dt %>%
-        dcast(date+UID+nsim~variable, value.var = 'stcon_value') %>%
-        .[, nsim := as.integer(nsim)]
+        dcast(date+UID~variable, value.var = 'stcon_value')
+      #With nsim
+      # STcon_cast <- in_STcon_directed[[in_country]]$STcon_dt %>%
+      #   dcast(date+UID+nsim~variable, value.var = 'stcon_value') %>%
+      #   .[, nsim := as.integer(nsim)]
       
-      out_dt <- merge(
-        in_hydrostats_isflowing[, cols_to_keep_hydrostats, with=F],
-        in_hydrostats_qsim, by=c('date', 'site')) %>%
-        merge(in_sites_ssn_dt[, .(id, UID)], ., by='site') %>%
-        merge(STcon_cast, by=c('date', 'UID', 'nsim'), all.x=T)
+      out_dt <- merge(hydrostats_isflowing[, cols_to_keep_hydrostats, with=F],
+                      hydrostats_qsim, by=c('date', 'site')) %>%
+        merge(in_sites_ssn_dt[country_sub == in_country,
+                              .(site, UID)], ., by='site') %>%
+        merge(STcon_cast, by=c('date', 'UID'), all.x=T)
+      # merge(STcon_cast, by=c('date', 'UID', 'nsim'), all.x=T) #with nsim
       
       return(out_dt)  
     }) %>% rbindlist 
   
-  spdiv_hydro_con <- merge(in_spdiv_local, hydro_con_compiled,
-                           by=c('date', 'site'), all.x=T)
-  
+  #Merge diversity metrics
+  #Check date match
   check <- in_spdiv_local[paste(date, site) %in% (
     unique(in_spdiv_local[, .(date, site)])[order(date),][, paste(date, site)] %>%
       .[!((.) %in% unique(hydro_con_compiled[, .(date, site)])[, paste(date, site)])]
   ),]
   
-  check_sub <- check[date<'2022-05-01' & !duplicated(paste(site, date)),]
+  spdiv_hydro_con <- merge(in_spdiv_local, hydro_con_compiled,
+                           by=c('date', 'site'), all.x=T)
   
-  hydro_con_compiled[date=='2021-02-01',]
+
   
-  in_sites_ssn_dt[id=='BUK01',]
-  unique(in_sites_ssn_dt$id)
-  tar_load(sites_dt)
-  sites_dt[id=='BUK01',]
-  unique(sites_dt$id)
+  #Merge environmental variables
   
   return(sprich_hydro)
 }
 
+###################################################################################
+###################################################################################
+###################################################################################
+###################################################################################
 
-#------ cor_heatmap ------------------------------------------------------------
+#------ compute_cor_matrix -----------------------------------------------------
 # alphadat_env_dt <- tar_read(alphadat_merged) %>%
 #   setDT %>%
 #   .[, `:=`(`if_ip_number_and_size_2_axes_+_depth_of_the_pools` = NULL,
@@ -3403,6 +3426,15 @@ merge_allvars_sites <- function(in_sprich, in_hydrostats_comb) {
 #   coord_flip() +
 #   theme(axis.text.y = element_text(
 #     colour = class_colors_ward_morecl))
+
+#------ plot_cor_heatmap -------------------------------------------------------
+#------ tabulate_cor_matrix ----------------------------------------------------
+#------ ordinate_local_vars ----------------------------------------------------
+#------ plot_spdiv_local -------------------------------------------------------
+#------ plot_spdiv_drn ---------------------------------------------------------
+#------ train_lme_aspatial -----------------------------------------------------
+#------ analyze_residuals_autocor ----------------------------------------------
+#------ train_lme_ssn ----------------------------------------------------------
 
 
 #------ model_SSN --------------------------------------------------------------
@@ -3540,7 +3572,7 @@ create_ssn_drn <- function(in_network_path,
     merge(in_hydromod$data_all[date < as.Date('2021-10-01', '%Y-%m-%d'),  #Link q data
                                list(mean_qsim = mean(qsim, na.rm=T)), 
                                by=reach_id],
-          by.x = 'cat_cor', by.y = 'reach_id') 
+          by.x = 'cat', by.y = 'reach_id') 
   
   #Build landscape network
   edges_lsn <- SSNbler::lines_to_lsn(
