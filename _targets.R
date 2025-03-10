@@ -43,12 +43,13 @@ hydro_combi <- expand.grid(
   in_varname =  c('isflowing', 'qsim'),
   stringsAsFactors = FALSE)
 
-
-perf_ratio <- 0.7 #Set how much you want to push your computer (% of cores and RAM)
-nthreads <- min(nrow(drn_dt), round(parallel::detectCores(logical=F)*perf_ratio))
-future::plan("future::multisession", workers=nthreads)
-total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
-options(future.globals.maxSize = perf_ratio*total_ram)
+if (!interactive()) {
+  perf_ratio <- 0.7 #Set how much you want to push your computer (% of cores and RAM)
+  nthreads <- min(nrow(drn_dt), round(parallel::detectCores(logical=F)*perf_ratio))
+  future::plan("future::multisession", workers=nthreads)
+  total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
+  options(future.globals.maxSize = perf_ratio*total_ram)
+}
 
 #--------------------------  Define targets plan -------------------------------
 #-------------- Preformatting targets ------------------------------------------
@@ -416,38 +417,38 @@ analysis_targets <- list(
   ,
   
   tar_target(
-    STcon_directed_list, 
+    STcon_directed_list,
     {
       out_STcon_list <- future_lapply(
         names(preformatted_data_STcon), function(in_country) {
           print(in_country)
-          
+
           unique_sampling_dates <- lapply(bio_dt, function(org_dt) {
             org_dt[country==in_country, .(date)]
           }) %>% rbindlist %>% unique
           in_dates <- unique_sampling_dates
-          
+
           window_size_list <- c(10, 30, 90, 365) #30, 60, 90, 180, 365
-          lapply(window_size_list, function(in_window) { 
+          lapply(window_size_list, function(in_window) {
             print(in_window)
             if (in_window == 365) {
               in_output <- 'all'
             } else {
               in_output <- 'STcon'
             }
-            
+
             compute_STcon_rolling(
-              in_preformatted_data = preformatted_data_STcon[[in_country]], 
+              in_preformatted_data = preformatted_data_STcon[[in_country]],
               ref = FALSE,
               #in_nsim = hydromod_paths_dt[country == in_country,]$best_sim,
-              in_dates = in_dates, 
-              window = in_window, 
+              in_dates = in_dates,
+              window = in_window,
               output = in_output,
               direction = 'directed',
               routing_mode = 'in',
               weighting = TRUE,
               rounding_factor = 1)
-          }) %>% setNames(paste0('STcon_m', window_size_list)) #60, 90, 180, 
+          }) %>% setNames(paste0('STcon_m', window_size_list)) #60, 90, 180,
         })
       setNames(out_STcon_list, names(preformatted_data_STcon))
     }
@@ -498,7 +499,7 @@ analysis_targets <- list(
     future_lapply(names(STcon_directed_list), function(in_country) {
       postprocess_STcon(in_STcon = STcon_directed_list[[in_country]],
                         in_net_shp_path = network_ssnready_shp_list[[in_country]],
-                        standardize_STcon = FALSE, in_STcon_ref = NULL) 
+                        standardize_STcon = FALSE, in_STcon_ref = NULL)
     }) %>% setNames(names(STcon_directed_list))
   ),
 

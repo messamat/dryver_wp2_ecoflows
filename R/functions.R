@@ -2951,13 +2951,14 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
   nsims <- isTRUE('nsim' %in% names(in_hydromod_drn$data_all))
   
   cast_formula <- if (nsims) {as.formula('date + nsim ~ from')} else {'date ~ from'}
-  sites_status_matrix <- 
-    merge(net_dt, in_hydromod_drn$data_all, by='cat', all.x=T) %>%
+  sites_status_matrix <- merge(net_dt, in_hydromod_drn$data_all,
+                               by='cat', all.x=T) %>%
     rbind(end_point_interm, fill=T) %>%
     .[, isflowing := as.integer(isflowing)] %>%
-    .[is.na(isflowing), isflowing := 1L] %>% #FILL NAs in original hydrological data
     setorder(from) %>%
-    dcast(formula = cast_formula, value.var = 'isflowing')
+    dcast(formula = cast_formula, value.var = 'isflowing') %>%
+    .[!is.na(date),] %>%
+    setnafill(type='const', fill=1L) #FILL NAs in original hydrological data
   
   # We built the matrix of the network structure for the STcon, which is the "base" on which connectivity will be assessed. 
   network_structure <- as.matrix(as_adjacency_matrix(net_graph)) 
@@ -3088,14 +3089,14 @@ compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL,
 # tar_load(STcon_directed_list)
 # tar_load(STcon_rolling_ref_list)
 # tar_load(preformatted_data_STcon)
-
+# 
 # in_country <- 'Croatia'
 # in_STcon <- STcon_undirected_list[[in_country]]
 # #in_STcon_ref <- STcon_directed_ref_list[[in_country]]
 # in_preformatted_data_STcon <- preformatted_data_STcon[[in_country]]
 # window_name <- 'STcon_m10'
 # date <- '2021-02-25'
-# standardize_STcon = FALSE
+# standardize_STcon = FALSE 
 # in_STcon_ref = NULL
 # in_net_shp_path <- tar_read(network_ssnready_shp_list)[[in_country]]
 
@@ -3112,7 +3113,7 @@ postprocess_STcon <- function(in_STcon, in_net_shp_path,
   
   #Compile STcon data in long format by window size, hydrological simulation, date, and ID
   STcon_dt <- lapply(names(in_STcon), function(window_name) {
-    lapply(names(in_STcon[[window_name]]), function(nsim_sel) {
+    lapply(names(in_STcon[[window_name]]), function(date) {
         if (standardize_STcon & !is.null(in_STcon_ref)) {
           #Standardize by STcon in a network without intermittence
           out_STcon <- (in_STcon[[window_name]][[date]]$STcon/
@@ -3139,7 +3140,7 @@ postprocess_STcon <- function(in_STcon, in_net_shp_path,
   UIDs_to_assign <- net_dt[UIDs_order, UID]
   
   STcon_mat <- lapply(names(in_STcon), function(window_name) {
-    lapply(names(in_STcon[[window_name]]), function(nsim_sel) {
+    lapply(names(in_STcon[[window_name]]), function(date) {
         if (!is.null(in_STcon[[window_name]][[date]]$STconmat)) {
           if (standardize_STcon & !is.null(in_STcon_ref)) {
             out_STconmat <- (in_STcon[[window_name]][[date]]$STconmat/
