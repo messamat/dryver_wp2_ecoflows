@@ -779,6 +779,49 @@ fix_confluences_inner <- function(shp, from = "FROM_NODE", to = "TO_NODE",
   return(newshp)
 }
 
+#------ compute_cor_matrix_inner -----------------------------------------------
+# Function to compute and flatten correlations
+compute_cor_matrix_inner <- function(in_dt, group_vars = NULL,
+                                     x_cols, y_cols = NULL,
+                                     correlation_type = "spearman",
+                                     exclude_diagonal = TRUE) {
+  
+  # If y_cols is NULL, compute correlation within x_cols
+  if (is.null(y_cols)) {
+    y_cols <- x_cols
+    single_group <- TRUE
+  } else {
+    single_group <- FALSE
+  }
+  
+  # Compute correlation within each group (or overall if group_vars is NULL)
+  cor_results <- in_dt[, {
+    if (single_group) {
+      cor_result <- Hmisc::rcorr(as.matrix(.SD[, x_cols, with=FALSE]), type = correlation_type)
+    } else {
+      cor_result <- Hmisc::rcorr(as.matrix(.SD[, x_cols, with=FALSE]),
+                                 as.matrix(.SD[, y_cols, with=FALSE]),
+                                 type = correlation_type)
+    }
+    
+    # Flatten within the data.table operation, using consistent variable names
+    combinations <- CJ(variable1 = rownames(cor_result$r),
+                       variable2 = colnames(cor_result$r))
+    list(
+      variable1 = combinations$variable1,
+      variable2 = combinations$variable2,
+      correlation = cor_result$r[cbind(combinations$variable1, combinations$variable2)],
+      p_value = cor_result$P[cbind(combinations$variable1, combinations$variable2)]
+    )
+    
+  }, by = group_vars]
+  
+  if (exclude_diagonal) {
+    cor_results <- cor_results[variable1 != variable2,]
+  }
+  
+  return(cor_results)  # Return the result directly
+}
 #-------------- workflow functions ---------------------------------------------
 # path_list = tar_read(bio_data_paths)
 # in_metadata_edna <- tar_read(metadata_edna)
@@ -3248,7 +3291,7 @@ merge_allvars_sites <- function(in_ssn_eu, in_spdiv_local, in_spdiv_drn,
   setDT(in_spdiv_drn)
   setnames(in_spdiv_drn, drn_cols, paste0(drn_cols, '_drn'))
   spdiv <- merge(in_spdiv_local, in_spdiv_drn,
-                           by=c('country', 'organism'))
+                 by=c('country', 'organism'))
   
   #Format hydrological and connectivity data
   hydro_con_compiled <- lapply(
@@ -3301,82 +3344,135 @@ merge_allvars_sites <- function(in_ssn_eu, in_spdiv_local, in_spdiv_drn,
   #Merge environmental variables
   setDT(in_env_dt)
   env_subcols <-  c('site', 'campaign', 
-                       names(in_env_dt)[!(names(in_env_dt) %in% 
-                                            names(spdiv_hydro_con))])
+                    setdiff(names(in_env_dt), names(spdiv_hydro_con)))
   all_vars_merged <- merge(spdiv_hydro_con, in_env_dt[, env_subcols, with=F],
                            by=c('site', 'campaign'), all.x=T)
   
-  return(all_vars_merged)
+  #List column names by originating dt
+  dtcols <- list(
+    div = setdiff(names(spdiv), 
+                  c(names(hydro_con_compiled), names(in_env_dt))),
+    hydro_con = setdiff(names(hydro_con_compiled), 
+                        c(names(spdiv), names(in_env_dt))),
+    env = setdiff(names(in_env_dt),
+                  c(names(spdiv), names(hydro_con_compiled)))
+  )
+  
+  return(list(
+    dt = all_vars_merged,
+    cols = dtcols)
+  )
 }
 
 #------ compute_cor_matrix -----------------------------------------------------
-
-compute_cor_matrix <- function(in_dt) {
+#in_allvars_merged <- tar_read(allvars_merged)
+compute_cor_matrix <- function(in_allvars_merged) {
+  dt <- in_allvars_merged$dt
+  cols_by_origin <- in_allvars_merged$cols
   
+  #Pre-formatting
+  dt[is.na(noflow_period_dur), noflow_period_dur := 0]
+  dt[, avg_bank_slope := rowMeans(.SD),
+     .SDcols=c('left_river_bank_slope', 'right_river_bank_slope')]
+  dt[, PrdD := as.numeric(PrdD)]
   
+  #Define columns to group by and columns to correlate
+  group_cols <- c("running_id", "site", "date", "campaign", "organism", "country",
+                  "UID", "stream_type", "state_of_flow")
+  exclude_cols <- c("ncampaigns", "name", "isflowing", "reach_length",
+                    "noflow_period", "noflow_period_dur", "last_noflowdate", "drn",
+                    "if_ip_number_and_size_2_axes_+_depth_of_the_pools",
+                    "latitude", "longitude", "reach_id", "hy", "month",
+                    'min_wetted_width', 'left_river_bank_slope', 'right_river_bank_slope',
+                    'qsim')
+  div_cols <- setdiff(cols_by_origin$div, c(exclude_cols, group_cols))
+  hydrocon_cols <- setdiff(cols_by_origin$hydro_con, c(exclude_cols, group_cols))
+  env_cols <- c(setdiff(cols_by_origin$env, c(exclude_cols, group_cols)),
+                'avg_bank_slope')
   
+  # --- Calculate Correlations ---
+  # 1. Overall Correlation (Hydro + Env)
+  cor_hydroenv <- compute_cor_matrix_inner(
+    dt,
+    x_cols = c(hydrocon_cols, env_cols)) 
+  
+  # 2. By Organism (Div x (Hydro + Env))
+  cor_div <- compute_cor_matrix_inner(
+    dt,
+    group_vars = "organism",
+    x_cols = div_cols,
+    y_cols = c(hydrocon_cols, env_cols)) 
+  
+  # 3. By Country (Hydro + Env)
+  cor_hydroenv_bydrn <- compute_cor_matrix_inner(
+    dt,
+    group_vars = "country",
+    x_cols = c(hydrocon_cols, env_cols)) 
+  
+  # 4. By Organism and Country (Div x (Hydro + Env))
+  cor_div_bydrn <- compute_cor_matrix_inner(
+    dt,
+    group_vars = c("organism", "country"),
+    x_cols = div_cols,
+    y_cols = c(hydrocon_cols, env_cols))
+  
+  return(list(hydroenv = cor_hydroenv,
+              div = cor_div,
+              hydroenv_bydrn = cor_hydroenv_bydrn,
+              div_bydrn = cor_div_bydrn
+  ))
 }
 
-# alphadat_env_dt <- tar_read(alphadat_merged) %>%
-#   setDT %>%
-#   .[, `:=`(`if_ip_number_and_size_2_axes_+_depth_of_the_pools` = NULL,
-#            last_noflowdate = NULL)] %>%
-#   .[is.na(noflow_period_dur), noflow_period_dur := 0] %>%
-#   .[, avg_bank_slope := rowMeans(.SD), 
-#     .SDcols=c('left_river_bank_slope', 'right_river_bank_slope')]
-#  
-# names(alphadat_env_dt)
-# idcols <- c( 'date', 'site', 'campaign', 'reach_id', 'doy', 'month', 
-#              'hy', 'nsim', 'stream_type', 'state_of_flow', 'drn', 
-#              'organism', 'running_id','mean_richness', 'richness')
-# exclu_cols <- c('qsim', 'longitude', 'latitude', 'noflow_period', 'reach_length',
-#                 'min_wetted_width', 'left_river_bank_slope', 'right_river_bank_slope')
-# predcols <- names(alphadat_env_dt)[!names(alphadat_env_dt) %in% 
-#                                      c(idcols, exclu_cols)]
-# 
-# alpha_env_melt <- melt(
-#   alphadat_env_dt,
-#   id.vars = idcols,
-#   measure.vars = predcols
-#   ) 
-#
-# alpha_env_cor_drn_type <- alpha_env_melt[, list(
-#   cor = .SD[!is.na(value),
-#             cor(richness, value, method='spearman')]),
-#   , by=c('drn', 'variable', 'organism', 'stream_type', 'nsim')] %>%
-#   .[,  list(mean_spr = mean(cor, na.rm=T),
-#             sd_spr = sd(cor, na.rm=T)),
-#     by=c('drn', 'variable', 'organism', 'stream_type')]
-# 
-# #Compute correlation between all predictor variables and species richness
-# #by organism and drn, then average across DRNs
-# alpha_env_cor_drn <- alpha_env_melt[, list(
-#   cor = .SD[!is.na(value),
-#             cor(richness, value, method='spearman')]),
-#   , by=c('drn', 'variable', 'organism', 'nsim')] %>%
-#   .[,  list(mean_spr = mean(cor, na.rm=T), #Average across RF sims
-#             sd_spr = sd(cor, na.rm=T)),
-#     by=c('drn', 'variable', 'organism')]
-# 
-# alpha_env_cor_avg <- alpha_env_cor_drn[
-#   , list(mean_spr = mean(mean_spr, na.rm=T)), 
-#   by = c('variable', 'organism')]
-# 
-# ggplot(alpha_env_cor_avg[
-#   abs(mean_spr) > 0.2 & 
-#     !(organism %in% c('miv_nopools', 'miv_nopools_flying', 
-#                       'miv_nopools_nonflying', 'bac_biof')),],
-#        aes(x=tidytext::reorder_within(variable, mean_spr, within=organism),
-#                                       y=mean_spr)) +
-#   geom_bar(aes(fill = mean_spr), stat='identity') +
-#   scale_fill_distiller(palette='Spectral', direction=1, 
-#                        breaks = seq(-1, 1, 0.1)) +
-#   tidytext::scale_x_reordered(name = 'Candidate predictor variable') +
-#   scale_y_discrete(name = "Mean Spearman's correlation across DRNs", expand=c(0,0)) +
-#   facet_wrap(~organism, scales='free', nrow = 1) +
-#   coord_flip() +
-#   theme_bw()
+#------ plot_cor_heatmap -------------------------------------------------------
+in_cor_matrices <- tar_read(cor_matrices_list)
 
+#   #############################
+#   ###################
+#   alpha_env_melt <- melt(
+#     alphadat_env_dt,
+#     id.vars = idcols,
+#     measure.vars = predcols
+#   )
+#   
+#   alpha_env_cor_drn_type <- alpha_env_melt[, list(
+#     cor = .SD[!is.na(value),
+#               cor(richness, value, method='spearman')]),
+#     , by=c('drn', 'variable', 'organism', 'stream_type', 'nsim')] %>%
+#     .[,  list(mean_spr = mean(cor, na.rm=T),
+#               sd_spr = sd(cor, na.rm=T)),
+#       by=c('drn', 'variable', 'organism', 'stream_type')]
+#   
+#   #Compute correlation between all predictor variables and species richness
+#   #by organism and drn, then average across DRNs
+#   alpha_env_cor_drn <- alpha_env_melt[, list(
+#     cor = .SD[!is.na(value),
+#               cor(richness, value, method='spearman')]),
+#     , by=c('drn', 'variable', 'organism', 'nsim')] %>%
+#     .[,  list(mean_spr = mean(cor, na.rm=T), #Average across RF sims
+#               sd_spr = sd(cor, na.rm=T)),
+#       by=c('drn', 'variable', 'organism')]
+#   
+#   alpha_env_cor_avg <- alpha_env_cor_drn[
+#     , list(mean_spr = mean(mean_spr, na.rm=T)),
+#     by = c('variable', 'organism')]
+#   
+#   ggplot(alpha_env_cor_avg[
+#     abs(mean_spr) > 0.2 &
+#       !(organism %in% c('miv_nopools', 'miv_nopools_flying',
+#                         'miv_nopools_nonflying', 'bac_biof')),],
+#     aes(x=tidytext::reorder_within(variable, mean_spr, within=organism),
+#         y=mean_spr)) +
+#     geom_bar(aes(fill = mean_spr), stat='identity') +
+#     scale_fill_distiller(palette='Spectral', direction=1,
+#                          breaks = seq(-1, 1, 0.1)) +
+#     tidytext::scale_x_reordered(name = 'Candidate predictor variable') +
+#     scale_y_discrete(name = "Mean Spearman's correlation across DRNs", expand=c(0,0)) +
+#     facet_wrap(~organism, scales='free', nrow = 1) +
+#     coord_flip() +
+#     theme_bw()
+#   
+#   
+# }
 
 #Check relationship between alpha richness for each organism and:
 #reach volume, mean discharge, and 
@@ -3446,7 +3542,9 @@ compute_cor_matrix <- function(in_dt) {
 #   theme(axis.text.y = element_text(
 #     colour = class_colors_ward_morecl))
 
-#------ plot_cor_heatmap -------------------------------------------------------
+
+
+
 #------ tabulate_cor_matrix ----------------------------------------------------
 #------ ordinate_local_vars ----------------------------------------------------
 #------ plot_spdiv_local -------------------------------------------------------

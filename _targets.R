@@ -564,10 +564,13 @@ analysis_targets <- list(
                         in_STcon_undirected = STcon_undirected_formatted, 
                         in_env_dt = env_dt)
   )
-  #,
+  ,
   #
-  #Visualize and create a table of correlations between predictors and responses, and among predictors
-  
+  #Create matrices of correlations between predictors and responses, and among predictors
+  tar_target(
+    cor_matrices_list,
+    compute_cor_matrix(allvars_merged)
+  )
   
   #
   
