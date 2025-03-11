@@ -1,6 +1,7 @@
 #Small changes to implement before next run
 #L22 functions: capitalize S in spain
 #L56 and L158 functions: catch metacols regardless of capitalization
+#Imput GEN04, campaign 1 date
 
 #Make sure that biological data are standardized by area to get densities
 #Get ancillary catchment data
@@ -551,15 +552,20 @@ analysis_targets <- list(
     }) %>% 
       rbindlist
   )
+  ,
+
+  tar_target(
+    allvars_merged,
+    merge_allvars_sites(in_ssn_eu = ssn_eu, 
+                        in_spdiv_local = spdiv_local, 
+                        in_spdiv_drn = spdiv_drn,
+                        in_hydrostats_sub_comb = hydrostats_sub_comb, 
+                        in_STcon_directed = STcon_directed_formatted,
+                        in_STcon_undirected = STcon_undirected_formatted, 
+                        in_env_dt = env_dt)
+  )
   #,
   #
-  # tar_target(
-  #   alphadat_merged,
-  #   merge_alphadat(in_sprich = sprich,
-  #                  in_hydrostats_comb = hydrostats_comb)
-  # )
-  # ,
-  # 
   #Visualize and create a table of correlations between predictors and responses, and among predictors
   
   

@@ -3231,20 +3231,29 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
 #------ merge_allvars_sites ----------------------------------------------------
 # in_country <- 'Croatia'
 # in_spdiv_local <- tar_read(spdiv_local)
+# in_spdiv_drn <- tar_read(spdiv_drn)
 # in_hydrostats_sub_comb <- tar_read(hydrostats_sub_comb)
 # in_STcon_directed <- tar_read(STcon_directed_formatted)
+# in_STcon_undirected <- tar_read(STcon_undirected_formatted)
 # in_ssn_eu <- tar_read(ssn_eu)
+# in_env_dt <- tar_read(env_dt)
 
-# tar_load(spdiv_drn)
-# tar_load(env_dt)
-# tar_load(bio_dt)
-
-merge_allvars_sites <- function(in_sprich, in_hydrostats_sub_comb) {
+merge_allvars_sites <- function(in_ssn_eu, in_spdiv_local, in_spdiv_drn,
+                                in_hydrostats_sub_comb, in_STcon_directed,
+                                in_STcon_undirected, in_env_dt) {
   in_sites_ssn_dt <- as.data.table(in_ssn_eu$ssn$obs)
   
+  #Merge diversity data
+  drn_cols <- c('Gamma', 'Beta1', 'Beta2in1', 'mAlpha')
+  setDT(in_spdiv_drn)
+  setnames(in_spdiv_drn, drn_cols, paste0(drn_cols, '_drn'))
+  spdiv <- merge(in_spdiv_local, in_spdiv_drn,
+                           by=c('country', 'organism'))
+  
+  #Format hydrological and connectivity data
   hydro_con_compiled <- lapply(
     unique(in_spdiv_local$country), function(in_country) {
-      print(in_country)
+      #print(in_country)
       
       hydrostats_isflowing <- in_hydrostats_sub_comb[[
         paste0('hydrostats_sub_', in_country, '_isflowing')]][['site']] %>%
@@ -3258,7 +3267,14 @@ merge_allvars_sites <- function(in_sprich, in_hydrostats_sub_comb) {
         (!names(hydrostats_isflowing) %in% names(hydrostats_qsim)) |
           (names(hydrostats_isflowing) %in% c('date','site'))] 
       
-      STcon_cast <- in_STcon_directed[[in_country]]$STcon_dt %>%
+      #Format STcon data
+      in_STcon_directed[[in_country]]$STcon_dt[
+        , variable := paste0(variable, '_directed')]
+      in_STcon_undirected[[in_country]]$STcon_dt[
+        , variable := paste0(variable, '_undirected')]
+      
+      STcon_cast <- rbind(in_STcon_directed[[in_country]]$STcon_dt,
+                          in_STcon_undirected[[in_country]]$STcon_dt) %>%
         dcast(date+UID~variable, value.var = 'stcon_value')
       #With nsim
       # STcon_cast <- in_STcon_directed[[in_country]]$STcon_dt %>%
@@ -3276,28 +3292,31 @@ merge_allvars_sites <- function(in_sprich, in_hydrostats_sub_comb) {
     }) %>% rbindlist 
   
   #Merge diversity metrics
-  #Check date match
-  check <- in_spdiv_local[paste(date, site) %in% (
-    unique(in_spdiv_local[, .(date, site)])[order(date),][, paste(date, site)] %>%
-      .[!((.) %in% unique(hydro_con_compiled[, .(date, site)])[, paste(date, site)])]
-  ),]
+  in_spdiv_local[site=='GEN04' & campaign=='1', 
+                 date := as.Date('2021-02-01')] #Same as GEN02 and GEN07, the closest sites sampled that campaign
   
-  spdiv_hydro_con <- merge(in_spdiv_local, hydro_con_compiled,
+  spdiv_hydro_con <- merge(spdiv, hydro_con_compiled,
                            by=c('date', 'site'), all.x=T)
   
-
-  
   #Merge environmental variables
+  setDT(in_env_dt)
+  env_subcols <-  c('site', 'campaign', 
+                       names(in_env_dt)[!(names(in_env_dt) %in% 
+                                            names(spdiv_hydro_con))])
+  all_vars_merged <- merge(spdiv_hydro_con, in_env_dt[, env_subcols, with=F],
+                           by=c('site', 'campaign'), all.x=T)
   
-  return(sprich_hydro)
+  return(all_vars_merged)
 }
 
-###################################################################################
-###################################################################################
-###################################################################################
-###################################################################################
-
 #------ compute_cor_matrix -----------------------------------------------------
+
+compute_cor_matrix <- function(in_dt) {
+  
+  
+  
+}
+
 # alphadat_env_dt <- tar_read(alphadat_merged) %>%
 #   setDT %>%
 #   .[, `:=`(`if_ip_number_and_size_2_axes_+_depth_of_the_pools` = NULL,
