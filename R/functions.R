@@ -2442,22 +2442,83 @@ compute_hydrostats_drn <- function(in_network_path,
 }
 
 #------ subset_hydrostats ------------------------------------------------------
-# in_country <- in_drn <- 'Czech'
+# in_country <- in_drn <- 'Spain'
 # hydrostats <- tar_read_raw(paste0("hydrostats_", in_country, '_qsim'))
 # in_bio_dt <- tar_read(bio_dt)
 
 subset_hydrostats <- function(hydrostats, in_country, in_bio_dt) {
   unique_sampling_dates <- lapply(in_bio_dt, function(org_dt) {
     org_dt[country==in_country, .(date)]
-  }) %>% rbindlist %>% unique
+  }) %>% rbindlist %>% unique %>% .$date
+  
+  min_date <- min(unique_sampling_dates, na.rm=T)
+  max_date <- max(unique_sampling_dates, na.rm=T)
   
   if ('drn' %in% names(hydrostats)) {
-    hydrostats[['site']] <- hydrostats[['site']][date %in% unique_sampling_dates$date,]
-    hydrostats[['drn']] <- hydrostats[['drn']][date %in% unique_sampling_dates$date,]
+    hydrostats[['site']] <- hydrostats[['site']][date>=min_date & date<=max_date,]
+    hydrostats[['drn']] <- hydrostats[['drn']][date>=min_date & date<=max_date,]
   } else {
-    hydrostats <- hydrostats[date %in% unique_sampling_dates$date,]
+    hydrostats <- hydrostats[date>=min_date & date<=max_date,]
   }
   return(hydrostats)
+}
+
+#------ compile_hydrocon_country -----------------------------------------------
+# in_hydrostats_sub_comb <- tar_read(hydrostats_sub_comb)
+# in_STcon_directed <- tar_read(STcon_directed_formatted)
+# in_STcon_undirected <- tar_read(STcon_undirected_formatted)
+# in_ssn_eu <- tar_read(ssn_eu)
+# in_country <- 'Spain'
+
+compile_hydrocon_country <- function(in_hydrostats_sub_comb, in_STcon_directed,
+                                     in_STcon_undirected, in_ssn_eu,
+                                     in_country) {
+  in_sites_ssn_dt <- as.data.table(in_ssn_eu$ssn$obs)
+  
+  hydrostats_isflowing_site <- in_hydrostats_sub_comb[[
+    paste0('hydrostats_sub_', in_country, '_isflowing')]][['site']] %>%
+    setDT
+  
+  hydrostats_isflowing_drn <- in_hydrostats_sub_comb[[
+    paste0('hydrostats_sub_', in_country, '_isflowing')]][['drn']] %>%
+    setDT
+  
+  hydrostats_qsim <- in_hydrostats_sub_comb[[
+    paste0('hydrostats_sub_', in_country, '_qsim')]] %>%
+    setDT
+  
+  cols_to_keep_site <- c(setdiff(names(hydrostats_isflowing_site),
+                                 names(hydrostats_qsim)),
+                         c('date', 'site'))
+  
+  cols_to_keep_drn <- c(setdiff(names(hydrostats_isflowing_drn),
+                                names(hydrostats_qsim)),
+                        c('date'))
+  
+  #Format STcon data
+  in_STcon_directed[[in_country]]$STcon_dt[
+    , variable := paste0(variable, '_directed')]
+  in_STcon_undirected[[in_country]]$STcon_dt[
+    , variable := paste0(variable, '_undirected')]
+  
+  STcon_cast <- rbind(in_STcon_directed[[in_country]]$STcon_dt,
+                      in_STcon_undirected[[in_country]]$STcon_dt) %>%
+    dcast(date+UID~variable, value.var = 'stcon_value')
+  #With nsim
+  # STcon_cast <- in_STcon_directed[[in_country]]$STcon_dt %>%
+  #   dcast(date+UID+nsim~variable, value.var = 'stcon_value') %>%
+  #   .[, nsim := as.integer(nsim)]
+  
+  out_dt <- merge(hydrostats_isflowing_site[, cols_to_keep_site, with=F],
+                  hydrostats_isflowing_drn[, cols_to_keep_drn, with=F],
+                  by='date') %>%
+    merge(hydrostats_qsim, by=c('date', 'site')) %>%
+    merge(in_sites_ssn_dt[country_sub == in_country,
+                          .(site, UID)], ., by='site') %>%
+    merge(STcon_cast, by=c('date', 'UID'), all.x=T)
+  # merge(STcon_cast, by=c('date', 'UID', 'nsim'), all.x=T) #with nsim
+  
+  return(out_dt)  
 }
 
 #------ format_sites_dt ----------------------------------------------------------
@@ -3281,65 +3342,21 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
 # in_ssn_eu <- tar_read(ssn_eu)
 # in_env_dt <- tar_read(env_dt)
 
-merge_allvars_sites <- function(in_ssn_eu, in_spdiv_local, in_spdiv_drn,
-                                in_hydrostats_sub_comb, in_STcon_directed,
-                                in_STcon_undirected, in_env_dt) {
-  in_sites_ssn_dt <- as.data.table(in_ssn_eu$ssn$obs)
-  
+merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
+                                in_hydrocon_compiled, in_env_dt) {
   #Merge diversity data
   drn_cols <- c('Gamma', 'Beta1', 'Beta2in1', 'mAlpha')
   setDT(in_spdiv_drn)
   setnames(in_spdiv_drn, drn_cols, paste0(drn_cols, '_drn'))
   spdiv <- merge(in_spdiv_local, in_spdiv_drn,
                  by=c('country', 'organism'))
-  
-  #Format hydrological and connectivity data
-  hydro_con_compiled <- lapply(
-    unique(in_spdiv_local$country), function(in_country) {
-      #print(in_country)
-      
-      hydrostats_isflowing <- in_hydrostats_sub_comb[[
-        paste0('hydrostats_sub_', in_country, '_isflowing')]][['site']] %>%
-        setDT
-      
-      hydrostats_qsim <- in_hydrostats_sub_comb[[
-        paste0('hydrostats_sub_', in_country, '_qsim')]] %>%
-        setDT
-      
-      cols_to_keep_hydrostats <- names(hydrostats_isflowing)[
-        (!names(hydrostats_isflowing) %in% names(hydrostats_qsim)) |
-          (names(hydrostats_isflowing) %in% c('date','site'))] 
-      
-      #Format STcon data
-      in_STcon_directed[[in_country]]$STcon_dt[
-        , variable := paste0(variable, '_directed')]
-      in_STcon_undirected[[in_country]]$STcon_dt[
-        , variable := paste0(variable, '_undirected')]
-      
-      STcon_cast <- rbind(in_STcon_directed[[in_country]]$STcon_dt,
-                          in_STcon_undirected[[in_country]]$STcon_dt) %>%
-        dcast(date+UID~variable, value.var = 'stcon_value')
-      #With nsim
-      # STcon_cast <- in_STcon_directed[[in_country]]$STcon_dt %>%
-      #   dcast(date+UID+nsim~variable, value.var = 'stcon_value') %>%
-      #   .[, nsim := as.integer(nsim)]
-      
-      out_dt <- merge(hydrostats_isflowing[, cols_to_keep_hydrostats, with=F],
-                      hydrostats_qsim, by=c('date', 'site')) %>%
-        merge(in_sites_ssn_dt[country_sub == in_country,
-                              .(site, UID)], ., by='site') %>%
-        merge(STcon_cast, by=c('date', 'UID'), all.x=T)
-      # merge(STcon_cast, by=c('date', 'UID', 'nsim'), all.x=T) #with nsim
-      
-      return(out_dt)  
-    }) %>% rbindlist 
-  
-  #Merge diversity metrics
+
+  #Merge diversity metrics with hydro_con
   in_spdiv_local[site=='GEN04' & campaign=='1', 
                  date := as.Date('2021-02-01')] #Same as GEN02 and GEN07, the closest sites sampled that campaign
   
-  spdiv_hydro_con <- merge(spdiv, hydro_con_compiled,
-                           by=c('date', 'site'), all.x=T)
+  spdiv_hydro_con <- merge(spdiv, in_hydrocon_compiled,
+                           by=c('date', 'site'), all.x=T) 
   
   #Merge environmental variables
   setDT(in_env_dt)
@@ -3351,11 +3368,11 @@ merge_allvars_sites <- function(in_ssn_eu, in_spdiv_local, in_spdiv_drn,
   #List column names by originating dt
   dtcols <- list(
     div = setdiff(names(spdiv), 
-                  c(names(hydro_con_compiled), names(in_env_dt))),
-    hydro_con = setdiff(names(hydro_con_compiled), 
+                  c(names(in_hydrocon_compiled), names(in_env_dt))),
+    hydro_con = setdiff(names(in_hydrocon_compiled), 
                         c(names(spdiv), names(in_env_dt))),
     env = setdiff(names(in_env_dt),
-                  c(names(spdiv), names(hydro_con_compiled)))
+                  c(names(spdiv), names(in_hydrocon_compiled)))
   )
   
   return(list(
@@ -3394,27 +3411,31 @@ compute_cor_matrix <- function(in_allvars_merged) {
   # 1. Overall Correlation (Hydro + Env)
   cor_hydroenv <- compute_cor_matrix_inner(
     dt,
-    x_cols = c(hydrocon_cols, env_cols)) 
+    x_cols = c(hydrocon_cols, env_cols),
+    exclude_diagonal = FALSE) 
   
   # 2. By Organism (Div x (Hydro + Env))
   cor_div <- compute_cor_matrix_inner(
     dt,
     group_vars = "organism",
     x_cols = div_cols,
-    y_cols = c(hydrocon_cols, env_cols)) 
+    y_cols = c(hydrocon_cols, env_cols),
+    exclude_diagonal = FALSE) 
   
   # 3. By Country (Hydro + Env)
   cor_hydroenv_bydrn <- compute_cor_matrix_inner(
     dt,
     group_vars = "country",
-    x_cols = c(hydrocon_cols, env_cols)) 
+    x_cols = c(hydrocon_cols, env_cols),
+    exclude_diagonal = FALSE)  
   
   # 4. By Organism and Country (Div x (Hydro + Env))
   cor_div_bydrn <- compute_cor_matrix_inner(
     dt,
     group_vars = c("organism", "country"),
     x_cols = div_cols,
-    y_cols = c(hydrocon_cols, env_cols))
+    y_cols = c(hydrocon_cols, env_cols),
+    exclude_diagonal = FALSE) 
   
   return(list(hydroenv = cor_hydroenv,
               div = cor_div,
@@ -3423,8 +3444,258 @@ compute_cor_matrix <- function(in_allvars_merged) {
   ))
 }
 
-#------ plot_cor_heatmap -------------------------------------------------------
-in_cor_matrices <- tar_read(cor_matrices_list)
+#------ plot_cor_heatmaps -------------------------------------------------------
+# in_cor_matrices <- tar_read(cor_matrices_list)
+# in_allvars_merged <- tar_read(allvars_merged)
+# p_threshold <- 0.05
+
+create_correlation_heatmap <- function(cor_matrix, p_matrix, title,
+                                       p_threshold = 1,
+                                       is_square = TRUE, hc_order = TRUE) { # Add is_square argument
+  
+  # Create the heatmap
+  heatmap <- ggcorrplot(cor_matrix,
+                        p.mat = p_matrix,
+                        hc.order = (is_square && hc_order),
+                        hc.method = 'average',
+                        lab = TRUE, lab_size = 3,
+                        digits = 1, insig = 'blank', sig.level = p_threshold,
+                        outline.color = "white",
+                        type = if (is_square) "full" else "upper",  # Control square/triangle
+                        show.diag = if (is_square) TRUE else FALSE) + # Control diagonal
+    scale_fill_distiller(
+      name = str_wrap("Correlation coefficient Spearman's rho", 20),
+      palette = 'RdBu',
+      breaks = c(-0.7, -0.5, 0, 0.5, 0.7),
+      limits = c(-1, 1)) +
+    ggtitle(title)
+  
+  return(heatmap)
+}
+
+plot_cor_heatmaps <- function(in_cor_matrices, in_allvars_merged,
+                              p_threshold = 1) {
+  org_list <- unique(in_cor_matrices$div$organism) %>%
+    setdiff('miv_nopools')
+  country_list <- unique(in_cor_matrices$hydroenv_bydrn$country)
+  
+  # # --- 1. Hydroenv Correlation ---
+  # hydroenv_sub <- in_cor_matrices$hydroenv[p_value <= p_threshold & 
+  #                                            correlation >= cor_threshold,]
+  # 
+  # Extract the correlation and p-value matrices
+  cor_matrix_hydroenv <- dcast(in_cor_matrices$hydroenv, 
+                               variable1 ~ variable2, 
+                               value.var = "correlation")
+  rnames <- cor_matrix_hydroenv$variable1
+  cor_matrix_hydroenv <- as.matrix(cor_matrix_hydroenv[, -1])
+  rownames(cor_matrix_hydroenv) <- rnames
+  cor_matrix_hydroenv[is.na(cor_matrix_hydroenv)] <- 0
+  
+  p_matrix_hydroenv <- dcast(in_cor_matrices$hydroenv, 
+                             variable1 ~ variable2, 
+                             value.var = "p_value")
+  p_matrix_hydroenv <- as.matrix(p_matrix_hydroenv[, -1])
+  rownames(p_matrix_hydroenv) <- rnames
+  p_matrix_hydroenv[is.na(p_matrix_hydroenv)] <- 1L
+  
+  # Create and print the heatmap
+  hydroenv_heatmap <- create_correlation_heatmap(
+    cor_matrix = cor_matrix_hydroenv, 
+    p_matrix = p_matrix_hydroenv,
+    title = "Hydro-Env Correlations",
+    p_threshold = p_threshold,
+    is_square = TRUE)
+  #ggplotly(hydroenv_heatmap)
+  
+  # --- 2. By Organism (Div x (Hydro + Env)) ---
+  div_heatmaps <- lapply(org_list, function(org) {
+    div_sub <- in_cor_matrices$div[organism == org,] %>%
+      .[variable1 %in% in_allvars_merged$cols$div,]
+    
+    # Convert to matrices
+    cor_matrix_org <- dcast(div_sub, 
+                            variable1 ~ variable2, 
+                            value.var = "correlation")
+    rnames_org <- cor_matrix_org$variable1
+    cor_matrix_org <- as.matrix(cor_matrix_org[, -1])
+    rownames(cor_matrix_org) <- rnames_org
+    cor_matrix_org[is.na(cor_matrix_org)] <- 0L
+    
+    p_matrix_org <- dcast(div_sub,
+                          variable1 ~ variable2, 
+                          value.var = "p_value")
+    p_matrix_org <- as.matrix(p_matrix_org[, -1])
+    rownames(p_matrix_org) <- rnames_org
+    p_matrix_org[is.na(p_matrix_org)] <- 1L
+    
+    heatmap <- create_correlation_heatmap(
+      cor_matrix = cor_matrix_org, 
+      p_matrix = p_matrix_org,
+      title = paste("Div vs. Hydro/Env - Organism:", org),
+      p_threshold = p_threshold,
+      is_square = FALSE)
+  }) %>% setNames(org_list)
+  
+  # --- 3. Hydroenv Correlation by Country (Square) ---
+  hydroenv_country_heatmaps <- lapply(country_list, function(in_country) {
+    hydroenv_sub <- in_cor_matrices$hydroenv_bydrn[country == in_country]
+    
+    cor_matrix_hydroenv <- dcast(hydroenv_sub, variable1 ~ variable2, 
+                                 value.var = "correlation")
+    rnames <- cor_matrix_hydroenv$variable1
+    cor_matrix_hydroenv <- as.matrix(cor_matrix_hydroenv[, -1])
+    rownames(cor_matrix_hydroenv) <- rnames
+    cor_matrix_hydroenv[is.na(cor_matrix_hydroenv)] <- 0
+    
+    p_matrix_hydroenv <- dcast(hydroenv_sub, variable1 ~ variable2, 
+                               value.var = "p_value")
+    p_matrix_hydroenv <- as.matrix(p_matrix_hydroenv[, -1])
+    rownames(p_matrix_hydroenv) <- rnames
+    p_matrix_hydroenv[is.na(p_matrix_hydroenv)] <- 1
+    
+    hydroenv_heatmap <- create_correlation_heatmap(
+        cor_matrix = cor_matrix_hydroenv,
+        p_matrix = p_matrix_hydroenv,
+        title = paste("Hydro-Env Correlations - Country:", in_country),
+        p_threshold = p_threshold,
+        is_square = TRUE)
+  }) %>% setNames(country_list)
+
+  # --- 4. Div x Hydroenv Correlation by Country (Non-square) ---
+  div_country_heatmaps <- lapply(country_list, function(in_country) {
+    lapply(org_list, function(org) {
+      div_hydro_sub <- in_cor_matrices$div_bydrn[
+        country == in_country & organism == org,]
+      
+      cor_matrix_div_hydro <- dcast(div_hydro_sub, variable1 ~ variable2, 
+                                    value.var = "correlation")
+      rnames <- cor_matrix_div_hydro$variable1
+      cor_matrix_div_hydro <- as.matrix(cor_matrix_div_hydro[, -1])
+      rownames(cor_matrix_div_hydro) <- rnames
+      cor_matrix_div_hydro[is.na(cor_matrix_div_hydro)] <- 0L
+      
+      p_matrix_div_hydro <- dcast(div_hydro_sub, variable1 ~ variable2, 
+                                  value.var = "p_value")
+      p_matrix_div_hydro <- as.matrix(p_matrix_div_hydro[, -1])
+      rownames(p_matrix_div_hydro) <- rnames
+      p_matrix_div_hydro [is.na(p_matrix_div_hydro )] <- 1L
+      
+      heatmap_div_hydro <- create_correlation_heatmap(
+        cor_matrix = cor_matrix_div_hydro,
+        p_matrix = p_matrix_div_hydro,
+        title = paste("Div x Hydro/Env - Country:", in_country,
+                      "- Organism:", org),
+        p_threshold = p_threshold,
+        is_square = FALSE)
+      
+    }) %>% setNames(org_list)
+  }) %>% setNames(country_list)
+  
+  return(list(
+    hydroenv = hydroenv_heatmap,
+    div = div_heatmaps,
+    hydroenv_country = hydroenv_country_heatmaps,
+    div_country = div_country_heatmaps
+  ))
+}
+
+#------ compare_drn_hydro ------------------------------------------------------
+# in_sites_dt <- tar_read(sites_dt)
+# in_hydrocon_compiled <- tar_read(hydrocon_compiled)
+
+compare_drn_hydro <- function(in_hydrocon_compiled, in_sites_dt) {
+  hydrocon_compiled_country <- merge(in_hydrocon_compiled, 
+                             in_sites_dt[, .(site, country)], by='site')
+  sampling_date_lims <- hydrocon_compiled_country[, list(
+    max_date = max(date, na.rm=T),
+    min_date = min(date, na.rm=T)), by=country]
+  
+  plot_relF90past <- ggplot(
+    hydrocon_compiled_country[!duplicated(paste(country ,date)),]) +
+    geom_area(aes(x=date, y=relF90past), fill='#2b8cbe') +
+    geom_rect(data=sampling_date_lims, 
+              aes(ymin=0, ymax=1, 
+                  xmin=max_date, xmax=max(sampling_date_lims$max_date)),
+              fill = 'grey') +
+    geom_rect(data=sampling_date_lims, 
+              aes(ymin=0, ymax=1, 
+                  xmin=min(sampling_date_lims$min_date), xmax=min_date),
+              fill = 'grey') +
+    coord_cartesian(expand = FALSE) +
+    facet_grid(~country) +
+    theme_classic() +
+    theme(panel.background = element_rect(fill='#feb24c'))
+  
+  # ggplot(hydrocon_compiled_country,
+  #        aes(x=date, y=DurD90past, color = site)) +
+  #   geom_line() +
+  #   geom_smooth(color='black', method='gam') +
+  #   coord_cartesian(expand = FALSE) +
+  #   facet_grid(~country) +
+  #   theme_classic() +
+  #   theme(legend.position = 'none')
+  # 
+  # ggplot(hydrocon_compiled_country,
+  #        aes(x=date, y=PDurD90past, color = site)) +
+  #   geom_line() +
+  #   geom_smooth(color='black', method='gam') +
+  #   coord_cartesian(expand = FALSE) +
+  #   facet_grid(~country) +
+  #   theme_classic() +
+  #   theme(legend.position = 'none')
+  
+  return(plot_relF90past)
+}
+
+#--- Check time windows of hydrological and connectivity variables -----------
+#For hydrological variables check by time window
+
+# vars_list <- c('DurD', 'PDurD', 'FreD', 'PFreD',
+#                'uQ90', 'oQ10', 'maxPQ', 'PmeanQ',
+#                'STcon.*_directed', 'STcon.*_undirected')
+# var_substr <- vars_list[[1]]
+# in_cor_dt <- tar_read(cor_matrices_list)$div_bydrn
+
+plot_cor_hydrowindow <-  function(in_cor_dt, var_substr) {
+  sub_dt <- in_cor_dt[grep(paste0('^', var_substr), variable2),] %>%
+    .[organism %in% org_list,] %>%
+    .[(variable1 %in% c('shannon','Jtm1')),] 
+  
+  sub_dt[, window_d := str_extract(variable2, '[0-9]+')] %>%
+    .[, window_d := factor(window_d, levels=sort(unique(as.integer(window_d))))]
+  
+  out_p <- ggplot(sub_dt[p_value < 0.1,], aes(x=window_d, y=correlation)) +
+    geom_hline(yintercept = 0) +
+    geom_boxplot(fill='grey', alpha=1/10, outlier.shape = NA, coef = 0) +
+    geom_line(aes(color=country, group=country), linewidth=1) +
+    facet_grid(organism~variable1) + #, scales='free_y') +
+    theme_bw() +
+    ggtitle(var_substr)
+  }
+
+plot_hydro_comparison <- function() {
+  sub_dt_compare <- in_cor_dt[grep(var_substr, variable2),] %>%
+    .[organism %in% org_list,] %>%
+    .[(variable1 %in% c('shannon','Jtm1')),] 
+  
+  sub_dt_compare[, window_d := str_extract(variable2, '[0-9]+')] %>%
+    .[, window_d := factor(window_d, levels=sort(unique(as.integer(window_d))))]
+  sub_dt_compare[, root_var := gsub('[0-9]+past', '', variable2)]
+  compare_cast <- dcast(sub_dt_compare[p_value < 0.1,], 
+                        variable1+organism+country+window_d~root_var, 
+                        value.var = 'correlation')
+  ggplot(compare_cast, aes(x=abs(DurD), y=abs(PDurD))) +
+    geom_point(aes(color=country)) +
+    geom_abline() +
+    facet_grid(organism~variable1) +
+    coord_fixed() +
+    theme_bw()
+}  
+
+
+
+
 
 #   #############################
 #   ###################
@@ -3473,16 +3744,6 @@ in_cor_matrices <- tar_read(cor_matrices_list)
 #   
 #   
 # }
-
-#Check relationship between alpha richness for each organism and:
-#reach volume, mean discharge, and 
-
-#Model alpha richness for miv based on residuals from regression on reach volume 
-#(reach length x average wetted width), 
-
-
-
-
 # 
 # env_dd_dep_cormat <- dcast(env_dd_dep_cor, NOM+INSEE_DEP~description,
 #                            value.var='cor')

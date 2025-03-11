@@ -5,6 +5,7 @@ pkg_vec <- list(
   'dbscan',
   'dplyr',
   'future.apply',
+  'ggcorrplot',
   'ggnewscale',
   'ggnetwork',
   'ggplot2',

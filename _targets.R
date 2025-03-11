@@ -1,10 +1,7 @@
 #Small changes to implement before next run
 #L22 functions: capitalize S in spain
 #L56 and L158 functions: catch metacols regardless of capitalization
-#Imput GEN04, campaign 1 date
-
-#Make sure that biological data are standardized by area to get densities
-#Get ancillary catchment data
+#Impute GEN04, campaign 1 date
 
 library(rprojroot)
 rootdir <- rprojroot::find_root(has_dir('R'))
@@ -516,6 +513,16 @@ analysis_targets <- list(
     }) %>% setNames(names(STcon_undirected_list))
   ),
   
+  #Compile hydrostats and connectivity data together as dt
+  tar_target(
+    hydrocon_compiled,
+    lapply(drn_dt$country, function(in_country) {
+      compile_hydrocon_country(hydrostats_sub_comb, STcon_directed_formatted,
+                               STcon_undirected_formatted, ssn_eu, in_country)
+    }) %>% rbindlist 
+  )
+  ,
+  
   #Create Spatial Stream Network (SSN) objects
   tar_target(
     ssn_eu,
@@ -556,13 +563,17 @@ analysis_targets <- list(
 
   tar_target(
     allvars_merged,
-    merge_allvars_sites(in_ssn_eu = ssn_eu, 
-                        in_spdiv_local = spdiv_local, 
+    merge_allvars_sites(in_spdiv_local = spdiv_local, 
                         in_spdiv_drn = spdiv_drn,
-                        in_hydrostats_sub_comb = hydrostats_sub_comb, 
-                        in_STcon_directed = STcon_directed_formatted,
-                        in_STcon_undirected = STcon_undirected_formatted, 
+                        in_hydrocon_compiled = hydrocon_compiled,
                         in_env_dt = env_dt)
+  )
+  ,
+  
+  tar_target(
+    relF_bydrn_plot,
+    compare_drn_hydro(in_hydrocon_compiled = hydrocon_compiled, 
+                      in_sites_dt = sites_dt) 
   )
   ,
   #
@@ -571,8 +582,15 @@ analysis_targets <- list(
     cor_matrices_list,
     compute_cor_matrix(allvars_merged)
   )
+  ,
   
-  #
+  #Create correlation heatmaps
+  tar_target(
+    cor_heatmaps,
+    plot_cor_heatmaps(in_cor_matrices = cor_matrices_list, 
+                      in_allvars_merged = allvars_merged,
+                      p_threshold = 0.05)
+  )
   
   #   tar_target(
   #     alpha_cor_plots_wrap,
