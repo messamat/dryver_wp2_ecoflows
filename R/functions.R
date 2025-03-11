@@ -3709,31 +3709,54 @@ check_cor_div_habvol <- function(in_allvars_merged) {
 }
 
 
-#------ check time windows of hydrological and connectivity variables -----------
+#------ plot_cor_hydrowindow  --------------------------------------------------
 #For hydrological variables check by time window
 
 # vars_list <- c('DurD', 'PDurD', 'FreD', 'PFreD',
 #                'uQ90', 'oQ10', 'maxPQ', 'PmeanQ',
 #                'STcon.*_directed', 'STcon.*_undirected')
-# var_substr <- vars_list[[1]]
+# var_substr <- 'STcon.*_directed'
 # in_cor_dt <- tar_read(cor_matrices_list)$div_bydrn
 
-plot_cor_hydrowindow <-  function(in_cor_dt, var_substr) {
+plot_cor_hydrowindow <-  function(in_cor_dt, var_substr, plot=T, out_dir) {
   sub_dt <- in_cor_dt[grep(paste0('^', var_substr), variable2),] %>%
-    .[organism %in% org_list,] %>%
+    .[organism != 'miv',] %>%
     .[(variable1 %in% c('shannon','Jtm1')),] 
   
-  sub_dt[, window_d := str_extract(variable2, '[0-9]+')] %>%
+  sub_dt[, window_d := str_extract(variable2,
+                                   '([0-9]+(?=past))|((?<=m)[0-9]+)')] %>%
     .[, window_d := factor(window_d, levels=sort(unique(as.integer(window_d))))]
   
-  out_p <- ggplot(sub_dt[p_value < 0.1,], aes(x=window_d, y=correlation)) +
-    geom_hline(yintercept = 0) +
-    geom_boxplot(fill='grey', alpha=1/10, outlier.shape = NA, coef = 0) +
-    geom_line(aes(color=country, group=country), linewidth=1) +
+  sub_dt[,`:=`(mean_cor = mean(`correlation`),
+               sd_cor = sd(`correlation`, na.rm=T)
+               ), by=c('window_d', 'organism', 'variable1')]
+  
+  out_p <- ggplot(sub_dt, aes(x=window_d, y=correlation)) +
+    geom_hline(yintercept = 0, color='grey') +
+    geom_point(aes(y=mean_cor), size=3, color='darkgrey', alpha=1/3) +
+    geom_segment(aes(xend=window_d, y=mean_cor-sd_cor, yend=mean_cor+sd_cor),
+                 color='darkgrey') +
+    geom_line(aes(group=country), color='darkgrey', linewidth=1) +
+    geom_line(data=sub_dt[p_value < 0.05,], 
+              aes(color=country, group=country), linewidth=1) +
     facet_grid(organism~variable1) + #, scales='free_y') +
     theme_bw() +
     ggtitle(var_substr)
+  
+  if (plot) {
+    out_path <- file.path(out_dir, paste0('plot_cor_hydrowindow_', var_substr,
+                                          '.png'))
+    ggsave(out_path, plot = out_p, 
+           height = 15, width = 7.5, units='in', dpi = 300)
   }
+  
+  return(out_p)
+}
+
+#------ compare standard hydro metrics with flow-duration curve-based metrics ---
+# vars_list <- c('DurD', FreD')
+# var_substr <- vars_list[[1]]
+# in_cor_dt <- tar_read(cor_matrices_list)$div_bydrn
 
 plot_hydro_comparison <- function() {
   sub_dt_compare <- in_cor_dt[grep(var_substr, variable2),] %>%

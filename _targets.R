@@ -597,9 +597,26 @@ analysis_targets <- list(
   #-> No, good
   tar_target(
     corplots_div_habvol,
-    cor_div_habvol(in_allvars_merged = allvars_merged)
+    check_cor_div_habvol(in_allvars_merged = allvars_merged)
   )
   ,
+  
+  #Plot spearman's correlation between hydro metrics by time window 
+  #and site-specific richness and t-minus1 betadiv
+  tar_target(
+    corplots_div_hydrowindow, {
+      hydrovar_list <- c('DurD', 'PDurD', 'FreD', 'PFreD', 
+                    'uQ90', 'oQ10', 'maxPQ', 'PmeanQ',
+                    'STcon.*_directed', 'STcon.*_undirected')
+      lapply(hydrovar_list, function(in_var_substr) {
+        plot_cor_hydrowindow(in_cor_dt = cor_matrices_list$div_bydrn, 
+                             var_substr = in_var_substr, 
+                             plot=T, 
+                             out_dir = resdir)
+      })%>% setNames(hydrovar_list)
+    }
+  )
+
   
   #   tar_target(
   #     alpha_cor_plots_wrap,
