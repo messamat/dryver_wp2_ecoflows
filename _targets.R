@@ -368,7 +368,7 @@ mapped_hydrotargets <- tarchetypes::tar_map(
     get_drn_hydromod(hydromod_path = hydromod_paths_dt[country==in_country,
                                                        sel_sim_path],
                      varname = in_varname)
-                     #selected_sims = 1:20)
+    #selected_sims = 1:20)
   ),
   
   tar_target(
@@ -423,12 +423,12 @@ analysis_targets <- list(
       out_STcon_list <- future_lapply(
         names(preformatted_data_STcon), function(in_country) {
           print(in_country)
-
+          
           unique_sampling_dates <- lapply(bio_dt, function(org_dt) {
             org_dt[country==in_country, .(date)]
           }) %>% rbindlist %>% unique
           in_dates <- unique_sampling_dates
-
+          
           window_size_list <- c(10, 30, 90, 365) #30, 60, 90, 180, 365
           lapply(window_size_list, function(in_window) {
             print(in_window)
@@ -437,7 +437,7 @@ analysis_targets <- list(
             } else {
               in_output <- 'STcon'
             }
-
+            
             compute_STcon_rolling(
               in_preformatted_data = preformatted_data_STcon[[in_country]],
               ref = FALSE,
@@ -503,7 +503,7 @@ analysis_targets <- list(
                         standardize_STcon = FALSE, in_STcon_ref = NULL)
     }) %>% setNames(names(STcon_directed_list))
   ),
-
+  
   tar_target(
     STcon_undirected_formatted,
     future_lapply(names(STcon_undirected_list), function(in_country) {
@@ -560,7 +560,7 @@ analysis_targets <- list(
       rbindlist
   )
   ,
-
+  
   tar_target(
     allvars_merged,
     merge_allvars_sites(in_spdiv_local = spdiv_local, 
@@ -591,6 +591,15 @@ analysis_targets <- list(
                       in_allvars_merged = allvars_merged,
                       p_threshold = 0.05)
   )
+  ,
+  
+  #Check whether richness is related to habitat volumne (for miv and biofilm)
+  #-> No, good
+  tar_target(
+    corplots_div_habvol,
+    cor_div_habvol(in_allvars_merged = allvars_merged)
+  )
+  ,
   
   #   tar_target(
   #     alpha_cor_plots_wrap,

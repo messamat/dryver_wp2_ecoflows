@@ -3648,7 +3648,68 @@ compare_drn_hydro <- function(in_hydrocon_compiled, in_sites_dt) {
   return(plot_relF90past)
 }
 
-#--- Check time windows of hydrological and connectivity variables -----------
+#------ check_diversity_dependence_on_habitat_volume ---------------------------
+#n_allvars_merged <- tar_read(allvars_merged)
+
+check_cor_div_habvol <- function(in_allvars_merged) {
+  #names(in_allvars_merged$dt)
+  in_allvars_merged$dt[, avg_vol_miv := avg_depth_macroinvertebrates*average_wetted_width_m]
+  in_allvars_merged$dt[, mean_avg_vol_miv := mean(avg_vol_miv), by=site]
+  in_allvars_merged$dt[, mean_velo_miv := mean(avg_velocity_macroinvertebrates), by=site]
+  
+  p_miv_vol <- ggplot(in_allvars_merged$dt[organism=='miv',], 
+         aes(x=avg_vol_miv/mean_avg_vol_miv, 
+             y=richness/mean_richness)) +
+    geom_point() +
+    geom_smooth(aes(color=site), method='lm', se=F) +
+    facet_wrap(~country) +
+    theme(legend.position = 'none')
+  
+  p_miv_vel <- ggplot(in_allvars_merged$dt[organism=='miv_nopools' & 
+                                avg_velocity_macroinvertebrates<5,], 
+         aes(x=avg_velocity_macroinvertebrates, 
+             y=richness/mean_richness)) +
+    geom_point() +
+    geom_smooth(aes(color=site), method='lm', se=F) +
+    geom_smooth(color='black', method='lm', linewidth=1.2) +
+    facet_wrap(~country) +
+    theme(legend.position = 'none')
+  
+  p_dia_biof_vol <- ggplot(in_allvars_merged$dt[organism=='dia_biof',], 
+         aes(x=volume_biofilm, 
+             y=richness/mean_richness)) +
+    geom_point() +
+    geom_smooth(aes(color=site), method='lm', se=F) +
+    facet_wrap(~country) +
+    theme(legend.position = 'none')
+  
+  p_dia_biof_m2 <- ggplot(in_allvars_merged$dt[organism=='dia_biof',], 
+         aes(x=m2_biofilm, 
+             y=richness/mean_richness)) +
+    geom_point() +
+    geom_smooth(aes(color=site), method='lm', se=F) +
+    facet_wrap(~country) +
+    theme(legend.position = 'none')
+  
+  p_fun_biof_m2 <- ggplot(in_allvars_merged$dt[organism=='fun_biof',], 
+         aes(x=m2_biofilm, 
+             y=richness/mean_richness)) +
+    geom_point() +
+    geom_smooth(aes(color=site), method='lm', se=F) +
+    facet_wrap(~country) +
+    theme(legend.position = 'none')
+  
+  return(list(
+    miv_vol= p_miv_vol,
+    miv_vel = p_miv_vel,
+    dia_biof_vol = p_dia_biof_vol,
+    dia_biof_m2 = p_dia_biof_m2,
+    fun_biof_m2 = p_fun_biof_m2
+  ))
+}
+
+
+#------ check time windows of hydrological and connectivity variables -----------
 #For hydrological variables check by time window
 
 # vars_list <- c('DurD', 'PDurD', 'FreD', 'PFreD',
