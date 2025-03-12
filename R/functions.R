@@ -3352,8 +3352,8 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
                  by=c('country', 'organism'))
 
   #Merge diversity metrics with hydro_con
-  in_spdiv_local[site=='GEN04' & campaign=='1', 
-                 date := as.Date('2021-02-01')] #Same as GEN02 and GEN07, the closest sites sampled that campaign
+  spdiv[site=='GEN04' & campaign=='1', 
+        date := as.Date('2021-05-30')] #Same as GEN02 and GEN07, the closest sites sampled that campaign
   
   spdiv_hydro_con <- merge(spdiv, in_hydrocon_compiled,
                            by=c('date', 'site'), all.x=T) 
@@ -3372,7 +3372,15 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
     hydro_con = setdiff(names(in_hydrocon_compiled), 
                         c(names(spdiv), names(in_env_dt))),
     env = setdiff(names(in_env_dt),
-                  c(names(spdiv), names(in_hydrocon_compiled)))
+                  c(names(spdiv), names(in_hydrocon_compiled))),
+    group_cols = c("running_id", "site", "date", "campaign", "organism", "country",
+                   "UID", "stream_type", "state_of_flow"),
+    exclude_cols = c("ncampaigns", "name", "isflowing", "reach_length",
+                     "noflow_period", "noflow_period_dur", "last_noflowdate", "drn",
+                     "if_ip_number_and_size_2_axes_+_depth_of_the_pools",
+                     "latitude", "longitude", "reach_id", "hy", "month",
+                     'min_wetted_width', 'left_river_bank_slope', 'right_river_bank_slope',
+                     'qsim')
   )
   
   return(list(
@@ -3386,6 +3394,8 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
 compute_cor_matrix <- function(in_allvars_merged) {
   dt <- in_allvars_merged$dt
   cols_by_origin <- in_allvars_merged$cols
+  exclude_cols <- cols_by_origin$exclude_cols
+  group_cols <- cols_by_origin$group_cols
   
   #Pre-formatting
   dt[is.na(noflow_period_dur), noflow_period_dur := 0]
@@ -3394,14 +3404,6 @@ compute_cor_matrix <- function(in_allvars_merged) {
   dt[, PrdD := as.numeric(PrdD)]
   
   #Define columns to group by and columns to correlate
-  group_cols <- c("running_id", "site", "date", "campaign", "organism", "country",
-                  "UID", "stream_type", "state_of_flow")
-  exclude_cols <- c("ncampaigns", "name", "isflowing", "reach_length",
-                    "noflow_period", "noflow_period_dur", "last_noflowdate", "drn",
-                    "if_ip_number_and_size_2_axes_+_depth_of_the_pools",
-                    "latitude", "longitude", "reach_id", "hy", "month",
-                    'min_wetted_width', 'left_river_bank_slope', 'right_river_bank_slope',
-                    'qsim')
   div_cols <- setdiff(cols_by_origin$div, c(exclude_cols, group_cols))
   hydrocon_cols <- setdiff(cols_by_origin$hydro_con, c(exclude_cols, group_cols))
   env_cols <- c(setdiff(cols_by_origin$env, c(exclude_cols, group_cols)),
