@@ -822,6 +822,113 @@ compute_cor_matrix_inner <- function(in_dt, group_vars = NULL,
   
   return(cor_results)  # Return the result directly
 }
+#------ fill_nas_hierarchical --------------------------------------------------
+# Function to fill NAs hierarchically (by site -> by country -> overall)
+fill_nas_hierarchical <- function(dt, cols_to_fill, site_col, country_col) {
+  
+  # Create a copy to avoid modifying the original data.table in place
+  dt_copy <- copy(dt)
+  
+  # 1. Fill NAs with site averages
+  dt_copy[,
+          (cols_to_fill) := lapply(.SD, function(x) {
+            fifelse(is.na(x), mean(x, na.rm = TRUE), x)
+          }),
+          .SDcols = cols_to_fill,
+          by = site_col
+  ]
+  
+  # 2. Fill remaining NAs with country averages
+  dt_copy[,
+          (cols_to_fill) := lapply(.SD, function(x) {
+            fifelse(is.na(x), mean(x, na.rm = TRUE), x)
+          }),
+          .SDcols = cols_to_fill,
+          by = country_col
+  ]
+  
+  # 3. Fill any remaining NAs with overall averages
+  overall_means <- dt_copy[, lapply(.SD, mean, na.rm = TRUE),
+                           .SDcols = cols_to_fill]
+  for (col in cols_to_fill) {
+    dt_copy[, (col) := fifelse(is.na(get(col)), overall_means[[col]], get(col))]
+  }
+  
+  return(dt_copy)
+}
+#------ trans_pca --------------------------------------------------------------
+# Function for Box-Cox Transformation, Z-standardization, and PCA
+trans_pca <- function(in_dt, in_cols_to_ordinate, num_pca_axes = 4) {
+  dt_copy <- copy(in_dt)
+  
+  # 1. Determine optimal lambda for Box-Cox
+  dt_copy[, (in_cols_to_ordinate) := lapply(.SD, function(x) {
+    min_positive <- min(x[x > 0], na.rm = TRUE)
+    trans_shift <- if (is.finite(min_positive)) min_positive * 0.01 else 1
+    return(x + trans_shift)
+  }), .SDcols = in_cols_to_ordinate]
+  
+  bc_lambdas <- dt_copy[, lapply(.SD, forecast::BoxCox.lambda),
+                        .SDcols = in_cols_to_ordinate] %>%
+    round(1)
+  
+  # 2. Apply Box-Cox and Z-standardization
+  for (in_col in in_cols_to_ordinate) {
+    dt_copy[, (in_col) := base::scale(
+      forecast::BoxCox(get(in_col), 
+                       bc_lambdas[[in_col]])
+    )]
+  } 
+  
+  # 3. PCA (using .SD for transformed columns only, and ensuring non-NA data)
+  pca_out <- dt_copy[, stats::prcomp(.SD, center=FALSE, scale=FALSE), 
+                     .SDcols = in_cols_to_ordinate] 
+  pca_out_dt <- as.data.table(pca_out$x) %>%
+    setnames(paste0('env_', names(.)))  %>%
+    .[, .SD, .SDcols = seq(1, num_pca_axes)]
+  
+  return(list(
+    pca = pca_out,
+    pca_dt = pca_out_dt,
+    trans_dt = dt_copy
+  ))
+}
+#------ trans_pca_wrapper ------------------------------------------------------
+trans_pca_wrapper <- function(in_dt, in_cols_to_ordinate, id_cols, 
+                              group_cols = NULL, num_pca_axes = 4) {
+  if (is.null(group_cols)) {
+    pca_out <- trans_pca(in_dt = in_dt, 
+                         in_cols_to_ordinate = in_cols_to_ordinate, 
+                         num_pca_axes = num_pca_axes)
+    out_dt <- cbind(in_dt[, id_cols, with=F], pca_out$pca_dt)
+    out_plot <- ordiplot(pca_out$pca, 
+                         choices = c(1, 2), 
+                         type="text", 
+                         display='species')
+    
+    return(list(
+      pca = pca_out$pca,
+      trans_dt = pca_out$trans_dt,
+      dt = out_dt,
+      plot = out_plot
+    ))
+  } else {
+    out_dt <- cbind(
+      in_dt[, trans_pca(in_dt = .SD, 
+                        in_cols_to_ordinate = in_cols_to_ordinate, 
+                        num_pca_axes = num_pca_axes)$pca_dt
+            , by=group_cols],
+      in_dt[, .SD, .SDcols = id_cols, by=group_cols][, id_cols, with=F]
+    )
+    
+    return(list(
+      pca = NULL,
+      trans_dt = NULL, #Could be easily done
+      dt = out_dt,
+      plot = NULL
+    ))
+  }
+}
 #-------------- workflow functions ---------------------------------------------
 # path_list = tar_read(bio_data_paths)
 # in_metadata_edna <- tar_read(metadata_edna)
@@ -1036,6 +1143,9 @@ read_envdt <- function(in_env_data_path_annika,
       avg_ratio_sampling_hydraulic_dis[avg_ratio_sampling_hydraulic_dis$site_id == site, 'mean_ratio_v'],
     by=site]
   
+  #Make sure velocity is OK
+  env_dt_merged[avg_velocity_macroinvertebrates > 5, avg_velocity_macroinvertebrates := NA]
+  
   #Compute simple discharge for the site
   env_dt_merged[running_id == 'AL07_1',
                 discharge_l_s := avg_velocity_macroinvertebrates*
@@ -1144,6 +1254,10 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
     is.na(date),
     date := in_metadata_edna[sample_type=='biofilm', .(running_id, date)][
       .SD, on='running_id', x.date]]
+  #Replace dates in dia_biof, which seem erroneous
+  dt_list$dia_biof[,
+                   date := in_metadata_edna[sample_type=='biofilm', .(running_id, date)][
+                     .SD, on='running_id', x.date]]
   
   #Add Campaign and Site to bacteria data, then remove pool sites
   dt_list$bac_sedi[, c('site', 'campaign') := tstrsplit(v1, '_')] %>%
@@ -1303,7 +1417,7 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
     
     #Format local diversity decomposition
     localdiv_decomp <- as.data.table(decomp$tab_by_site) %>%
-      setnames('nsite', 'ncampaigns')
+      setnames(c('nsite'), 'ncampaigns')
     localdiv_decomp[, site := unique(biodt_copy$site)]
     
     out_dt <- mergeDTlist(
@@ -1312,9 +1426,18 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
       merge(localdiv_decomp, by='site', all.x=T)
     
   } else if (level == 'regional') {
+    nsites <- nrow(decomp$tab_by_site) #Number of sites
+    nsteps <- max(decomp$tab_by_site[,'nsite']) #Number of sampling campaigns
+    
     out_dt <- t(decomp[[1]]) %>%
       data.table %>%
-      .[, organism := in_biodt[1, .(organism)]] 
+      setnames(c('Gamma', 'Beta1', 'Beta2in1', 'mAlpha'),
+               paste0(c('gamma', 'beta_s', 'beta_t_s', 'malpha'), '_drn')
+      ) %>% 
+      .[, `:=`(organism = in_biodt[1, .(organism)][[1]],
+               beta_s_drn_std = (beta_s_drn-1)/(nsites-1),
+               beta_t_s_drn_std = (beta_t_s_drn-1)/(nsteps-1) 
+               )] 
   }
   
   return(out_dt)
@@ -3345,12 +3468,10 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
 merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
                                 in_hydrocon_compiled, in_env_dt) {
   #Merge diversity data
-  drn_cols <- c('Gamma', 'Beta1', 'Beta2in1', 'mAlpha')
   setDT(in_spdiv_drn)
-  setnames(in_spdiv_drn, drn_cols, paste0(drn_cols, '_drn'))
   spdiv <- merge(in_spdiv_local, in_spdiv_drn,
                  by=c('country', 'organism'))
-
+  
   #Merge diversity metrics with hydro_con
   spdiv[site=='GEN04' & campaign=='1', 
         date := as.Date('2021-05-30')] #Same as GEN02 and GEN07, the closest sites sampled that campaign
@@ -3396,7 +3517,6 @@ compute_cor_matrix <- function(in_allvars_merged) {
   cols_by_origin <- in_allvars_merged$cols
   exclude_cols <- cols_by_origin$exclude_cols
   group_cols <- cols_by_origin$group_cols
->>>>>>> f5e70ce92ab2a6ca3c39b2e3e6c5137e722fda22
   
   #Pre-formatting
   dt[is.na(noflow_period_dur), noflow_period_dur := 0]
@@ -3558,13 +3678,13 @@ plot_cor_heatmaps <- function(in_cor_matrices, in_allvars_merged,
     p_matrix_hydroenv[is.na(p_matrix_hydroenv)] <- 1
     
     hydroenv_heatmap <- create_correlation_heatmap(
-        cor_matrix = cor_matrix_hydroenv,
-        p_matrix = p_matrix_hydroenv,
-        title = paste("Hydro-Env Correlations - Country:", in_country),
-        p_threshold = p_threshold,
-        is_square = TRUE)
+      cor_matrix = cor_matrix_hydroenv,
+      p_matrix = p_matrix_hydroenv,
+      title = paste("Hydro-Env Correlations - Country:", in_country),
+      p_threshold = p_threshold,
+      is_square = TRUE)
   }) %>% setNames(country_list)
-
+  
   # --- 4. Div x Hydroenv Correlation by Country (Non-square) ---
   div_country_heatmaps <- lapply(country_list, function(in_country) {
     lapply(org_list, function(org) {
@@ -3609,7 +3729,7 @@ plot_cor_heatmaps <- function(in_cor_matrices, in_allvars_merged,
 
 compare_drn_hydro <- function(in_hydrocon_compiled, in_sites_dt) {
   hydrocon_compiled_country <- merge(in_hydrocon_compiled, 
-                             in_sites_dt[, .(site, country)], by='site')
+                                     in_sites_dt[, .(site, country)], by='site')
   sampling_date_lims <- hydrocon_compiled_country[, list(
     max_date = max(date, na.rm=T),
     min_date = min(date, na.rm=T)), by=country]
@@ -3661,17 +3781,17 @@ check_cor_div_habvol <- function(in_allvars_merged) {
   in_allvars_merged$dt[, mean_velo_miv := mean(avg_velocity_macroinvertebrates), by=site]
   
   p_miv_vol <- ggplot(in_allvars_merged$dt[organism=='miv',], 
-         aes(x=avg_vol_miv/mean_avg_vol_miv, 
-             y=richness/mean_richness)) +
+                      aes(x=avg_vol_miv/mean_avg_vol_miv, 
+                          y=richness/mean_richness)) +
     geom_point() +
     geom_smooth(aes(color=site), method='lm', se=F) +
     facet_wrap(~country) +
     theme(legend.position = 'none')
   
   p_miv_vel <- ggplot(in_allvars_merged$dt[organism=='miv_nopools' & 
-                                avg_velocity_macroinvertebrates<5,], 
-         aes(x=avg_velocity_macroinvertebrates, 
-             y=richness/mean_richness)) +
+                                             avg_velocity_macroinvertebrates<5,], 
+                      aes(x=avg_velocity_macroinvertebrates, 
+                          y=richness/mean_richness)) +
     geom_point() +
     geom_smooth(aes(color=site), method='lm', se=F) +
     geom_smooth(color='black', method='lm', linewidth=1.2) +
@@ -3679,24 +3799,24 @@ check_cor_div_habvol <- function(in_allvars_merged) {
     theme(legend.position = 'none')
   
   p_dia_biof_vol <- ggplot(in_allvars_merged$dt[organism=='dia_biof',], 
-         aes(x=volume_biofilm, 
-             y=richness/mean_richness)) +
+                           aes(x=volume_biofilm, 
+                               y=richness/mean_richness)) +
     geom_point() +
     geom_smooth(aes(color=site), method='lm', se=F) +
     facet_wrap(~country) +
     theme(legend.position = 'none')
   
   p_dia_biof_m2 <- ggplot(in_allvars_merged$dt[organism=='dia_biof',], 
-         aes(x=m2_biofilm, 
-             y=richness/mean_richness)) +
+                          aes(x=m2_biofilm, 
+                              y=richness/mean_richness)) +
     geom_point() +
     geom_smooth(aes(color=site), method='lm', se=F) +
     facet_wrap(~country) +
     theme(legend.position = 'none')
   
   p_fun_biof_m2 <- ggplot(in_allvars_merged$dt[organism=='fun_biof',], 
-         aes(x=m2_biofilm, 
-             y=richness/mean_richness)) +
+                          aes(x=m2_biofilm, 
+                              y=richness/mean_richness)) +
     geom_point() +
     geom_smooth(aes(color=site), method='lm', se=F) +
     facet_wrap(~country) +
@@ -3732,7 +3852,7 @@ plot_cor_hydrowindow <-  function(in_cor_dt, var_substr, plot=T, out_dir) {
   
   sub_dt[,`:=`(mean_cor = mean(`correlation`),
                sd_cor = sd(`correlation`, na.rm=T)
-               ), by=c('window_d', 'organism', 'variable1')]
+  ), by=c('window_d', 'organism', 'variable1')]
   
   out_p <- ggplot(sub_dt, aes(x=window_d, y=correlation)) +
     geom_hline(yintercept = 0, color='grey') +
@@ -3784,8 +3904,119 @@ plot_hydro_comparison <- function() {
 
 
 
-#   #############################
-#   ###################
+#------ ordinate_local_env ----------------------------------------------------
+ordinate_local_env <- function(in_allvars_merged) {
+  #1. Compute PCA for miv_nopools ----------------------------------------------
+  env_cols_miv <- c('avg_velocity_macroinvertebrates', 'embeddedness',
+                    'bedrock', 'particle_size', 'oxygen_sat', 'filamentous_algae',
+                    'incrusted_algae', 'macrophyte_cover', 'leaf_litter_cover',
+                    'moss_cover', 'wood_cover', 'riparian_cover_in_the_riparian_area',
+                    'shade', 'hydromorphological_alteration', 'm2_biofilm',
+                    'conductivity_micros_cm', 'ph', 'temperature_c')
+  #'oxygen_mg_l'
+  
+  #Convert all columns to numeric (rather than integer)
+  in_allvars_merged$dt[, (env_cols_miv) := lapply(.SD, as.numeric), 
+                       .SDcols = env_cols_miv] 
+  
+  #Fill NAs hierarchically. First by site, then by country, then overall
+  miv_nopools_dt <- fill_nas_hierarchical(
+    dt = in_allvars_merged$dt[organism == 'miv_nopools'], 
+    cols_to_fill = env_cols_miv, 
+    site_col = 'site', 
+    country_col = 'country')
+  
+  #Check distributions by country
+  dt_miv_envmelt <- melt(in_allvars_merged$dt[organism == 'miv',], 
+                         id.vars = c('country', 'site', 'campaign'),
+                         measure.vars = env_cols_miv)
+  # ggplot(dt_miv_envmelt, #[variable=='conductivity_micros_cm',],
+  #        aes(x=country, y=value, color=country)) +
+  #   geom_jitter() + 
+  #   facet_wrap(~variable, scales='free_y') +
+  #   scale_y_sqrt()
+  # 
+  # ggplot(dt_miv_envmelt, aes(x=value)) +
+  #   geom_density() + 
+  #   facet_wrap(~variable, scales='free')
+  
+  out_list_miv <- trans_pca_wrapper(in_dt = miv_nopools_dt, 
+                                    in_cols_to_ordinate = env_cols_miv, 
+                                    id_cols = c('site', 'date', 'country'), 
+                                    group_cols = NULL, 
+                                    num_pca_axes = 4)
+  
+  # out_list_miv_country <- trans_pca_wrapper(in_dt = miv_nopools_dt, 
+  #                                           in_cols_to_ordinate = env_cols_miv, 
+  #                                           id_cols = c('site', 'date'), 
+  #                                           group_cols = 'country', 
+  #                                           num_pca_axes = 4)
+  
+  #2. Compute PCA for eDNA data ------------------------------------------------
+  edna_orglist <- c('dia_sedi', 'dia_biof', 
+                    'fun_sedi', 'fun_biof', 
+                    'bac_sedi', 'bac_biof')
+  
+  env_cols_edna <- c('filamentous_algae', 'incrusted_algae', 
+                     'macrophyte_cover', 'leaf_litter_cover','moss_cover', 
+                     'wood_cover', 'riparian_cover_in_the_riparian_area',
+                     'shade', 'm2_biofilm', 'conductivity_micros_cm',
+                     'oxygen_sat', 'ph','temperature_c')
+  
+  #Convert all columns to numeric (rather than integer)
+  in_allvars_merged$dt[, (env_cols_edna) := lapply(.SD, as.numeric), 
+                       .SDcols = env_cols_edna]
+  
+  #Check distributions by country
+  dt_edna_envmelt <- unique(in_allvars_merged$dt[organism %in% edna_orglist,],
+                            by=c('site', 'date')) %>%
+    melt(id.vars = c('country', 'site', 'campaign', 'organism'),
+         measure.vars = env_cols_edna)
+  ggplot(dt_edna_envmelt, #[variable=='conductivity_micros_cm',],
+         aes(x=country, y=value, color=country)) +
+    geom_jitter() + 
+    facet_grid(organism~variable, scales='free_y') +
+    scale_y_log10()
+  
+  ggplot(dt_edna_envmelt, aes(x=value)) +
+    geom_density() + 
+    facet_wrap(~variable, scales='free')
+  
+  #Fill NAs hierarchically. First by site, then by country, then overall
+  #this gives the average conditions when there is flow to dry samples. 
+  #will need to think about how to use this
+  edna_dt <- unique(in_allvars_merged$dt[organism %in% edna_orglist,],
+                    by=c('site', 'date')) %>%
+    .[, c('country', 'site', 'date', env_cols_edna), with=F] %>%
+    fill_nas_hierarchical(cols_to_fill = env_cols_edna, 
+                          site_col = 'site', 
+                          country_col = 'country') 
+  
+  out_list_edna <- trans_pca_wrapper(in_dt = edna_dt, 
+                                     in_cols_to_ordinate = env_cols_edna, 
+                                     id_cols = c('site', 'date', 'country'), 
+                                     group_cols = NULL, 
+                                     num_pca_axes = 4)
+  
+  return(list(
+    miv_nopools = out_list_miv,
+    edna = out_list_edna
+  ))
+}
+#------ model_miv_t ------------------------------------------------------------
+# in_allvars_merged <- tar_read(allvars_merged)
+# local_env_pca_all <- ordinate_local_env(in_allvars_merged)
+# in_local_env_pca <- local_env_pca_all$miv_nopools
+# 
+# model_miv_t <- function(in_allvars_merged, in_local_env_pca) {
+#   
+#   
+#   
+# }
+
+################################################################################
+################################################################################
+
 #   alpha_env_melt <- melt(
 #     alphadat_env_dt,
 #     id.vars = idcols,
@@ -3894,7 +4125,6 @@ plot_hydro_comparison <- function() {
 
 
 #------ tabulate_cor_matrix ----------------------------------------------------
-#------ ordinate_local_vars ----------------------------------------------------
 #------ plot_spdiv_local -------------------------------------------------------
 #------ plot_spdiv_drn ---------------------------------------------------------
 #------ train_lme_aspatial -----------------------------------------------------

@@ -2,6 +2,7 @@
 #L22 functions: capitalize S in spain
 #L56 and L158 functions: catch metacols regardless of capitalization
 #Impute GEN04, campaign 1 date
+#Correct avg velocity 25 m/s
 
 library(rprojroot)
 rootdir <- rprojroot::find_root(has_dir('R'))
@@ -83,8 +84,8 @@ preformatting_targets <- list(
       dia_biof = "diatoms_dna_biofilm_removed_pools_and_zero_rows_and_columns.csv",
       fun_sedi = "fungi_dna_sediment_removed_pools_zero_rows_and_columns.csv",
       fun_biof = "fungi_dna_Biof_removed_pools_zero_rows_and_columns.csv",
-      bac_sedi = "Sediment_bacteria_removed_pools_and_zero_species.csv",
-      bac_biof = "Biofilm_bacteria_removed_pools_and_zero_species.csv",
+      bac_sedi = "bacteria_dna_sediment_removed_pools_and_zero_species.csv",
+      bac_biof = "bacteria_dna_biofilm_removed_pools_and_zero_species.csv",
       miv = "DRYvER_MIV_data_genus_reduced_taxa.csv",
       miv_nopools = "DRYvER_MIV_data_genus_reduced_taxa_removed_pools.csv",
       miv_nopools_flying = "DRYvER_MIV_data_genus_reduced_taxa_removed_pools_for_traits_flying.csv",
@@ -383,7 +384,9 @@ mapped_hydrotargets <- tarchetypes::tar_map(
   
   tar_target(
     hydrostats_sub,
-    subset_hydrostats(hydrostats, in_country = in_country, in_bio_dt = bio_dt)
+    subset_hydrostats(hydrostats, 
+                      in_country = in_country, 
+                      in_bio_dt = bio_dt)
   )
 )
 
@@ -468,7 +471,7 @@ analysis_targets <- list(
           }) %>% rbindlist %>% unique
           in_dates <- unique_sampling_dates
           
-          window_size_list <- c(10) #, 30, 90, 120, 180, 365) 
+          window_size_list <- c(10, 30, 90, 365) #, 30, 90, 120, 180, 365) 
           lapply(window_size_list, function(in_window) { 
             print(in_window)
             if (in_window == 365) {
@@ -616,22 +619,13 @@ analysis_targets <- list(
       })%>% setNames(hydrovar_list)
     }
   )
-
+  ,
   
-  #   tar_target(
-  #     alpha_cor_plots_wrap,
-  #     plot_alpha_cor(alphadat_merged,
-  #                    out_dir = file.path(resdir, 'Null_models'),
-  #                    facet_wrap = TRUE)
-  #   )
-  #   ,
-  # 
-  # tar_target(
-  #   alpha_cor_plots_all,
-  #   plot_alpha_cor(alphadat_merged,
-  #                  out_dir = file.path(resdir, 'Null_models'),
-  #                  facet_wrap = FALSE)
-  # )
+  #Ordinate local environmental variables to use axes in regression models
+  tar_target(
+    local_env_pca,
+    ordinate_local_env(in_allvars_merged = allvars_merged)
+  )
 )
 
 list(preformatting_targets, mapped_hydrotargets, 
@@ -641,6 +635,21 @@ list(preformatting_targets, mapped_hydrotargets,
 
 
 ######################### OLD TARGETS ##########################################
+#   tar_target(
+#     alpha_cor_plots_wrap,
+#     plot_alpha_cor(alphadat_merged,
+#                    out_dir = file.path(resdir, 'Null_models'),
+#                    facet_wrap = TRUE)
+#   )
+#   ,
+# 
+# tar_target(
+#   alpha_cor_plots_all,
+#   plot_alpha_cor(alphadat_merged,
+#                  out_dir = file.path(resdir, 'Null_models'),
+#                  facet_wrap = FALSE)
+# )
+
 # tar_target(
 #   alpha_cor,
 #   alphadat_merged[, list(meanS_totdur90_cor = stats::cor(mean_S, TotDur90),
