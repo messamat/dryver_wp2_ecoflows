@@ -1,14 +1,7 @@
 #Small changes to implement before next run
 #L22 functions: capitalize S in spain
 #L56 and L158 functions: catch metacols regardless of capitalization
-#Standardize country names across all input datasets
-#Standardize metacols across all input datasets
-#site names in "data/wp1/Results_present_period_final/data/Genal/Genal_sampling_sites_ReachIDs.csv" are incorrect
-#Need to know how sites were snapped to network "C:\DRYvER_wp2\WP2 - Predicting biodiversity changes in DRNs\Coordinates\Shapefiles with sites moved to the river network\Croatia_near_coords.shp"
-#3s flow acc for Europe: https://data.hydrosheds.org/file/hydrosheds-v1-acc/eu_acc_3s.zip
-
-#Make sure that biological data are standardized by area to get densities
-#Get ancillary catchment data
+#Impute GEN04, campaign 1 date
 
 library(rprojroot)
 rootdir <- rprojroot::find_root(has_dir('R'))
@@ -43,12 +36,13 @@ hydro_combi <- expand.grid(
   in_varname =  c('isflowing', 'qsim'),
   stringsAsFactors = FALSE)
 
-
-perf_ratio <- 0.8 #Set how much you want to push your computer (% of cores and RAM)
-nthreads <- min(nrow(drn_dt), round(parallel::detectCores(logical=F)*perf_ratio))
-future::plan("future::multisession", workers=nthreads)
-total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
-options(future.globals.maxSize = perf_ratio*total_ram)
+if (!interactive()) {
+  perf_ratio <- 0.7 #Set how much you want to push your computer (% of cores and RAM)
+  nthreads <- min(nrow(drn_dt), round(parallel::detectCores(logical=F)*perf_ratio))
+  future::plan("future::multisession", workers=nthreads)
+  total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
+  options(future.globals.maxSize = perf_ratio*total_ram)
+}
 
 #--------------------------  Define targets plan -------------------------------
 #-------------- Preformatting targets ------------------------------------------
@@ -260,7 +254,7 @@ preformatting_targets <- list(
   )
   ,
   
-  #Copy gpkg to shapefiles for sharing
+  #Copy gpkg to shapefiles for sharing (and removing extraneous UIDs)
   tar_target(
     network_ssnready_shp_list,
     lapply(network_ssnready_gpkg_list, function(path) {
@@ -288,7 +282,8 @@ preformatting_targets <- list(
                       in_sites_dt = sites_dt,
                       out_dir = file.path('results', 'gis'),
                       geom = 'reaches',
-                      in_network_path_list = network_ssnready_gpkg_list,
+                      in_network_path_list = network_ssnready_shp_list,
+                      in_network_idcol = 'cat',
                       overwrite = T)
   )
   ,
@@ -310,12 +305,12 @@ preformatting_targets <- list(
     site_snapped_gpkg_list,
     lapply(names(site_points_gpkg_list), function(in_country) {
       snap_river_sites(in_sites_path = site_points_gpkg_list[[in_country]], 
-                       in_network_path = network_ssnready_gpkg_list[[in_country]],
+                       in_network_path = network_ssnready_shp_list[[in_country]],
                        custom_proj = F,
                        in_sites_unique_id = 'site',
                        in_network_unique_id = 'UID',
                        in_sites_idcol_tomatch = 'reach_id',
-                       in_network_idcol_tomatch = 'cat_cor',
+                       in_network_idcol_tomatch = 'cat',
                        overwrite = T)
     }) %>% setNames(names(site_points_gpkg_list))
   ),
@@ -334,10 +329,10 @@ preformatting_targets <- list(
     barrier_snapped_gpkg_list,
     lapply(names(barrier_points_gpkg_list), function(in_country) {
       snap_barrier_sites(in_sites_path = barrier_points_gpkg_list[[in_country]], 
-                         in_network_path = network_ssnready_gpkg_list[[in_country]],
+                         in_network_path = network_ssnready_shp_list[[in_country]],
                          out_snapped_sites_path=NULL, 
                          in_sites_idcol = 'GUID',
-                         attri_to_join = c('cat_cor', 'UID'),
+                         attri_to_join = c('cat', 'UID'),
                          custom_proj = F,
                          overwrite = T)
     }) %>% setNames(names(site_points_gpkg_list))
@@ -373,16 +368,22 @@ mapped_hydrotargets <- tarchetypes::tar_map(
     get_drn_hydromod(hydromod_path = hydromod_paths_dt[country==in_country,
                                                        sel_sim_path],
                      varname = in_varname)
-                     #selected_sims = 1:20)
+    #selected_sims = 1:20)
   ),
   
   tar_target(
     hydrostats,
     compute_hydrostats_drn(
-      in_network_path = network_ssnready_gpkg_list[[in_country]],
+      in_network_path = network_ssnready_shp_list[[in_country]],
       in_sites_dt = sites_dt[country == in_country,],
       varname = in_varname,
-      in_hydromod_drn = hydromod_dt)
+      in_hydromod_drn = hydromod_dt,
+      in_network_idcol = 'cat')
+  ),
+  
+  tar_target(
+    hydrostats_sub,
+    subset_hydrostats(hydrostats, in_country = in_country, in_bio_dt = bio_dt)
   )
 )
 
@@ -393,11 +394,12 @@ combined_hydrotargets <- list(
     command = list(!!!.x)
   ),
   tar_combine(
-    hydrostats_comb,
-    mapped_hydrotargets[['hydrostats']],
+    hydrostats_sub_comb,
+    mapped_hydrotargets[['hydrostats_sub']],
     command = list(!!!.x)
   )
 )
+
 
 #Compute local species richness
 analysis_targets <- list(
@@ -416,7 +418,7 @@ analysis_targets <- list(
   ,
   
   tar_target(
-    STcon_directed_list, 
+    STcon_directed_list,
     {
       out_STcon_list <- future_lapply(
         names(preformatted_data_STcon), function(in_country) {
@@ -427,8 +429,8 @@ analysis_targets <- list(
           }) %>% rbindlist %>% unique
           in_dates <- unique_sampling_dates
           
-          window_size_list <- c(10) #, 30, 90, 120, 180, 365) 
-          lapply(window_size_list, function(in_window) { 
+          window_size_list <- c(10, 30, 90, 365) #30, 60, 90, 180, 365
+          lapply(window_size_list, function(in_window) {
             print(in_window)
             if (in_window == 365) {
               in_output <- 'all'
@@ -437,17 +439,17 @@ analysis_targets <- list(
             }
             
             compute_STcon_rolling(
-              in_preformatted_data = preformatted_data_STcon[[in_country]], 
+              in_preformatted_data = preformatted_data_STcon[[in_country]],
               ref = FALSE,
-              in_nsim = hydromod_paths_dt[country == in_country,]$best_sim,
-              in_dates = in_dates, 
-              window = in_window, 
+              #in_nsim = hydromod_paths_dt[country == in_country,]$best_sim,
+              in_dates = in_dates,
+              window = in_window,
               output = in_output,
               direction = 'directed',
               routing_mode = 'in',
               weighting = TRUE,
               rounding_factor = 1)
-          }) %>% setNames(paste0('STcon_m', window_size_list)) #60, 90, 180, 
+          }) %>% setNames(paste0('STcon_m', window_size_list)) #60, 90, 180,
         })
       setNames(out_STcon_list, names(preformatted_data_STcon))
     }
@@ -478,7 +480,7 @@ analysis_targets <- list(
             compute_STcon_rolling(
               in_preformatted_data = preformatted_data_STcon[[in_country]], 
               ref = FALSE,
-              in_nsim = hydromod_paths_dt[country == in_country,]$best_sim,
+              #in_nsim = hydromod_paths_dt[country == in_country,]$best_sim, 
               in_dates = in_dates, 
               window = in_window, 
               output = in_output,
@@ -498,10 +500,10 @@ analysis_targets <- list(
     future_lapply(names(STcon_directed_list), function(in_country) {
       postprocess_STcon(in_STcon = STcon_directed_list[[in_country]],
                         in_net_shp_path = network_ssnready_shp_list[[in_country]],
-                        standardize_STcon = FALSE, in_STcon_ref = NULL) 
+                        standardize_STcon = FALSE, in_STcon_ref = NULL)
     }) %>% setNames(names(STcon_directed_list))
   ),
-
+  
   tar_target(
     STcon_undirected_formatted,
     future_lapply(names(STcon_undirected_list), function(in_country) {
@@ -511,10 +513,20 @@ analysis_targets <- list(
     }) %>% setNames(names(STcon_undirected_list))
   ),
   
+  #Compile hydrostats and connectivity data together as dt
+  tar_target(
+    hydrocon_compiled,
+    lapply(drn_dt$country, function(in_country) {
+      compile_hydrocon_country(hydrostats_sub_comb, STcon_directed_formatted,
+                               STcon_undirected_formatted, ssn_eu, in_country)
+    }) %>% rbindlist 
+  )
+  ,
+  
   #Create Spatial Stream Network (SSN) objects
   tar_target(
     ssn_eu,
-    create_ssn_europe(in_network_path = network_ssnready_gpkg_list,
+    create_ssn_europe(in_network_path = network_ssnready_shp_list,
                       in_sites_path = site_snapped_gpkg_list,
                       in_barriers_path = barrier_snapped_gpkg_list,
                       in_hydromod = hydromod_comb,
@@ -547,15 +559,65 @@ analysis_targets <- list(
     }) %>% 
       rbindlist
   )
-  #,
+  ,
+  
+  tar_target(
+    allvars_merged,
+    merge_allvars_sites(in_spdiv_local = spdiv_local, 
+                        in_spdiv_drn = spdiv_drn,
+                        in_hydrocon_compiled = hydrocon_compiled,
+                        in_env_dt = env_dt)
+  )
+  ,
+  
+  tar_target(
+    relF_bydrn_plot,
+    compare_drn_hydro(in_hydrocon_compiled = hydrocon_compiled, 
+                      in_sites_dt = sites_dt) 
+  )
+  ,
   #
-  # tar_target(
-  #   alphadat_merged,
-  #   merge_alphadat(in_sprich = sprich,
-  #                  in_hydrostats_comb = hydrostats_comb)
-  # )
-  # ,
-  # 
+  #Create matrices of correlations between predictors and responses, and among predictors
+  tar_target(
+    cor_matrices_list,
+    compute_cor_matrix(allvars_merged)
+  )
+  ,
+  
+  #Create correlation heatmaps
+  tar_target(
+    cor_heatmaps,
+    plot_cor_heatmaps(in_cor_matrices = cor_matrices_list, 
+                      in_allvars_merged = allvars_merged,
+                      p_threshold = 0.05)
+  )
+  ,
+  
+  #Check whether richness is related to habitat volumne (for miv and biofilm)
+  #-> No, good
+  tar_target(
+    corplots_div_habvol,
+    check_cor_div_habvol(in_allvars_merged = allvars_merged)
+  )
+  ,
+  
+  #Plot spearman's correlation between hydro metrics by time window 
+  #and site-specific richness and t-minus1 betadiv
+  tar_target(
+    corplots_div_hydrowindow, {
+      hydrovar_list <- c('DurD', 'PDurD', 'FreD', 'PFreD', 
+                    'uQ90', 'oQ10', 'maxPQ', 'PmeanQ',
+                    'STcon.*_directed', 'STcon.*_undirected')
+      lapply(hydrovar_list, function(in_var_substr) {
+        plot_cor_hydrowindow(in_cor_dt = cor_matrices_list$div_bydrn, 
+                             var_substr = in_var_substr, 
+                             plot=T, 
+                             out_dir = resdir)
+      })%>% setNames(hydrovar_list)
+    }
+  )
+
+  
   #   tar_target(
   #     alpha_cor_plots_wrap,
   #     plot_alpha_cor(alphadat_merged,
