@@ -3214,12 +3214,6 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
 # in_STcon_directed <- tar_read(STcon_directed_formatted)
 # in_ssn_eu <- tar_read(ssn_eu)
 
-
-#############################
-# tar_load(spdiv_drn)
-# tar_load(env_dt)
-# tar_load(bio_dt)
-
 merge_allvars_sites <- function(in_sprich, in_hydrostats_comb) {
   in_sites_ssn_dt <- as.data.table(in_ssn_eu$ssn$obs)
   
