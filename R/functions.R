@@ -4004,15 +4004,207 @@ ordinate_local_env <- function(in_allvars_merged) {
   ))
 }
 #------ model_miv_t ------------------------------------------------------------
-# in_allvars_merged <- tar_read(allvars_merged)
-# local_env_pca_all <- ordinate_local_env(in_allvars_merged)
-# in_local_env_pca <- local_env_pca_all$miv_nopools
-# 
-# model_miv_t <- function(in_allvars_merged, in_local_env_pca) {
-#   
-#   
-#   
-# }
+# Regularization: Techniques like LASSO (L1 regularization), Ridge Regression 
+# (L2 regularization), and Elastic Net (a combination) can help prevent overfitting 
+# by penalizing model complexity. glmnet is a great package for this, and it's easily integrated with caret.
+
+in_allvars_merged <- tar_read(allvars_merged)
+local_env_pca_all <- ordinate_local_env(in_allvars_merged)
+in_local_env_pca <- local_env_pca_all$miv_nopools
+in_ssn_eu <- tar_read(ssn_eu)
+
+library(glmulti)
+
+model_miv_t <- function(in_allvars_merged, in_local_env_pca) {
+  #Prepare data
+  allvars_dt <- in_allvars_merged$dt[organism == 'miv_nopools',] %>%
+    merge(in_local_env_pca$dt, by=c('site', 'date', 'country'), all.x=T)
+  
+  hydro_candidates <- setdiff(in_allvars_merged$cols$hydro_con, 
+                              c('doy', 'month', 'hy', 'reach_id', 'qsim', 'UID',
+                                'isflowing', 'reach_length', 'noflow_period',
+                                'noflow_period_dur', 'last_noflowdate', 'PrdD')
+  )
+  
+  #Scale data
+  allvars_dt[
+    , (hydro_candidates) := lapply(.SD, 
+                                   function(x) base::scale(x, center=T, scale=T)),
+    .SDcols = hydro_candidates]
+  
+  #Examine correlations with shannon
+  topcors_overall <- cor_matrices_list$div[
+    variable1 == 'shannon' & organism == 'miv_nopools' & 
+      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+    .[, abs_cor := abs(correlation)] %>%
+    setorder(-abs_cor) 
+  
+  topcors_bydrn <- cor_matrices_list$div_bydrn[
+    variable1 == 'shannon' & organism == 'miv_nopools' & 
+      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+    .[, abs_cor := abs(correlation)] %>%
+    setorder(-abs_cor) 
+  
+  
+  basic_train_mod <- function(in_dt, mod_formula, mod_name, color_var='country') {
+    out_mod <- lmer(formula= as.formula(mod_formula), 
+                    data=in_dt)
+    
+    in_dt[, (paste0('mod_', mod_name)) := predict(out_mod)]
+    out_p <- ggplot(in_dt, aes(x=shannon, y=mod_env2_preds, color=get(color_var))) +
+      geom_point() +
+      geom_smooth(se=F, method='lm') +
+      coord_fixed()
+    
+    print(summary(out_mod))
+    print(out_p)
+    print(paste('AIC:', AIC(out_mod)))
+    print(MuMIn::r.squaredGLMM((out_mod)))
+    
+    return(list(
+      mod = out_mod,
+      summ = summary(out_mod),
+      plot = out_p, 
+      AIC = AIC(out_mod)
+    ))
+    
+  }
+  
+  #1.1. Model Shannon diversity without space x all countries ------------------
+  shannon_miv_nopools_modlist <- list()
+  
+  shannon_miv_nopools_modlist[['null']] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country)',
+    mod_name = 'null')
+  
+  
+  # ggplot(allvars_dt, aes(x=env_PC1, y=shannon)) +
+  #   geom_point(aes(color=country)) +
+  #   geom_smooth(color='black', method='lm') +
+  #   geom_smooth(aes(color=country), se=F, method='lm')
+  
+  shannon_miv_nopools_modlist[['env1']] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1',
+    mod_name = 'env1')
+  
+  shannon_miv_nopools_modlist[['env2_mod']] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1 + env_PC2',
+    mod_name = 'env2')
+  
+
+  shannon_miv_nopools_modlist[['all1_mod'] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past',
+    mod_name = 'all1')
+    
+  shannon_miv_nopools_modlist[['all2_mod'] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1 + env_PC2 + DurD3650past',
+    mod_name = 'all2')
+  
+  shannon_miv_nopools_modlist[['all3_mod'] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + FreD3650past',
+    mod_name = 'all3')
+  
+  shannon_miv_nopools_modlist[['all4_mod'] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + PDurD180past',
+    mod_name = 'all4')
+  
+  shannon_miv_nopools_modlist[['all5_mod'] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + FreD180past',
+    mod_name = 'all5')
+  
+  shannon_miv_nopools_modlist[['all6_mod']] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + FreD180past + oQ10_10past',
+    mod_name = 'all6')
+  
+  shannon_miv_nopools_modlist[['all7_mod']] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + FreD180past + maxPQ_10past',
+    mod_name = 'all7')
+  
+  shannon_miv_nopools_modlist[['all8_mod']] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + FreD180past + relF90past',
+    mod_name = 'all8')
+  
+  shannon_miv_nopools_modlist[['all9_mod']] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + FreD180past + oQ10_10past + relF90past',
+    mod_name = 'all9')
+  
+  shannon_miv_nopools_modlist[['all10_mod']] <- basic_train_mod( #####
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + FreD180past + relF7mean',
+    mod_name = 'all10')
+  
+  shannon_miv_nopools_modlist[['all11_mod']] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past*relF7mean + FreD180past',
+    mod_name = 'all11')
+  
+  shannon_miv_nopools_modlist[['all12_mod']] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + FreD180past + relF7mean + PmeanQ10past',
+    mod_name = 'all12')
+  
+  shannon_miv_nopools_modlist[['all13_mod']] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + FreD180past + relF7mean + STcon_m365_directed',
+    mod_name = 'all13')
+  
+  shannon_miv_nopools_modlist[['all14_mod']] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + relF7mean',
+    mod_name = 'all14')
+  
+  shannon_miv_nopools_modlist[['all15_mod']] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1 + env_PC2 + DurD3650past + relF7mean',
+    mod_name = 'all15')
+  
+  shannon_miv_nopools_modlist[['all16_mod']] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1 + env_PC2 + DurD3650past + relF7mean + country:relF7mean',
+    mod_name = 'all16')
+  
+  #Check distributions of residuals
+  if (length(in_mod$coefficients)>1) {
+    nsp_diag <- gg_diagnose(in_mod)
+  } else {
+    nsp_diag <- NULL
+  }
+  MAE = list(
+    lm = mae(in_mod$model$ddt_to_bdtopo_ddratio_ceind,
+             in_mod$fitted.values)
+  )
+  
+  MAPE = list(
+    lm = mape(in_mod$model$ddt_to_bdtopo_ddratio_ceind,
+              in_mod$fitted.values)
+  )
+  
+  vars_to_try <- sample(hydro_candidates, 5)
+  glmulti_result <- glmulti(shannon ~ .^2, 
+                            maxsize = 2,
+                            data = allvars_dt[, c('shannon',
+                                                  vars_to_try , 
+                                                  paste0('env_PC', seq(1,4))),
+                                              with=F],
+                            crit = "aic", level = 2, fitfunction = "glm",
+                            method='h')
+
+
+
+
+}
 
 ################################################################################
 ################################################################################

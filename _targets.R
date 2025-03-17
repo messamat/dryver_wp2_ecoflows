@@ -356,7 +356,7 @@ preformatting_targets <- list(
     bio_dt,
     read_biodt(path_list = bio_data_paths,
                in_metadata_edna = metadata_edna,
-               include_bacteria = F)
+               include_bacteria = T)
   )
 )
 
