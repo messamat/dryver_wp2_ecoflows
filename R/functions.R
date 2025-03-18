@@ -1241,6 +1241,9 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
   }, path_list, names(path_list)
   )
   
+  #Remove spaces in running id
+  in_metadata_edna[, running_id := gsub(' ', '', running_id)]
+
   #Fill NAs in dates with eDNA metadata if possible
   dt_list$dia_sedi[
     is.na(date),
@@ -1255,10 +1258,12 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
     date := in_metadata_edna[sample_type=='biofilm', .(running_id, date)][
       .SD, on='running_id', x.date]]
   #Replace dates in dia_biof, which seem erroneous
-  dt_list$dia_biof[,
-                   date := in_metadata_edna[sample_type=='biofilm', .(running_id, date)][
-                     .SD, on='running_id', x.date]]
-  
+  dt_list$dia_biof[
+    ,
+    date := in_metadata_edna[sample_type=='biofilm', .(running_id, date)][
+      .SD, on='running_id', x.date]] %>%
+    .[running_id!='GEN04_1', ] #Not in metadata, only for some organisms. Too unsure. Otherwise: use 2021-05-30', Same as GEN02 and GEN07, the closest sites sampled that campaign
+
   #Add Campaign and Site to bacteria data, then remove pool sites
   dt_list$bac_sedi[, c('site', 'campaign') := tstrsplit(v1, '_')] %>%
     setnames('v1', 'running_id') %>%
@@ -1281,11 +1286,14 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
   dt_list$bac_sedi <- merge(dt_list$bac_sedi, 
                             in_metadata_edna[sample_type=='sediment', 
                                              .(running_id, date, habitat, country)],
-                            by='running_id')
+                            by='running_id') %>%
+    .[country == 'Czech Republic', country := 'Czech']
+  
   dt_list$bac_biof <- merge(dt_list$bac_biof,
                             in_metadata_edna[sample_type=='biofilm',
                                              .(running_id, date, habitat, country)],
-                            by='running_id')
+                            by='running_id') %>%
+    .[country == 'Czech Republic', country := 'Czech']
   
   dt_list$bac_biof_nopools <- dt_list$bac_biof %>%
     .[habitat!='pool',] %>%
@@ -1309,7 +1317,7 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
   if (!include_bacteria) {
     dt_list <- dt_list[!grepl('bac_', names(dt_list))]
   }
-  
+
   return(dt_list)
 }
 
@@ -1396,11 +1404,11 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
     #   scale_x_continuous() +
     #   facet_wrap(~country)
     
-    #Compute Shannon Index and inverse Simpson (alpha diversity) by site x time step
+    #Compute invsimpson Index and inverse Simpson (alpha diversity) by site x time step
     sha_simp <- biodt_copy[, list(
       campaign = campaign,
       site = site,
-      shannon = vegan::diversity(as.matrix(.SD), index = "shannon"),
+      invsimpson = vegan::diversity(as.matrix(.SD), index = "invsimpson"),
       invsimpson = vegan::diversity(as.matrix(.SD), index = "invsimpson")
     ), .SDcols = spcols]
     
@@ -2982,166 +2990,6 @@ snap_barrier_sites <- function(in_sites_path,
   return(out_snapped_sites_path) #Path to layer containing site points with attribute data
 }
 
-#------ create_ssn_europe ------------------------------------------------------
-#in_network_path = tar_read(network_ssnready_shp_list)
-# in_sites_path = tar_read(site_snapped_gpkg_list)
-# in_barriers_path = tar_read(barrier_snapped_gpkg_list)
-# in_hydromod = tar_read(hydromod_comb)
-# out_dir = 'results/ssn'
-# out_ssn_name = 'all_drns'
-# overwrite=T
-
-create_ssn_europe <- function(in_network_path,
-                              in_sites_path,
-                              in_barriers_path,
-                              in_hydromod,
-                              out_dir,
-                              out_ssn_name,
-                              overwrite = T) {
-  
-  if (!dir.exists(out_dir)) {
-    dir.create(out_dir)
-  }
-  
-  lsn_path <- file.path(out_dir,
-                        paste0(out_ssn_name, '_lsn')
-  )
-  
-  #Build landscape network (lsn) -----------------------------------------------
-  #Read input network
-  net_eu <- lapply(names(in_network_path), function(in_country) {
-    #print(in_country)
-    net_proj <- in_network_path[[in_country]] %>%
-      st_cast("LINESTRING") %>%
-      #Make sure that the geometry column is equally named regardless 
-      #of file format (see https://github.com/r-spatial/sf/issues/719)
-      st_set_geometry('geometry') %>%
-      st_transform(3035)
-    
-    hydromod_country <- in_hydromod[[
-      paste0('hydromod_dt_', in_country, '_qsim')]]
-    
-    net_hydro <- merge(net_proj,
-                       hydromod_country$data_all[
-                         date < as.Date('2021-10-01', '%Y-%m-%d'),  #Link q data
-                         list(mean_qsim = mean(qsim, na.rm=T)), 
-                         by=reach_id],
-                       by.x = 'cat', by.y = 'reach_id')
-    return(net_hydro)
-  }) %>% do.call(rbind, .)
-  
-  edges_lsn <- SSNbler::lines_to_lsn(
-    streams = net_eu,
-    lsn_path = lsn_path,
-    check_topology = TRUE,
-    snap_tolerance = 0.1,
-    topo_tolerance = 20,
-    overwrite = overwrite
-  )
-  
-  #Incorporate sites into the landscape network --------------------------------
-  sites_eu <- lapply(names(in_sites_path), function(in_country) {
-    st_read(in_sites_path[[in_country]]) %>%
-      st_transform(3035)  
-  }) %>% do.call(rbind, .)
-  
-  sites_lsn <- SSNbler::sites_to_lsn(
-    sites = sites_eu,
-    edges =  edges_lsn,
-    lsn_path = lsn_path,
-    file_name = "sites",
-    snap_tolerance = 5,
-    save_local = TRUE,
-    overwrite = TRUE
-  )
-  
-  sites_list <- list(sites = sites_lsn)
-  
-  #Incorporate barriers into the landscape network
-  #Only keep barriers over 2 m and under 100 m snap from network
-  barriers_eu_sub <- lapply(names(in_barriers_path), function(in_country) {
-    st_read(in_barriers_path[[in_country]]) %>%
-      st_transform(3035) %>%
-      filter((!is.na(Height) & Height > 2) & snap_dist_m < 100)
-  }) %>% do.call(rbind, .)
-  
-  if (nrow(barriers_eu_sub) > 0) {
-    barriers_lsn <- sites_to_lsn(
-      sites = barriers_eu_sub,
-      edges =  edges_lsn,
-      lsn_path = lsn_path,
-      file_name = "barriers",
-      snap_tolerance = 5,
-      save_local = TRUE,
-      overwrite = TRUE
-    )
-    
-    sites_list$barriers <- barriers_lsn
-  }
-  
-  #Calculate upstream distance
-  edges_lsn <- updist_edges(
-    edges =  edges_lsn,
-    save_local = TRUE,
-    lsn_path = lsn_path,
-    calc_length = TRUE
-  )
-  
-  sites_list_lsn <- updist_sites(
-    sites = sites_list,
-    edges = edges_lsn,
-    length_col = "Length",
-    save_local = TRUE,
-    lsn_path = lsn_path
-  )
-  
-  #Compute segment Proportional Influence (PI) and Additive Function Values (AFVs)
-  if (min(net_eu$mean_qsim) > 0) {
-    edges_lsn$mean_qsim_sqrt <- sqrt(edges_lsn$mean_qsim)
-    
-    edges_lsn <- afv_edges(
-      edges = edges_lsn,
-      infl_col = "mean_qsim_sqrt",
-      segpi_col = "pi_qsqrt",
-      afv_col = "afv_qsqrt",
-      lsn_path = lsn_path
-    )
-    
-    sites_list_lsn <- afv_sites(
-      sites = sites_list_lsn,
-      edges = edges_lsn,
-      afv_col = "afv_qsqrt",
-      save_local = TRUE,
-      lsn_path = lsn_path
-    )
-    
-  } else {
-    stop("Trying to use mean discharge to compute Additive Function Values (AFVs),
-         but there are 0s in the discharge column.")
-  }
-  
-  
-  #Assemble the SSN
-  out_ssn_path <- paste0(out_dir, out_ssn_name)
-  
-  out_ssn <- ssn_assemble(
-    edges = edges_lsn,
-    lsn_path = lsn_path,
-    obs_sites = sites_list_lsn$sites,
-    ssn_path = out_ssn_path,
-    import = TRUE,
-    check = TRUE,
-    afv_col = "afv_qsqrt",
-    overwrite = TRUE
-  )
-  
-  return(list(
-    path = out_ssn_path,
-    ssn = out_ssn)
-  )
-}
-
-
 #------ prepare_data_for_STcon ---------------------------------------------------
 # in_country <- in_drn <- 'Croatia'
 # in_hydromod_drn <- tar_read(hydromod_comb)[[paste0(
@@ -3510,6 +3358,302 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
   )
 }
 
+#------ ordinate_local_env ----------------------------------------------------
+#in_allvars_merged <- tar_read(allvars_merged)
+
+ordinate_local_env <- function(in_allvars_merged) {
+  #1. Compute PCA for miv_nopools ----------------------------------------------
+  env_cols_miv <- c('avg_velocity_macroinvertebrates', 'embeddedness',
+                    'bedrock', 'particle_size', 'oxygen_sat', 'filamentous_algae',
+                    'incrusted_algae', 'macrophyte_cover', 'leaf_litter_cover',
+                    'moss_cover', 'wood_cover', 'riparian_cover_in_the_riparian_area',
+                    'shade', 'hydromorphological_alteration', 'm2_biofilm',
+                    'conductivity_micros_cm', 'ph', 'temperature_c')
+  #'oxygen_mg_l'
+  
+  #Convert all columns to numeric (rather than integer)
+  in_allvars_merged$dt[, (env_cols_miv) := lapply(.SD, as.numeric), 
+                       .SDcols = env_cols_miv] 
+  
+  #Fill NAs hierarchically. First by site, then by country, then overall
+  miv_nopools_dt <- fill_nas_hierarchical(
+    dt = in_allvars_merged$dt[organism == 'miv_nopools'], 
+    cols_to_fill = env_cols_miv, 
+    site_col = 'site', 
+    country_col = 'country')
+  
+  #Check distributions by country
+  dt_miv_envmelt <- melt(in_allvars_merged$dt[organism == 'miv',], 
+                         id.vars = c('country', 'site', 'campaign'),
+                         measure.vars = env_cols_miv)
+  # ggplot(dt_miv_envmelt, #[variable=='conductivity_micros_cm',],
+  #        aes(x=country, y=value, color=country)) +
+  #   geom_jitter() + 
+  #   facet_wrap(~variable, scales='free_y') +
+  #   scale_y_sqrt()
+  # 
+  # ggplot(dt_miv_envmelt, aes(x=value)) +
+  #   geom_density() + 
+  #   facet_wrap(~variable, scales='free')
+  
+  out_list_miv <- trans_pca_wrapper(in_dt = miv_nopools_dt, 
+                                    in_cols_to_ordinate = env_cols_miv, 
+                                    id_cols = c('site', 'date', 'country'), 
+                                    group_cols = NULL, 
+                                    num_pca_axes = 4)
+  
+  # out_list_miv_country <- trans_pca_wrapper(in_dt = miv_nopools_dt, 
+  #                                           in_cols_to_ordinate = env_cols_miv, 
+  #                                           id_cols = c('site', 'date'), 
+  #                                           group_cols = 'country', 
+  #                                           num_pca_axes = 4)
+  
+  #2. Compute PCA for eDNA data ------------------------------------------------
+  edna_orglist <- c('dia_sedi', 'dia_biof', 
+                    'fun_sedi', 'fun_biof', 
+                    'bac_sedi_nopools', 'bac_biof_nopools')
+  
+  env_cols_edna <- c('filamentous_algae', 'incrusted_algae', 
+                     'macrophyte_cover', 'leaf_litter_cover','moss_cover', 
+                     'wood_cover', 'riparian_cover_in_the_riparian_area',
+                     'shade', 'm2_biofilm', 'conductivity_micros_cm',
+                     'oxygen_sat', 'ph','temperature_c')
+  
+  #Convert all columns to numeric (rather than integer)
+  in_allvars_merged$dt[, (env_cols_edna) := lapply(.SD, as.numeric), 
+                       .SDcols = env_cols_edna]
+  
+  #Check distributions by country
+  dt_edna_envmelt <- unique(in_allvars_merged$dt[organism %in% edna_orglist,],
+                            by=c('site', 'date')) %>%
+    melt(id.vars = c('country', 'site', 'campaign', 'organism'),
+         measure.vars = env_cols_edna)
+  # ggplot(dt_edna_envmelt, #[variable=='conductivity_micros_cm',],
+  #        aes(x=country, y=value, color=country)) +
+  #   geom_jitter() + 
+  #   facet_grid(organism~variable, scales='free_y') +
+  #   scale_y_log10()
+  # 
+  # ggplot(dt_edna_envmelt, aes(x=value)) +
+  #   geom_density() + 
+  #   facet_wrap(~variable, scales='free')
+  
+  #Fill NAs hierarchically. First by site, then by country, then overall
+  #this gives the average conditions when there is flow to dry samples. 
+  #will need to think about how to use this
+  edna_dt <- unique(in_allvars_merged$dt[organism %in% edna_orglist,],
+                    by=c('site', 'date')) %>%
+    .[, c('country', 'site', 'date', env_cols_edna), with=F] %>%
+    fill_nas_hierarchical(cols_to_fill = env_cols_edna, 
+                          site_col = 'site', 
+                          country_col = 'country') 
+  
+  out_list_edna <- trans_pca_wrapper(in_dt = edna_dt, 
+                                     in_cols_to_ordinate = env_cols_edna, 
+                                     id_cols = c('site', 'date', 'country'), 
+                                     group_cols = NULL, 
+                                     num_pca_axes = 4)
+  
+  #Merge dts
+  out_dt_miv <- merge(
+    in_allvars_merged$dt[organism == 'miv_nopools',
+                         .(site, date, country, organism)],
+    out_list_miv$dt)
+  
+  out_dt_edna <- merge(
+    in_allvars_merged$dt[organism %in% edna_orglist,
+                         .(site, date, country, organism)],
+    out_list_edna$dt)
+  
+
+  out_dt <- rbind(out_dt_miv, out_dt_edna)
+
+  return(list(
+    miv_nopools = out_list_miv,
+    edna = out_list_edna,
+    dt_all = out_dt
+  ))
+}
+#------ create_ssn_europe ------------------------------------------------------
+# in_network_path = tar_read(network_ssnready_shp_list)
+# in_sites_path = tar_read(site_snapped_gpkg_list)
+# in_barriers_path = tar_read(barrier_snapped_gpkg_list)
+# in_allvars_merged = tar_read(allvars_merged)
+# in_local_env_pca = ordinate_local_env(in_allvars_merged)
+# in_hydromod = tar_read(hydromod_comb)
+# out_dir = 'results/ssn'
+# out_ssn_name = 'all_drns'
+# overwrite=T
+
+create_ssn_europe <- function(in_network_path,
+                              in_sites_path,
+                              in_allvars_merged,
+                              in_barriers_path,
+                              in_hydromod,
+                              out_dir,
+                              out_ssn_name,
+                              overwrite = T) {
+  
+  if (!dir.exists(out_dir)) {
+    dir.create(out_dir)
+  }
+  
+  lsn_path <- file.path(out_dir,
+                        paste0(out_ssn_name, '_lsn')
+  )
+  
+  #Build landscape network (lsn) -----------------------------------------------
+  #Read input network
+  net_eu <- lapply(names(in_network_path), function(in_country) {
+    #print(in_country)
+    net_proj <- in_network_path[[in_country]] %>%
+      st_cast("LINESTRING") %>%
+      #Make sure that the geometry column is equally named regardless 
+      #of file format (see https://github.com/r-spatial/sf/issues/719)
+      st_set_geometry('geometry') %>%
+      st_transform(3035)
+    
+    hydromod_country <- in_hydromod[[
+      paste0('hydromod_dt_', in_country, '_qsim')]]
+    
+    net_hydro <- merge(net_proj,
+                       hydromod_country$data_all[
+                         date < as.Date('2021-10-01', '%Y-%m-%d'),  #Link q data
+                         list(mean_qsim = mean(qsim, na.rm=T)), 
+                         by=reach_id],
+                       by.x = 'cat', by.y = 'reach_id')
+    return(net_hydro)
+  }) %>% do.call(rbind, .)
+  
+  edges_lsn <- SSNbler::lines_to_lsn(
+    streams = net_eu,
+    lsn_path = lsn_path,
+    check_topology = TRUE,
+    snap_tolerance = 0.1,
+    topo_tolerance = 20,
+    overwrite = overwrite
+  )
+  
+  #Incorporate sites into the landscape network --------------------------------
+  sites_eu <- lapply(names(in_sites_path), function(in_country) {
+    st_read(in_sites_path[[in_country]]) %>%
+      st_transform(3035)  
+  }) %>% 
+    do.call(rbind, .) %>%
+    rename(country=country_sub)
+  
+  sites_lsn <- SSNbler::sites_to_lsn(
+    sites = sites_eu,
+    edges =  edges_lsn,
+    lsn_path = lsn_path,
+    file_name = "sites",
+    snap_tolerance = 5,
+    save_local = TRUE,
+    overwrite = TRUE
+  )
+  
+  setDT(in_allvars_merged$dt)[country == 'Czech Republic', country := 'Czech']
+  sites_lsn_attri <- merge(sites_lsn,
+                          in_allvars_merged$dt, 
+                          by=c('country', 'site')) %>%
+    merge(in_local_env_pca$dt_all,
+          by=c('site', 'date', 'country', 'organism'))
+  
+  sites_list <- list(sites = sites_lsn_attri)
+  
+  #Incorporate barriers into the landscape network
+  #Only keep barriers over 2 m and under 100 m snap from network
+  barriers_eu_sub <- lapply(names(in_barriers_path), function(in_country) {
+    st_read(in_barriers_path[[in_country]]) %>%
+      st_transform(3035) %>%
+      filter((!is.na(Height) & Height > 2) & snap_dist_m < 100)
+  }) %>% do.call(rbind, .)
+  
+  if (nrow(barriers_eu_sub) > 0) {
+    barriers_lsn <- sites_to_lsn(
+      sites = barriers_eu_sub,
+      edges =  edges_lsn,
+      lsn_path = lsn_path,
+      file_name = "barriers",
+      snap_tolerance = 5,
+      save_local = TRUE,
+      overwrite = TRUE
+    )
+    
+    sites_list$barriers <- barriers_lsn
+  }
+  
+  #Calculate upstream distance
+  edges_lsn <- updist_edges(
+    edges =  edges_lsn,
+    save_local = TRUE,
+    lsn_path = lsn_path,
+    calc_length = TRUE
+  )
+  
+  sites_list_lsn <- updist_sites(
+    sites = sites_list,
+    edges = edges_lsn,
+    length_col = "Length",
+    save_local = TRUE,
+    lsn_path = lsn_path
+  )
+  
+  #Compute segment Proportional Influence (PI) and Additive Function Values (AFVs)
+  if (min(net_eu$mean_qsim) > 0) {
+    edges_lsn$mean_qsim_sqrt <- sqrt(edges_lsn$mean_qsim)
+    
+    edges_lsn <- afv_edges(
+      edges = edges_lsn,
+      infl_col = "mean_qsim_sqrt",
+      segpi_col = "pi_qsqrt",
+      afv_col = "afv_qsqrt",
+      lsn_path = lsn_path
+    )
+    
+    sites_list_lsn <- afv_sites(
+      sites = sites_list_lsn,
+      edges = edges_lsn,
+      afv_col = "afv_qsqrt",
+      save_local = TRUE,
+      lsn_path = lsn_path
+    )
+    
+  } else {
+    stop("Trying to use mean discharge to compute Additive Function Values (AFVs),
+         but there are 0s in the discharge column.")
+  }
+  
+  
+  #Assemble an SSN for each organism 
+  #(so that it only includes data for the  correpsonding sites and dates)
+ 
+  
+  out_ssn_list <- lapply(unique(sites_list_lsn$sites$organism), function(in_org) {
+    out_ssn_path <- paste0(out_dir, '_', out_ssn_name, '_', in_org, '.ssn')
+    
+    out_ssn <- ssn_assemble(
+      edges = edges_lsn,
+      lsn_path = lsn_path,
+      obs_sites = sites_list_lsn$sites[sites_list_lsn$sites$organism == in_org,],
+      ssn_path = out_ssn_path,
+      import = TRUE,
+      check = TRUE,
+      afv_col = "afv_qsqrt",
+      overwrite = TRUE
+    )
+    
+    return(list(
+      path = out_ssn_path,
+      ssn = out_ssn
+    ))
+  }) %>% setNames(unique(sites_list_lsn$sites$organism))
+  
+  return(out_ssn_list)
+}
+
+
+
 #------ compute_cor_matrix -----------------------------------------------------
 #in_allvars_merged <- tar_read(allvars_merged)
 compute_cor_matrix <- function(in_allvars_merged) {
@@ -3844,7 +3988,7 @@ check_cor_div_habvol <- function(in_allvars_merged) {
 plot_cor_hydrowindow <-  function(in_cor_dt, var_substr, plot=T, out_dir) {
   sub_dt <- in_cor_dt[grep(paste0('^', var_substr), variable2),] %>%
     .[organism != 'miv',] %>%
-    .[(variable1 %in% c('shannon','Jtm1')),] 
+    .[(variable1 %in% c('invsimpson','Jtm1')),] 
   
   sub_dt[, window_d := str_extract(variable2,
                                    '([0-9]+(?=past))|((?<=m)[0-9]+)')] %>%
@@ -3884,7 +4028,7 @@ plot_cor_hydrowindow <-  function(in_cor_dt, var_substr, plot=T, out_dir) {
 plot_hydro_comparison <- function() {
   sub_dt_compare <- in_cor_dt[grep(var_substr, variable2),] %>%
     .[organism %in% org_list,] %>%
-    .[(variable1 %in% c('shannon','Jtm1')),] 
+    .[(variable1 %in% c('invsimpson','Jtm1')),] 
   
   sub_dt_compare[, window_d := str_extract(variable2, '[0-9]+')] %>%
     .[, window_d := factor(window_d, levels=sort(unique(as.integer(window_d))))]
@@ -3904,126 +4048,49 @@ plot_hydro_comparison <- function() {
 
 
 
-#------ ordinate_local_env ----------------------------------------------------
-ordinate_local_env <- function(in_allvars_merged) {
-  #1. Compute PCA for miv_nopools ----------------------------------------------
-  env_cols_miv <- c('avg_velocity_macroinvertebrates', 'embeddedness',
-                    'bedrock', 'particle_size', 'oxygen_sat', 'filamentous_algae',
-                    'incrusted_algae', 'macrophyte_cover', 'leaf_litter_cover',
-                    'moss_cover', 'wood_cover', 'riparian_cover_in_the_riparian_area',
-                    'shade', 'hydromorphological_alteration', 'm2_biofilm',
-                    'conductivity_micros_cm', 'ph', 'temperature_c')
-  #'oxygen_mg_l'
-  
-  #Convert all columns to numeric (rather than integer)
-  in_allvars_merged$dt[, (env_cols_miv) := lapply(.SD, as.numeric), 
-                       .SDcols = env_cols_miv] 
-  
-  #Fill NAs hierarchically. First by site, then by country, then overall
-  miv_nopools_dt <- fill_nas_hierarchical(
-    dt = in_allvars_merged$dt[organism == 'miv_nopools'], 
-    cols_to_fill = env_cols_miv, 
-    site_col = 'site', 
-    country_col = 'country')
-  
-  #Check distributions by country
-  dt_miv_envmelt <- melt(in_allvars_merged$dt[organism == 'miv',], 
-                         id.vars = c('country', 'site', 'campaign'),
-                         measure.vars = env_cols_miv)
-  # ggplot(dt_miv_envmelt, #[variable=='conductivity_micros_cm',],
-  #        aes(x=country, y=value, color=country)) +
-  #   geom_jitter() + 
-  #   facet_wrap(~variable, scales='free_y') +
-  #   scale_y_sqrt()
-  # 
-  # ggplot(dt_miv_envmelt, aes(x=value)) +
-  #   geom_density() + 
-  #   facet_wrap(~variable, scales='free')
-  
-  out_list_miv <- trans_pca_wrapper(in_dt = miv_nopools_dt, 
-                                    in_cols_to_ordinate = env_cols_miv, 
-                                    id_cols = c('site', 'date', 'country'), 
-                                    group_cols = NULL, 
-                                    num_pca_axes = 4)
-  
-  # out_list_miv_country <- trans_pca_wrapper(in_dt = miv_nopools_dt, 
-  #                                           in_cols_to_ordinate = env_cols_miv, 
-  #                                           id_cols = c('site', 'date'), 
-  #                                           group_cols = 'country', 
-  #                                           num_pca_axes = 4)
-  
-  #2. Compute PCA for eDNA data ------------------------------------------------
-  edna_orglist <- c('dia_sedi', 'dia_biof', 
-                    'fun_sedi', 'fun_biof', 
-                    'bac_sedi', 'bac_biof')
-  
-  env_cols_edna <- c('filamentous_algae', 'incrusted_algae', 
-                     'macrophyte_cover', 'leaf_litter_cover','moss_cover', 
-                     'wood_cover', 'riparian_cover_in_the_riparian_area',
-                     'shade', 'm2_biofilm', 'conductivity_micros_cm',
-                     'oxygen_sat', 'ph','temperature_c')
-  
-  #Convert all columns to numeric (rather than integer)
-  in_allvars_merged$dt[, (env_cols_edna) := lapply(.SD, as.numeric), 
-                       .SDcols = env_cols_edna]
-  
-  #Check distributions by country
-  dt_edna_envmelt <- unique(in_allvars_merged$dt[organism %in% edna_orglist,],
-                            by=c('site', 'date')) %>%
-    melt(id.vars = c('country', 'site', 'campaign', 'organism'),
-         measure.vars = env_cols_edna)
-  ggplot(dt_edna_envmelt, #[variable=='conductivity_micros_cm',],
-         aes(x=country, y=value, color=country)) +
-    geom_jitter() + 
-    facet_grid(organism~variable, scales='free_y') +
-    scale_y_log10()
-  
-  ggplot(dt_edna_envmelt, aes(x=value)) +
-    geom_density() + 
-    facet_wrap(~variable, scales='free')
-  
-  #Fill NAs hierarchically. First by site, then by country, then overall
-  #this gives the average conditions when there is flow to dry samples. 
-  #will need to think about how to use this
-  edna_dt <- unique(in_allvars_merged$dt[organism %in% edna_orglist,],
-                    by=c('site', 'date')) %>%
-    .[, c('country', 'site', 'date', env_cols_edna), with=F] %>%
-    fill_nas_hierarchical(cols_to_fill = env_cols_edna, 
-                          site_col = 'site', 
-                          country_col = 'country') 
-  
-  out_list_edna <- trans_pca_wrapper(in_dt = edna_dt, 
-                                     in_cols_to_ordinate = env_cols_edna, 
-                                     id_cols = c('site', 'date', 'country'), 
-                                     group_cols = NULL, 
-                                     num_pca_axes = 4)
-  
-  return(list(
-    miv_nopools = out_list_miv,
-    edna = out_list_edna
-  ))
-}
+
 #------ model_miv_t ------------------------------------------------------------
 # Regularization: Techniques like LASSO (L1 regularization), Ridge Regression 
 # (L2 regularization), and Elastic Net (a combination) can help prevent overfitting 
 # by penalizing model complexity. glmnet is a great package for this, and it's easily integrated with caret.
 
-in_allvars_merged <- tar_read(allvars_merged)
-local_env_pca_all <- ordinate_local_env(in_allvars_merged)
-in_local_env_pca <- local_env_pca_all$miv_nopools
-in_ssn_eu <- tar_read(ssn_eu)
+# in_allvars_merged <- tar_read(allvars_merged)
+# local_env_pca_all <- ordinate_local_env(in_allvars_merged)
+# in_local_env_pca <- local_env_pca_all$miv_nopools
+# in_ssn_eu <- tar_read(ssn_eu)
+# in_cor_matrices <- tar_read(cor_matrices_list)
+# library(glmulti)
+# 
+# in_network_path = tar_read(network_ssnready_shp_list)
+# in_sites_path = tar_read(site_snapped_gpkg_list)
+# in_barriers_path = tar_read(barrier_snapped_gpkg_list)
+# in_allvars_merged = tar_read(allvars_merged)
+# in_local_env_pca = ordinate_local_env(in_allvars_merged)
+# in_hydromod = tar_read(hydromod_comb)
+# out_dir = 'results/ssn'
+# out_ssn_name = 'all_drns'
+# overwrite=T
+# 
+# in_ssn_eu <- create_ssn_europe(in_network_path,
+#                   in_sites_path,
+#                   in_allvars_merged,
+#                   in_barriers_path,
+#                   in_hydromod,
+#                   out_dir,
+#                   out_ssn_name,
+#                   overwrite = T)
 
-library(glmulti)
-
-model_miv_t <- function(in_allvars_merged, in_local_env_pca) {
+model_miv_t <- function(in_allvars_merged, in_local_env_pca, in_cor_matrices) {
   #Prepare data
   allvars_dt <- in_allvars_merged$dt[organism == 'miv_nopools',] %>%
     merge(in_local_env_pca$dt, by=c('site', 'date', 'country'), all.x=T)
   
-  hydro_candidates <- setdiff(in_allvars_merged$cols$hydro_con, 
-                              c('doy', 'month', 'hy', 'reach_id', 'qsim', 'UID',
-                                'isflowing', 'reach_length', 'noflow_period',
-                                'noflow_period_dur', 'last_noflowdate', 'PrdD')
+  hydro_candidates <- setdiff(
+    in_allvars_merged$cols$hydro_con, 
+    c('doy', 'month', 'hy', 'reach_id', 'qsim', 'UID',
+      'isflowing', 'reach_length', 'noflow_period',
+      'noflow_period_dur', 'last_noflowdate', 'PrdD',
+      grep('^meanQ', in_allvars_merged$cols$hydro_con, value=T))
   )
   
   #Scale data
@@ -4032,26 +4099,16 @@ model_miv_t <- function(in_allvars_merged, in_local_env_pca) {
                                    function(x) base::scale(x, center=T, scale=T)),
     .SDcols = hydro_candidates]
   
-  #Examine correlations with shannon
-  topcors_overall <- cor_matrices_list$div[
-    variable1 == 'shannon' & organism == 'miv_nopools' & 
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor) 
-  
-  topcors_bydrn <- cor_matrices_list$div_bydrn[
-    variable1 == 'shannon' & organism == 'miv_nopools' & 
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor) 
-  
-  
+
   basic_train_mod <- function(in_dt, mod_formula, mod_name, color_var='country') {
     out_mod <- lmer(formula= as.formula(mod_formula), 
                     data=in_dt)
     
-    in_dt[, (paste0('mod_', mod_name)) := predict(out_mod)]
-    out_p <- ggplot(in_dt, aes(x=shannon, y=mod_env2_preds, color=get(color_var))) +
+    in_dt[, (paste0('mod_', mod_name, '_pred')) := predict(out_mod)]
+    out_p <- ggplot(in_dt, 
+                    aes(x=invsimpson, 
+                        y=get(paste0('mod_', mod_name, '_pred')), 
+                        color=get(color_var))) +
       geom_point() +
       geom_smooth(se=F, method='lm') +
       coord_fixed()
@@ -4070,115 +4127,188 @@ model_miv_t <- function(in_allvars_merged, in_local_env_pca) {
     
   }
   
-  #1.1. Model Shannon diversity without space x all countries ------------------
-  shannon_miv_nopools_modlist <- list()
+  #1.1. Model invsimpson diversity without space x all countries ------------------
+  #Examine correlations with invsimpson
+  topcors_overall <- in_cor_matrices$div[
+    variable1 == 'invsimpson' & organism == 'miv_nopools' & 
+      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+    .[, abs_cor := abs(correlation)] %>%
+    setorder(-abs_cor) 
   
-  shannon_miv_nopools_modlist[['null']] <- basic_train_mod(
+  topcors_bydrn <- in_cor_matrices$div_bydrn[
+    variable1 == 'invsimpson' & organism == 'miv_nopools' & 
+      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+             var_label = paste(variable2, round(correlation, 2))
+    ), by=country] %>%
+    dcast(cor_order~country, value.var = 'var_label', fill=NA)
+  
+  invsimpson_miv_nopools_modlist <- list()
+  
+  
+  # To test:
+  # DurD3650past, FreD3650past, DurD365past, DurD180past, FreD365past, FreD180past,
+  # PDurD180past, PFreD180past, relF90past, maxPQ_30past, oQ10_10past, maxPQ_365past, 
+  # oQ10_90past, relF1825past, PmeanQ10past, relF60past, relF7mean
+  
+  invsimpson_miv_nopools_modlist[['null']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country)',
+    mod_formula='invsimpson ~ (1|country)',
     mod_name = 'null')
   
-  
-  # ggplot(allvars_dt, aes(x=env_PC1, y=shannon)) +
+  # ggplot(allvars_dt, aes(x=env_PC1, y=invsimpson)) +
   #   geom_point(aes(color=country)) +
   #   geom_smooth(color='black', method='lm') +
   #   geom_smooth(aes(color=country), se=F, method='lm')
   
-  shannon_miv_nopools_modlist[['env1']] <- basic_train_mod(
+  invsimpson_miv_nopools_modlist[['env1']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1',
+    mod_formula='invsimpson ~ (1|country) + env_PC1',
     mod_name = 'env1')
+
   
-  shannon_miv_nopools_modlist[['env2_mod']] <- basic_train_mod(
+  invsimpson_miv_nopools_modlist[['env2_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1 + env_PC2',
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + env_PC2',
     mod_name = 'env2')
   
 
-  shannon_miv_nopools_modlist[['all1_mod'] <- basic_train_mod(
+  invsimpson_miv_nopools_modlist[['all1_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past',
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past',
     mod_name = 'all1')
-    
-  shannon_miv_nopools_modlist[['all2_mod'] <- basic_train_mod(
+  
+  invsimpson_miv_nopools_modlist[['all2_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1 + env_PC2 + DurD3650past',
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + env_PC2 + DurD3650past',
     mod_name = 'all2')
   
-  shannon_miv_nopools_modlist[['all3_mod'] <- basic_train_mod(
+
+  invsimpson_miv_nopools_modlist[['all3_mod']] <- basic_train_mod( ########
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + FreD3650past',
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + FreD3650past',
     mod_name = 'all3')
   
-  shannon_miv_nopools_modlist[['all4_mod'] <- basic_train_mod(
+  invsimpson_miv_nopools_modlist[['all4_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + PDurD180past',
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + DurD365past',
     mod_name = 'all4')
   
-  shannon_miv_nopools_modlist[['all5_mod'] <- basic_train_mod(
+  invsimpson_miv_nopools_modlist[['all5_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + FreD180past',
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + DurD180past',
     mod_name = 'all5')
   
-  shannon_miv_nopools_modlist[['all6_mod']] <- basic_train_mod(
+  invsimpson_miv_nopools_modlist[['all6_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + FreD180past + oQ10_10past',
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + FreD365past',
     mod_name = 'all6')
   
-  shannon_miv_nopools_modlist[['all7_mod']] <- basic_train_mod(
+  invsimpson_miv_nopools_modlist[['all7_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + FreD180past + maxPQ_10past',
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + FreD180past',
     mod_name = 'all7')
   
-  shannon_miv_nopools_modlist[['all8_mod']] <- basic_train_mod(
+  invsimpson_miv_nopools_modlist[['all8_mod']] <- basic_train_mod( #########
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + FreD180past + relF90past',
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + relF90past',
     mod_name = 'all8')
   
-  shannon_miv_nopools_modlist[['all9_mod']] <- basic_train_mod(
+  invsimpson_miv_nopools_modlist[['all9_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + FreD180past + oQ10_10past + relF90past',
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + maxPQ_30past',
     mod_name = 'all9')
   
-  shannon_miv_nopools_modlist[['all10_mod']] <- basic_train_mod( #####
+  invsimpson_miv_nopools_modlist[['all10_mod']] <- basic_train_mod( 
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + FreD180past + relF7mean',
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + oQ10_10past',
     mod_name = 'all10')
   
-  shannon_miv_nopools_modlist[['all11_mod']] <- basic_train_mod(
+  invsimpson_miv_nopools_modlist[['all11_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past*relF7mean + FreD180past',
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + maxPQ_365past',
     mod_name = 'all11')
   
-  shannon_miv_nopools_modlist[['all12_mod']] <- basic_train_mod(
+  invsimpson_miv_nopools_modlist[['all12_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + FreD180past + relF7mean + PmeanQ10past',
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + oQ10_90past',
     mod_name = 'all12')
   
-  shannon_miv_nopools_modlist[['all13_mod']] <- basic_train_mod(
+  invsimpson_miv_nopools_modlist[['all13_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + FreD180past + relF7mean + STcon_m365_directed',
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + relF1825past',
     mod_name = 'all13')
   
-  shannon_miv_nopools_modlist[['all14_mod']] <- basic_train_mod(
+  invsimpson_miv_nopools_modlist[['all14_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1 + DurD3650past + relF7mean',
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + PmeanQ10past',
     mod_name = 'all14')
   
-  shannon_miv_nopools_modlist[['all15_mod']] <- basic_train_mod(
+  invsimpson_miv_nopools_modlist[['all15_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1 + env_PC2 + DurD3650past + relF7mean',
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + relF60past',
     mod_name = 'all15')
   
-  shannon_miv_nopools_modlist[['all16_mod']] <- basic_train_mod(
+  invsimpson_miv_nopools_modlist[['all16_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1 + env_PC2 + DurD3650past + relF7mean + country:relF7mean',
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + relF10past',
     mod_name = 'all16')
   
-  shannon_miv_nopools_modlist[['all17_mod']] <- basic_train_mod(
+  invsimpson_miv_nopools_modlist[['all17_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='shannon ~ (1|country) + env_PC1 + env_PC2 + PDurD3650past + relF365past',
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + env_PC2 +DurD3650past + relF10past',
     mod_name = 'all17')
+  
+  invsimpson_miv_nopools_modlist[['all18_mod']] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + env_PC2 + DurD3650past + relF10past + relF10past:country',
+    mod_name = 'all18')
+  
+  invsimpson_miv_nopools_modlist[['all19_mod']] <- basic_train_mod( 
+    in_dt=allvars_dt,
+    mod_formula='invsimpson ~ (1|country) + env_PC1 + env_PC2 + (DurD3650past|country) + relF10past',
+    mod_name = 'all19')
+  residplot(invsimpson_miv_nopools_modlist[['all19_mod']]$mod)
+  
+  ########
+  invsimpson_miv_nopools_modlist[['all20_mod']] <- basic_train_mod( 
+    in_dt=allvars_dt,
+    mod_formula= 'invsimpson ~ (1|country) + env_PC1 + env_PC2 + DurD3650past*country + relF10past',
+    mod_name = 'all20')
+  residplot(invsimpson_miv_nopools_modlist[['all20_mod']]$mod)
+  sjPlot::plot_model(invsimpson_miv_nopools_modlist[['all20_mod']]$mod,
+                     type = "pred", terms=c('DurD3650past', 'country'))
+  
+  #1.2. Model invsimpson diversity with space x all countries-------------------
+  ssn_miv <- ssn_subset(in_ssn_eu$ssn, 
+                        path = file.path(dirname(in_ssn_eu$path), 
+                                         'ssnall_drns_miv'), 
+                        subset = organism == 'miv_nopools')
+  tg_invsimpson <- Torgegram(
+    formula = invsimpson ~ (1|country) + env_PC1 + env_PC2 + DurD3650past*country + relF10past,
+    ssn.object = in_ssn_eu,
+    type = c("flowcon", "flowuncon", "euclid")
+  )
+  
+  
+  #2.1. Model Tmj1 diversity without space x all countries ------------------
+  #Examine correlations with invsimpson
+  topcors_overall_Jtm1 <- in_cor_matrices$div[
+    variable1 == 'Jtm1' & organism == 'miv_nopools' & 
+      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+    .[, abs_cor := abs(correlation)] %>%
+    setorder(-abs_cor) 
+  
+  topcors_bydrn_Jtm1 <- in_cor_matrices$div_bydrn[
+    variable1 == 'invsimpson' & organism == 'miv_nopools' & 
+      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+             var_label = paste(variable2, round(correlation, 2))
+    ), by=country] %>%
+    dcast(cor_order~country, value.var = 'var_label', fill=NA)
+  
+  invsimpson_miv_nopools_modlist <- list()
+  
   
   
   
@@ -4199,9 +4329,9 @@ model_miv_t <- function(in_allvars_merged, in_local_env_pca) {
   )
   
   vars_to_try <- sample(hydro_candidates, 5)
-  glmulti_result <- glmulti(shannon ~ .^2, 
+  glmulti_result <- glmulti(invsimpson ~ .^2, 
                             maxsize = 2,
-                            data = allvars_dt[, c('shannon',
+                            data = allvars_dt[, c('invsimpson',
                                                   vars_to_try , 
                                                   paste0('env_PC', seq(1,4))),
                                               with=F],
