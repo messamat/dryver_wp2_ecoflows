@@ -4175,6 +4175,13 @@ model_miv_t <- function(in_allvars_merged, in_local_env_pca) {
     mod_formula='shannon ~ (1|country) + env_PC1 + env_PC2 + DurD3650past + relF7mean + country:relF7mean',
     mod_name = 'all16')
   
+  shannon_miv_nopools_modlist[['all17_mod']] <- basic_train_mod(
+    in_dt=allvars_dt,
+    mod_formula='shannon ~ (1|country) + env_PC1 + env_PC2 + PDurD3650past + relF365past',
+    mod_name = 'all17')
+  
+  
+  
   #Check distributions of residuals
   if (length(in_mod$coefficients)>1) {
     nsp_diag <- gg_diagnose(in_mod)
