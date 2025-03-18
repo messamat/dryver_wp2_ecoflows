@@ -3627,8 +3627,6 @@ create_ssn_europe <- function(in_network_path,
   
   #Assemble an SSN for each organism 
   #(so that it only includes data for the  correpsonding sites and dates)
- 
-  
   out_ssn_list <- lapply(unique(sites_list_lsn$sites$organism), function(in_org) {
     out_ssn_path <- paste0(out_dir, '_', out_ssn_name, '_', in_org, '.ssn')
     
@@ -4099,7 +4097,11 @@ model_miv_t <- function(in_allvars_merged, in_local_env_pca, in_cor_matrices) {
                                    function(x) base::scale(x, center=T, scale=T)),
     .SDcols = hydro_candidates]
   
-
+  #Subset SSN and create distance matrices
+  ssn_miv <- in_ssn_eu$miv_nopools$ssn
+  SSN2::ssn_create_distmat(ssn_miv)
+  
+  #Scale data
   basic_train_mod <- function(in_dt, mod_formula, mod_name, color_var='country') {
     out_mod <- lmer(formula= as.formula(mod_formula), 
                     data=in_dt)
@@ -4280,15 +4282,54 @@ model_miv_t <- function(in_allvars_merged, in_local_env_pca, in_cor_matrices) {
                      type = "pred", terms=c('DurD3650past', 'country'))
   
   #1.2. Model invsimpson diversity with space x all countries-------------------
-  ssn_miv <- ssn_subset(in_ssn_eu$ssn, 
-                        path = file.path(dirname(in_ssn_eu$path), 
-                                         'ssnall_drns_miv'), 
-                        subset = organism == 'miv_nopools')
-  tg_invsimpson <- Torgegram(
-    formula = invsimpson ~ (1|country) + env_PC1 + env_PC2 + DurD3650past*country + relF10past,
-    ssn.object = in_ssn_eu,
-    type = c("flowcon", "flowuncon", "euclid")
+  #Examine Torgegram ------
+  #describes how the semivariance (i.e. halved average squared difference) 
+  #between observations or residuals from the model change
+  #with hydrologic or Euclidean distances 
+  tg_miv_invsimpson_null <- Torgegram(
+    formula = invsimpson ~ country,
+    ssn.object = ssn_miv,
+    type = c("flowcon", "flowuncon", "euclid"),
+    bins = 15,
+    cutoff = 40000,
+    partition_factor = ~ as.factor(campaign)
+  ) %>%
+    rbindlist(idcol = 'dist_type')
+  
+  ggplot(tg_miv_invsimpson_null, aes(x=dist, y=gamma, color=dist_type)) +
+    geom_point(aes(size=np)) +
+    geom_smooth(span=1, method='lm', se=F) +
+    scale_x_log10() +
+    facet_wrap(~dist_type, scales='free')
+  
+  tg_miv_invsimpson_mod20 <- Torgegram(
+    formula = invsimpson ~ env_PC1 + env_PC2 + DurD3650past*country + relF10past,
+    ssn.object = ssn_miv,
+    type = c("flowcon", "flowuncon", "euclid"),
+    bins = 15,
+    cutoff = 40000,
+    partition_factor = ~ country
+  ) %>%
+    rbindlist(idcol = 'dist_type')
+  
+  ggplot(tg_miv_invsimpson_mod20, aes(x=dist, y=gamma, color=dist_type)) +
+    geom_point(aes(size=np)) +
+    geom_smooth(span=1, method='lm', se=F) +
+    scale_x_log10() +
+    facet_wrap(~dist_type, scales='free')
+  
+  #Train model -----------
+  ssn_mod_null <- ssn_lm(
+    formula = invsimpson ~ 1,
+    ssn.object = ssn_miv,
+    taildown_type = "spherical",
+    euclid_type = "gaussian",
+    additive = "afv_qsqrt",
+    partition_factor = ~ country,
+    random = ~ country
   )
+  summary(ssn_mod_null)
+  SSN2::varcomp(ssn_mod_null)
   
   
   #2.1. Model Tmj1 diversity without space x all countries ------------------
