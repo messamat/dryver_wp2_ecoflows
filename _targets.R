@@ -48,7 +48,9 @@ if (!interactive()) {
 #--------------------------  Define targets plan -------------------------------
 #-------------- Preformatting targets ------------------------------------------
 preformatting_targets <- list(
-  #------------------------------- Define paths ----------------------------------
+  ##############################################################################
+  ### DEFINE PATHS #############################################################
+  
   #
   #Path to local environmental data
   tar_target(
@@ -96,7 +98,9 @@ preformatting_targets <- list(
   )
   ,
   
-  #------------------------------- Download data -------------------------------
+  ##############################################################################
+  ### DOWNLOAD DATA ############################################################
+  
   #Download amber river barriers dataset
   tar_target(
     amber_path,
@@ -111,7 +115,9 @@ preformatting_targets <- list(
     }
   ),
   
-  #------------------------------- Read in data ----------------------------------
+  ##############################################################################
+  ### READ DATA ################################################################
+  
   #Read reach data
   tar_target(
     reaches_dt,
@@ -145,6 +151,30 @@ preformatting_targets <- list(
                                        in_country = country),
                       by = country] 
   ),
+  
+  #Read metadata accompanying eDNA data
+  tar_target(
+    metadata_edna,
+    fread(metadata_edna_path,
+          colClasses = c(rep('character', 5), 'integer', 
+                         rep('character',4))) %>%
+      setnames(tolower(names(.))) %>%
+      setnames(c('matchingenvid', 'sampling_date'),
+               c('running_id', 'date')) %>%
+      .[, date := as.Date(date, "%d.%m.%Y")]
+  ),
+  
+  #Read pre-processed biological sampling data
+  tar_target(
+    bio_dt,
+    read_biodt(path_list = bio_data_paths,
+               in_metadata_edna = metadata_edna,
+               include_bacteria = F)
+  )
+  ,
+  
+  ##############################################################################
+  ### PRE-FORMAT DATA ##########################################################
   
   #Subset river network shapefiles to only keep sections within which there
   #are sampling site-reaches (based on sub-catchment file given by countries)
@@ -192,10 +222,10 @@ preformatting_targets <- list(
   )
   ,
   
+  #Direct network
   tar_target(
     network_directed_gpkg_list,
     lapply(names(network_clean_gpkg_list), function(in_country) {
-      #Set size of simplifying radius to remove loops. See function
       outlet_uid_list <- list(Croatia = 463, Czech = 4, Finland = 682,
                               France = 1, Hungary = 5, Spain = 86)
       
@@ -211,7 +241,7 @@ preformatting_targets <- list(
   )
   ,
   
-  
+  #Fix complex confluences
   tar_target(
     network_nocomplexconf_gpkg_list,
     lapply(names(network_directed_gpkg_list), function(in_country) {
@@ -276,7 +306,7 @@ preformatting_targets <- list(
   )
   ,
   
-  #Create shapefile of sampling site-reaches
+  #Create shapefile of sampling sites (reach lines)
   tar_target(
     site_reaches_gpkg_list,
     create_sites_gpkg(in_hydromod_paths_dt = hydromod_paths_dt,
@@ -289,6 +319,7 @@ preformatting_targets <- list(
   )
   ,
   
+  #Create shapefile of sampling sites (points)
   tar_target(
     site_points_gpkg_list,
     create_sites_gpkg(in_hydromod_paths_dt = hydromod_paths_dt,
@@ -326,6 +357,7 @@ preformatting_targets <- list(
   )
   ,
   
+  #Snap barriers to river network
   tar_target(
     barrier_snapped_gpkg_list,
     lapply(names(barrier_points_gpkg_list), function(in_country) {
@@ -338,28 +370,11 @@ preformatting_targets <- list(
                          overwrite = T)
     }) %>% setNames(names(site_points_gpkg_list))
   )
-  ,
-  #Read metadata accompanying eDNA data
-  tar_target(
-    metadata_edna,
-    fread(metadata_edna_path,
-          colClasses = c(rep('character', 5), 'integer', 
-                         rep('character',4))) %>%
-      setnames(tolower(names(.))) %>%
-      setnames(c('matchingenvid', 'sampling_date'),
-               c('running_id', 'date')) %>%
-      .[, date := as.Date(date, "%d.%m.%Y")]
-  ),
-  
-  #Read pre-processed biological sampling data
-  tar_target(
-    bio_dt,
-    read_biodt(path_list = bio_data_paths,
-               in_metadata_edna = metadata_edna,
-               include_bacteria = T)
-  )
 )
 
+
+################################################################################
+### COMPUTE METRICS ############################################################
 
 mapped_hydrotargets <- tarchetypes::tar_map(
   values = hydro_combi,
@@ -372,6 +387,7 @@ mapped_hydrotargets <- tarchetypes::tar_map(
     #selected_sims = 1:20)
   ),
   
+  #Compute hydrological statistics for entire river network for all dates
   tar_target(
     hydrostats,
     compute_hydrostats_drn(
@@ -382,6 +398,7 @@ mapped_hydrotargets <- tarchetypes::tar_map(
       in_network_idcol = 'cat')
   ),
   
+  #Subset statistics to keep only those for sampling site and dates
   tar_target(
     hydrostats_sub,
     subset_hydrostats(hydrostats, 
@@ -420,6 +437,7 @@ analysis_targets <- list(
   )
   ,
   
+  #Compute directed STcon 
   tar_target(
     STcon_directed_list,
     {
@@ -459,6 +477,7 @@ analysis_targets <- list(
   )
   ,
   
+  #Compute undirected STcon 
   tar_target(
     STcon_undirected_list, 
     {
@@ -498,6 +517,7 @@ analysis_targets <- list(
   )
   ,
   
+  #Format directed STcon for subsequent use in models
   tar_target(
     STcon_directed_formatted,
     future_lapply(names(STcon_directed_list), function(in_country) {
@@ -507,6 +527,7 @@ analysis_targets <- list(
     }) %>% setNames(names(STcon_directed_list))
   ),
   
+  #Format undirected STcon for subsequent use in models
   tar_target(
     STcon_undirected_formatted,
     future_lapply(names(STcon_undirected_list), function(in_country) {
@@ -528,7 +549,8 @@ analysis_targets <- list(
     }) %>% rbindlist 
   )
   ,
-
+  
+  #Compute local taxonomic diversity
   tar_target(
     spdiv_local,
     lapply(names(bio_dt), function(in_org) {
@@ -542,6 +564,7 @@ analysis_targets <- list(
   )
   ,
   
+  #Compute regional taxonomic diversity
   tar_target(
     spdiv_drn,
     lapply(names(bio_dt), function(in_org) {
@@ -555,6 +578,7 @@ analysis_targets <- list(
   )
   ,
   
+  #Merge ecological, environmental and hydrological data
   tar_target(
     allvars_merged,
     merge_allvars_sites(in_spdiv_local = spdiv_local, 
@@ -564,14 +588,18 @@ analysis_targets <- list(
   )
   ,
   
- 
+  ##############################################################################
+  # ANALYZE DATA
+  ##############################################################################
+  
+  #Visualize percentage of flowing sites by DRN over time
   tar_target(
     relF_bydrn_plot,
     compare_drn_hydro(in_hydrocon_compiled = hydrocon_compiled, 
                       in_sites_dt = sites_dt) 
   )
   ,
-  #
+  
   #Create matrices of correlations between predictors and responses, and among predictors
   tar_target(
     cor_matrices_list,
@@ -579,7 +607,7 @@ analysis_targets <- list(
   )
   ,
   
-  #Create correlation heatmaps
+  #Create correlation heatmaps across all variables
   tar_target(
     cor_heatmaps,
     plot_cor_heatmaps(in_cor_matrices = cor_matrices_list, 
@@ -601,8 +629,8 @@ analysis_targets <- list(
   tar_target(
     corplots_div_hydrowindow, {
       hydrovar_list <- c('DurD', 'PDurD', 'FreD', 'PFreD', 
-                    'uQ90', 'oQ10', 'maxPQ', 'PmeanQ',
-                    'STcon.*_directed', 'STcon.*_undirected')
+                         'uQ90', 'oQ10', 'maxPQ', 'PmeanQ',
+                         'STcon.*_directed', 'STcon.*_undirected')
       lapply(hydrovar_list, function(in_var_substr) {
         plot_cor_hydrowindow(in_cor_dt = cor_matrices_list$div_bydrn, 
                              var_substr = in_var_substr, 

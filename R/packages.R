@@ -4,6 +4,7 @@ pkg_vec <- list(
   'assertthat',
   'dbscan',
   'dplyr',
+  'forecast',
   'future.apply',
   'ggcorrplot',
   'ggnewscale',
@@ -43,7 +44,6 @@ pkg_vec <- list(
   'tidyterra',
   'tidytext',
   'vegan',
-  'mapview',
   'data.table')
 lapply(pkg_vec, function(p) {
   suppressWarnings(
