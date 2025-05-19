@@ -520,24 +520,15 @@ analysis_targets <- list(
   tar_target(
     hydrocon_compiled,
     lapply(drn_dt$country, function(in_country) {
-      compile_hydrocon_country(hydrostats_sub_comb, STcon_directed_formatted,
-                               STcon_undirected_formatted, ssn_eu, in_country)
+      compile_hydrocon_country(hydrostats_sub_comb,
+                               STcon_directed_formatted,
+                               STcon_undirected_formatted,
+                               site_snapped_gpkg_list, 
+                               in_country)
     }) %>% rbindlist 
   )
   ,
-  
-  #Create Spatial Stream Network (SSN) objects
-  tar_target(
-    ssn_eu,
-    create_ssn_europe(in_network_path = network_ssnready_shp_list,
-                      in_sites_path = site_snapped_gpkg_list,
-                      in_barriers_path = barrier_snapped_gpkg_list,
-                      in_hydromod = hydromod_comb,
-                      out_dir = file.path(resdir, 'ssn'),
-                      out_ssn_name = 'ssn_eu',
-                      overwrite = T)
-  ),
-  
+
   tar_target(
     spdiv_local,
     lapply(names(bio_dt), function(in_org) {
@@ -573,6 +564,7 @@ analysis_targets <- list(
   )
   ,
   
+ 
   tar_target(
     relF_bydrn_plot,
     compare_drn_hydro(in_hydrocon_compiled = hydrocon_compiled, 
@@ -625,6 +617,20 @@ analysis_targets <- list(
   tar_target(
     local_env_pca,
     ordinate_local_env(in_allvars_merged = allvars_merged)
+  ),
+  
+  #Create Spatial Stream Network (SSN) objects
+  tar_target(
+    ssn_eu,
+    create_ssn_europe(in_network_path = network_ssnready_shp_list,
+                      in_sites_path = site_snapped_gpkg_list,
+                      in_allvars_merged = allvars_merged,
+                      in_local_env_pca = local_env_pca,
+                      in_barriers_path = barrier_snapped_gpkg_list,
+                      in_hydromod = hydromod_comb,
+                      out_dir = file.path(resdir, 'ssn'),
+                      out_ssn_name = 'ssn_eu',
+                      overwrite = T)
   )
 )
 

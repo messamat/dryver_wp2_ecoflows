@@ -1408,7 +1408,7 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
     sha_simp <- biodt_copy[, list(
       campaign = campaign,
       site = site,
-      invsimpson = vegan::diversity(as.matrix(.SD), index = "invsimpson"),
+      shannon = vegan::diversity(as.matrix(.SD), index = "shannon"),
       invsimpson = vegan::diversity(as.matrix(.SD), index = "invsimpson")
     ), .SDcols = spcols]
     
@@ -2594,64 +2594,6 @@ subset_hydrostats <- function(hydrostats, in_country, in_bio_dt) {
   return(hydrostats)
 }
 
-#------ compile_hydrocon_country -----------------------------------------------
-# in_hydrostats_sub_comb <- tar_read(hydrostats_sub_comb)
-# in_STcon_directed <- tar_read(STcon_directed_formatted)
-# in_STcon_undirected <- tar_read(STcon_undirected_formatted)
-# in_ssn_eu <- tar_read(ssn_eu)
-# in_country <- 'Spain'
-
-compile_hydrocon_country <- function(in_hydrostats_sub_comb, in_STcon_directed,
-                                     in_STcon_undirected, in_ssn_eu,
-                                     in_country) {
-  in_sites_ssn_dt <- as.data.table(in_ssn_eu$ssn$obs)
-  
-  hydrostats_isflowing_site <- in_hydrostats_sub_comb[[
-    paste0('hydrostats_sub_', in_country, '_isflowing')]][['site']] %>%
-    setDT
-  
-  hydrostats_isflowing_drn <- in_hydrostats_sub_comb[[
-    paste0('hydrostats_sub_', in_country, '_isflowing')]][['drn']] %>%
-    setDT
-  
-  hydrostats_qsim <- in_hydrostats_sub_comb[[
-    paste0('hydrostats_sub_', in_country, '_qsim')]] %>%
-    setDT
-  
-  cols_to_keep_site <- c(setdiff(names(hydrostats_isflowing_site),
-                                 names(hydrostats_qsim)),
-                         c('date', 'site'))
-  
-  cols_to_keep_drn <- c(setdiff(names(hydrostats_isflowing_drn),
-                                names(hydrostats_qsim)),
-                        c('date'))
-  
-  #Format STcon data
-  in_STcon_directed[[in_country]]$STcon_dt[
-    , variable := paste0(variable, '_directed')]
-  in_STcon_undirected[[in_country]]$STcon_dt[
-    , variable := paste0(variable, '_undirected')]
-  
-  STcon_cast <- rbind(in_STcon_directed[[in_country]]$STcon_dt,
-                      in_STcon_undirected[[in_country]]$STcon_dt) %>%
-    dcast(date+UID~variable, value.var = 'stcon_value')
-  #With nsim
-  # STcon_cast <- in_STcon_directed[[in_country]]$STcon_dt %>%
-  #   dcast(date+UID+nsim~variable, value.var = 'stcon_value') %>%
-  #   .[, nsim := as.integer(nsim)]
-  
-  out_dt <- merge(hydrostats_isflowing_site[, cols_to_keep_site, with=F],
-                  hydrostats_isflowing_drn[, cols_to_keep_drn, with=F],
-                  by='date') %>%
-    merge(hydrostats_qsim, by=c('date', 'site')) %>%
-    merge(in_sites_ssn_dt[country_sub == in_country,
-                          .(site, UID)], ., by='site') %>%
-    merge(STcon_cast, by=c('date', 'UID'), all.x=T)
-  # merge(STcon_cast, by=c('date', 'UID', 'nsim'), all.x=T) #with nsim
-  
-  return(out_dt)  
-}
-
 #------ format_sites_dt ----------------------------------------------------------
 # in_country <- 'Spain'
 # in_path <- tar_read(hydromod_paths_dt)[country == in_country, sites_reachids]
@@ -3303,6 +3245,67 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
 }
 
 
+#------ compile_hydrocon_country -----------------------------------------------
+# in_hydrostats_sub_comb <- tar_read(hydrostats_sub_comb)
+# in_STcon_directed <- tar_read(STcon_directed_formatted)
+# in_STcon_undirected <- tar_read(STcon_undirected_formatted)
+# in_snapped_sites_gpkg_list <- tar_read(snapped_sites_gpkg_list)
+# in_country <- 'Spain'
+
+compile_hydrocon_country <- function(in_hydrostats_sub_comb, 
+                                     in_STcon_directed,
+                                     in_STcon_undirected, 
+                                     in_site_snapped_gpkg_list,
+                                     in_country) {
+  
+  in_sites_dt <- as.data.table(vect(in_site_snapped_gpkg_list[[in_country]]))
+  
+  hydrostats_isflowing_site <- in_hydrostats_sub_comb[[
+    paste0('hydrostats_sub_', in_country, '_isflowing')]][['site']] %>%
+    setDT
+  
+  hydrostats_isflowing_drn <- in_hydrostats_sub_comb[[
+    paste0('hydrostats_sub_', in_country, '_isflowing')]][['drn']] %>%
+    setDT
+  
+  hydrostats_qsim <- in_hydrostats_sub_comb[[
+    paste0('hydrostats_sub_', in_country, '_qsim')]] %>%
+    setDT
+  
+  cols_to_keep_site <- c(setdiff(names(hydrostats_isflowing_site),
+                                 names(hydrostats_qsim)),
+                         c('date', 'site'))
+  
+  cols_to_keep_drn <- c(setdiff(names(hydrostats_isflowing_drn),
+                                names(hydrostats_qsim)),
+                        c('date'))
+  
+  #Format STcon data
+  in_STcon_directed[[in_country]]$STcon_dt[
+    , variable := paste0(variable, '_directed')]
+  in_STcon_undirected[[in_country]]$STcon_dt[
+    , variable := paste0(variable, '_undirected')]
+  
+  STcon_cast <- rbind(in_STcon_directed[[in_country]]$STcon_dt,
+                      in_STcon_undirected[[in_country]]$STcon_dt) %>%
+    dcast(date+UID~variable, value.var = 'stcon_value')
+  #With nsim
+  # STcon_cast <- in_STcon_directed[[in_country]]$STcon_dt %>%
+  #   dcast(date+UID+nsim~variable, value.var = 'stcon_value') %>%
+  #   .[, nsim := as.integer(nsim)]
+  
+  out_dt <- merge(hydrostats_isflowing_site[, cols_to_keep_site, with=F],
+                  hydrostats_isflowing_drn[, cols_to_keep_drn, with=F],
+                  by='date') %>%
+    merge(hydrostats_qsim, by=c('date', 'site')) %>%
+    merge(in_sites_dt[country_sub == in_country,
+                      .(site, UID)], ., by='site') %>%
+    merge(STcon_cast, by=c('date', 'UID'), all.x=T)
+  # merge(STcon_cast, by=c('date', 'UID', 'nsim'), all.x=T) #with nsim
+  
+  return(out_dt)  
+}
+
 #------ merge_allvars_sites ----------------------------------------------------
 # in_country <- 'Croatia'
 # in_spdiv_local <- tar_read(spdiv_local)
@@ -3488,6 +3491,7 @@ ordinate_local_env <- function(in_allvars_merged) {
 create_ssn_europe <- function(in_network_path,
                               in_sites_path,
                               in_allvars_merged,
+                              in_local_env_pca,
                               in_barriers_path,
                               in_hydromod,
                               out_dir,
@@ -4053,239 +4057,269 @@ plot_hydro_comparison <- function() {
 # by penalizing model complexity. glmnet is a great package for this, and it's easily integrated with caret.
 
 # in_allvars_merged <- tar_read(allvars_merged)
-# local_env_pca_all <- ordinate_local_env(in_allvars_merged)
-# in_local_env_pca <- local_env_pca_all$miv_nopools
 # in_ssn_eu <- tar_read(ssn_eu)
 # in_cor_matrices <- tar_read(cor_matrices_list)
 # library(glmulti)
-# 
-# in_network_path = tar_read(network_ssnready_shp_list)
-# in_sites_path = tar_read(site_snapped_gpkg_list)
-# in_barriers_path = tar_read(barrier_snapped_gpkg_list)
-# in_allvars_merged = tar_read(allvars_merged)
-# in_local_env_pca = ordinate_local_env(in_allvars_merged)
-# in_hydromod = tar_read(hydromod_comb)
-# out_dir = 'results/ssn'
-# out_ssn_name = 'all_drns'
-# overwrite=T
-# 
-# in_ssn_eu <- create_ssn_europe(in_network_path,
-#                   in_sites_path,
-#                   in_allvars_merged,
-#                   in_barriers_path,
-#                   in_hydromod,
-#                   out_dir,
-#                   out_ssn_name,
-#                   overwrite = T)
 
-model_miv_t <- function(in_allvars_merged, in_local_env_pca, in_cor_matrices) {
-  #Prepare data
-  allvars_dt <- in_allvars_merged$dt[organism == 'miv_nopools',] %>%
-    merge(in_local_env_pca$dt, by=c('site', 'date', 'country'), all.x=T)
-  
-  hydro_candidates <- setdiff(
-    in_allvars_merged$cols$hydro_con, 
-    c('doy', 'month', 'hy', 'reach_id', 'qsim', 'UID',
-      'isflowing', 'reach_length', 'noflow_period',
-      'noflow_period_dur', 'last_noflowdate', 'PrdD',
-      grep('^meanQ', in_allvars_merged$cols$hydro_con, value=T))
-  )
-  
-  #Scale data
-  allvars_dt[
-    , (hydro_candidates) := lapply(.SD, 
-                                   function(x) base::scale(x, center=T, scale=T)),
-    .SDcols = hydro_candidates]
+model_miv_t <- function(in_ssn_eu, in_allvars_merged, in_cor_matrices) {
   
   #Subset SSN and create distance matrices
   ssn_miv <- in_ssn_eu$miv_nopools$ssn
   SSN2::ssn_create_distmat(ssn_miv)
   
+  allvars_dt <- as.data.table(ssn_miv$obs) %>%
+    setorderv(c('country', 'site', 'campaign')) %>%
+    .[country != 'Hungary',]
+
+  hydro_candidates <- setdiff(
+    in_allvars_merged$cols$hydro_con,
+    c('doy', 'month', 'hy', 'reach_id', 'qsim', 'UID',
+      'isflowing', 'reach_length', 'noflow_period',
+      'noflow_period_dur', 'last_noflowdate', 'PrdD',
+      grep('^meanQ', in_allvars_merged$cols$hydro_con, value=T))
+  )
+
   #Scale data
-  basic_train_mod <- function(in_dt, mod_formula, mod_name, color_var='country') {
-    out_mod <- lmer(formula= as.formula(mod_formula), 
-                    data=in_dt)
+  allvars_dt[
+    , (hydro_candidates) := lapply(.SD,
+                                   function(x) base::scale(x, center=T, scale=T)),
+    .SDcols = hydro_candidates]
+
+  #Basic function to train an lm or lmer model
+  basic_train_mod <- function(in_dt, mod_formula, mod_name, 
+                              id_cols = c('site', 'date'), color_var='country') {
+    dt_copy <- copy(in_dt)
     
-    in_dt[, (paste0('mod_', mod_name, '_pred')) := predict(out_mod)]
-    out_p <- ggplot(in_dt, 
-                    aes(x=invsimpson, 
-                        y=get(paste0('mod_', mod_name, '_pred')), 
-                        color=get(color_var))) +
+    if (grepl('[|]', mod_formula)) {
+      out_mod <- lmer(formula= as.formula(mod_formula),
+                      data=in_dt)
+    } else {
+      out_mod <- lm(formula= as.formula(mod_formula),
+                      data=in_dt)
+    }
+
+    resp_col <- trimws(gsub('[~].*', '', mod_formula))
+    
+    predm_col <- paste0('mod_', mod_name, '_predm')
+    predc_col <- paste0('mod_', mod_name, '_predc')
+    resid_col <- paste0('mod_', mod_name, '_resid')
+    dt_copy [, `:=`(predm = predict(out_mod, re.form = NA),
+                 predc = predict(out_mod, re.form = NULL),
+                 resid = resid(out_mod)
+                 )]
+    
+    comp_p <- ggplot(dt_copy ,
+                    aes_string(x=predc, y=get(resp_col), color=get(color_var))) +
+      geom_abline() +
       geom_point() +
       geom_smooth(se=F, method='lm') +
-      coord_fixed()
-    
+      coord_fixed() +
+      labs(x='Predicted', y='Observed')
+      theme_bw()
+      
     print(summary(out_mod))
     print(out_p)
     print(paste('AIC:', AIC(out_mod)))
     print(MuMIn::r.squaredGLMM((out_mod)))
     
+    str_extract_all()
+    
     return(list(
       mod = out_mod,
       summ = summary(out_mod),
-      plot = out_p, 
+      dt = dt_copy [, .()],
+      plot = out_p,
       AIC = AIC(out_mod)
     ))
-    
   }
-  
+
   #1.1. Model invsimpson diversity without space x all countries ------------------
   #Examine correlations with invsimpson
-  topcors_overall <- in_cor_matrices$div[
-    variable1 == 'invsimpson' & organism == 'miv_nopools' & 
+  topcors_overall_invsimpson <- in_cor_matrices$div[
+    variable1 == 'invsimpson' & organism == 'miv_nopools' &
       variable2 %in% hydro_candidates & !is.na(correlation),] %>%
     .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor) 
-  
-  topcors_bydrn <- in_cor_matrices$div_bydrn[
-    variable1 == 'invsimpson' & organism == 'miv_nopools' & 
+    setorder(-abs_cor)
+
+  topcors_bydrn_invsimpson <- in_cor_matrices$div_bydrn[
+    variable1 == 'invsimpson' & organism == 'miv_nopools' &
       variable2 %in% hydro_candidates & !is.na(correlation),] %>%
     .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
              var_label = paste(variable2, round(correlation, 2))
     ), by=country] %>%
     dcast(cor_order~country, value.var = 'var_label', fill=NA)
-  
-  invsimpson_miv_nopools_modlist <- list()
-  
-  
+
+  #Check n-1 temporal autocorrelation
+  acf_invsimpson_dt <- allvars_dt[, list(
+    ac1 = cor(invsimpson,
+              lag(invsimpson),
+              use='pairwise.complete.obs'),
+    n = .N-1)
+    , by=c('site', 'country')] %>% .[n > 2,]
+
+  acf_invsimpson_p <- ggplot(acf_invsimpson_dt,
+                             aes(x=country, y=ac1,color=country)) +
+    geom_hline(yintercept=0) +
+    geom_boxplot(alpha=1/2) +
+    geom_text(aes(label=as.numeric(gsub('^[A-Z]+', '', site))), 
+              position = position_jitter(seed = 1, width=0.2, height=0)
+              ) +
+    theme_classic()
+
   # To test:
   # DurD3650past, FreD3650past, DurD365past, DurD180past, FreD365past, FreD180past,
-  # PDurD180past, PFreD180past, relF90past, maxPQ_30past, oQ10_10past, maxPQ_365past, 
+  # PDurD180past, PFreD180past, relF90past, maxPQ_30past, oQ10_10past, maxPQ_365past,
   # oQ10_90past, relF1825past, PmeanQ10past, relF60past, relF7mean
-  
+
+  invsimpson_miv_nopools_modlist <- list()
+
   invsimpson_miv_nopools_modlist[['null']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country)',
     mod_name = 'null')
-  
+
   # ggplot(allvars_dt, aes(x=env_PC1, y=invsimpson)) +
   #   geom_point(aes(color=country)) +
   #   geom_smooth(color='black', method='lm') +
   #   geom_smooth(aes(color=country), se=F, method='lm')
-  
+
   invsimpson_miv_nopools_modlist[['env1']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1',
     mod_name = 'env1')
 
-  
   invsimpson_miv_nopools_modlist[['env2_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + env_PC2',
     mod_name = 'env2')
-  
 
   invsimpson_miv_nopools_modlist[['all1_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past',
     mod_name = 'all1')
-  
+
   invsimpson_miv_nopools_modlist[['all2_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + env_PC2 + DurD3650past',
     mod_name = 'all2')
-  
 
   invsimpson_miv_nopools_modlist[['all3_mod']] <- basic_train_mod( ########
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + FreD3650past',
     mod_name = 'all3')
-  
+
   invsimpson_miv_nopools_modlist[['all4_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + DurD365past',
     mod_name = 'all4')
-  
+
   invsimpson_miv_nopools_modlist[['all5_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + DurD180past',
     mod_name = 'all5')
-  
+
   invsimpson_miv_nopools_modlist[['all6_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + FreD365past',
     mod_name = 'all6')
-  
+
   invsimpson_miv_nopools_modlist[['all7_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + FreD180past',
     mod_name = 'all7')
-  
-  invsimpson_miv_nopools_modlist[['all8_mod']] <- basic_train_mod( #########
+
+  invsimpson_miv_nopools_modlist[['all8_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + relF90past',
     mod_name = 'all8')
-  
+
   invsimpson_miv_nopools_modlist[['all9_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + maxPQ_30past',
     mod_name = 'all9')
-  
-  invsimpson_miv_nopools_modlist[['all10_mod']] <- basic_train_mod( 
+
+  invsimpson_miv_nopools_modlist[['all10_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + oQ10_10past',
     mod_name = 'all10')
-  
+
   invsimpson_miv_nopools_modlist[['all11_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + maxPQ_365past',
     mod_name = 'all11')
-  
+
   invsimpson_miv_nopools_modlist[['all12_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + oQ10_90past',
     mod_name = 'all12')
-  
+
   invsimpson_miv_nopools_modlist[['all13_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + relF1825past',
     mod_name = 'all13')
-  
+
   invsimpson_miv_nopools_modlist[['all14_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + PmeanQ10past',
     mod_name = 'all14')
-  
+
   invsimpson_miv_nopools_modlist[['all15_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + relF60past',
     mod_name = 'all15')
-  
+
   invsimpson_miv_nopools_modlist[['all16_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + DurD3650past + relF10past',
     mod_name = 'all16')
-  
+
   invsimpson_miv_nopools_modlist[['all17_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + env_PC2 +DurD3650past + relF10past',
     mod_name = 'all17')
-  
+
   invsimpson_miv_nopools_modlist[['all18_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + env_PC2 + DurD3650past + relF10past + relF10past:country',
     mod_name = 'all18')
-  
-  invsimpson_miv_nopools_modlist[['all19_mod']] <- basic_train_mod( 
+
+  invsimpson_miv_nopools_modlist[['all19_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + env_PC2 + (DurD3650past|country) + relF10past',
     mod_name = 'all19')
-  residplot(invsimpson_miv_nopools_modlist[['all19_mod']]$mod)
-  
-  ########
-  invsimpson_miv_nopools_modlist[['all20_mod']] <- basic_train_mod( 
+
+
+  invsimpson_miv_nopools_modlist[['all20_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula= 'invsimpson ~ (1|country) + env_PC1 + env_PC2 + DurD3650past*country + relF10past',
+    mod_formula= 'invsimpson ~ (1|country) + env_PC1 + (env_PC2|country) + (DurD3650past|country) + relF10past',
     mod_name = 'all20')
   residplot(invsimpson_miv_nopools_modlist[['all20_mod']]$mod)
-  sjPlot::plot_model(invsimpson_miv_nopools_modlist[['all20_mod']]$mod,
-                     type = "pred", terms=c('DurD3650past', 'country'))
+  sjPlot::plot_model(invsimpson_miv_nopools_modlist[['all20_mod']]$mod)
+  sjPlot::plot_model(invsimpson_miv_nopools_modlist[['all20_mod']]$mod, type='resid')
   
+                     ,
+                     type = "pred", terms=c('DurD3650past', 'country'))
+
+  ggplot(allvars_dt, aes(x=DurD3650past, y=invsimpson, color=country)) +
+    geom_point() +
+    geom_smooth(method='lm') +
+    facet_wrap(~country)
+  
+  ggplot(allvars_dt, aes(x=relF10past, y=invsimpson, color=country)) +
+    geom_point() +
+    geom_smooth(method='lm') +
+    facet_wrap(~country)
+  
+  ggplot(allvars_dt, aes(x=env_PC2, y=invsimpson, color=country)) +
+    geom_point() +
+    geom_smooth(method='lm') +
+    facet_wrap(~country)
+
   #1.2. Model invsimpson diversity with space x all countries-------------------
   #Examine Torgegram ------
-  #describes how the semivariance (i.e. halved average squared difference) 
+  #describes how the semivariance (i.e. halved average squared difference)
   #between observations or residuals from the model change
-  #with hydrologic or Euclidean distances 
+  #with hydrologic or Euclidean distances
   tg_miv_invsimpson_null <- Torgegram(
     formula = invsimpson ~ country,
     ssn.object = ssn_miv,
@@ -4295,13 +4329,13 @@ model_miv_t <- function(in_allvars_merged, in_local_env_pca, in_cor_matrices) {
     partition_factor = ~ as.factor(campaign)
   ) %>%
     rbindlist(idcol = 'dist_type')
-  
+
   ggplot(tg_miv_invsimpson_null, aes(x=dist, y=gamma, color=dist_type)) +
     geom_point(aes(size=np)) +
     geom_smooth(span=1, method='lm', se=F) +
     scale_x_log10() +
     facet_wrap(~dist_type, scales='free')
-  
+
   tg_miv_invsimpson_mod20 <- Torgegram(
     formula = invsimpson ~ env_PC1 + env_PC2 + DurD3650past*country + relF10past,
     ssn.object = ssn_miv,
@@ -4311,14 +4345,15 @@ model_miv_t <- function(in_allvars_merged, in_local_env_pca, in_cor_matrices) {
     partition_factor = ~ country
   ) %>%
     rbindlist(idcol = 'dist_type')
-  
+
   ggplot(tg_miv_invsimpson_mod20, aes(x=dist, y=gamma, color=dist_type)) +
     geom_point(aes(size=np)) +
     geom_smooth(span=1, method='lm', se=F) +
     scale_x_log10() +
     facet_wrap(~dist_type, scales='free')
-  
-  #Train model -----------
+
+  #Train models -----------
+  #--Null model ----------------------------------------------------------------
   ssn_mod_null <- ssn_lm(
     formula = invsimpson ~ 1,
     ssn.object = ssn_miv,
@@ -4330,29 +4365,94 @@ model_miv_t <- function(in_allvars_merged, in_local_env_pca, in_cor_matrices) {
   )
   summary(ssn_mod_null)
   SSN2::varcomp(ssn_mod_null)
-  
-  
+
+  probable_covtype <- expand.grid(
+    c("linear", "spherical", "exponential", "mariah", "epa"),
+    c("spherical", "exponential", "gaussian")) %>%
+    as.data.table %>%
+    setnames(c('down', 'euc')) %>%
+    .[, label := paste(down, euc, sep='_')]
+
+  #-- Model selected based on LME before --------------------------------------
+  ssn_mod20 <- mapply(function(down_type, euc_type) {
+    print(paste(down_type, euc_type))
+    out_ssn <- ssn_lm(
+      formula = invsimpson ~ env_PC1 + env_PC2 + DurD3650past*country + relF10past,
+      ssn.object = ssn_miv,
+      taildown_type = down_type,
+      euclid_type = euc_type,
+      additive = "afv_qsqrt",
+      partition_factor = ~ country,
+      random = ~ country
+    )
+    return(out_ssn)
+  },
+  down_type = probable_covtype$down,
+  euc_type = probable_covtype$euc,
+  SIMPLIFY = FALSE) %>%
+    setNames(probable_covtype$label)
+
+  mod20_types_glance <- purrr::map(ssn_mod20, SSN2::glance,
+                                      .id=names(ssn_mod20)) %>%
+    rbindlist(id='down_euc_types')%>%
+    setorder(AIC)
+
+
+  summary(ssn_mod20[['linear_spherical']])
+  SSN2::varcomp(ssn_mod20[['linear_spherical']])
+  SSN2::tidy(ssn_mod20[['linear_spherical']], conf.int = TRUE)
+
+  #preds <- predict(ssn_mod20[['linear_spherical']], ssn_miv$obs)
+
+  #-- Simpler model ------------------------------------------------------------
+  ssn_modsimp <- mapply(function(down_type, euc_type) {
+    print(paste(down_type, euc_type))
+    out_ssn <- ssn_lm(
+      formula = invsimpson ~ env_PC2 + DurD3650past + DurD3650past:country + relF10past,
+      ssn.object = ssn_miv,
+      taildown_type = down_type,
+      euclid_type = euc_type,
+      additive = "afv_qsqrt",
+      partition_factor = ~ country
+    )
+    return(out_ssn)
+  },
+  down_type = probable_covtype$down,
+  euc_type = probable_covtype$euc,
+  SIMPLIFY = FALSE) %>%
+    setNames(probable_covtype$label)
+
+  modsimp_types_glance <- purrr::map(ssn_modsimp, SSN2::glance,
+                                   .id=names(ssn_modsimp)) %>%
+    rbindlist(id='down_euc_types') %>%
+    setorder(AIC)
+
+  summary(ssn_modsimp[['linear_gaussian']])
+  SSN2::varcomp(ssn_modsimp[['linear_gaussian ']])
+  SSN2::tidy(ssn_modsimp[['linear_gaussian']], conf.int = TRUE)
+
+
   #2.1. Model Tmj1 diversity without space x all countries ------------------
   #Examine correlations with invsimpson
   topcors_overall_Jtm1 <- in_cor_matrices$div[
-    variable1 == 'Jtm1' & organism == 'miv_nopools' & 
+    variable1 == 'Jtm1' & organism == 'miv_nopools' &
       variable2 %in% hydro_candidates & !is.na(correlation),] %>%
     .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor) 
-  
+    setorder(-abs_cor)
+
   topcors_bydrn_Jtm1 <- in_cor_matrices$div_bydrn[
-    variable1 == 'invsimpson' & organism == 'miv_nopools' & 
+    variable1 == 'invsimpson' & organism == 'miv_nopools' &
       variable2 %in% hydro_candidates & !is.na(correlation),] %>%
     .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
              var_label = paste(variable2, round(correlation, 2))
     ), by=country] %>%
     dcast(cor_order~country, value.var = 'var_label', fill=NA)
-  
+
   invsimpson_miv_nopools_modlist <- list()
-  
-  
-  
-  
+
+
+
+
   #Check distributions of residuals
   if (length(in_mod$coefficients)>1) {
     nsp_diag <- gg_diagnose(in_mod)
@@ -4363,17 +4463,17 @@ model_miv_t <- function(in_allvars_merged, in_local_env_pca, in_cor_matrices) {
     lm = mae(in_mod$model$ddt_to_bdtopo_ddratio_ceind,
              in_mod$fitted.values)
   )
-  
+
   MAPE = list(
     lm = mape(in_mod$model$ddt_to_bdtopo_ddratio_ceind,
               in_mod$fitted.values)
   )
-  
+
   vars_to_try <- sample(hydro_candidates, 5)
-  glmulti_result <- glmulti(invsimpson ~ .^2, 
+  glmulti_result <- glmulti(invsimpson ~ .^2,
                             maxsize = 2,
                             data = allvars_dt[, c('invsimpson',
-                                                  vars_to_try , 
+                                                  vars_to_try ,
                                                   paste0('env_PC', seq(1,4))),
                                               with=F],
                             crit = "aic", level = 2, fitfunction = "glm",
