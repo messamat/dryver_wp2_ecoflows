@@ -29,7 +29,8 @@ metacols <- c('campaign', 'site', 'running_id', 'country', 'date',
               'summa_sample', 'sample.id', 'sample_id', 'organism')
 drn_dt <- data.table(
   country = c("Croatia", "Czech", "Finland", "France",  "Hungary", "Spain"),
-  catchment = c("Butiznica", "Velicka", "Lepsamaanjoki", "Albarine", "Bukkosdi", "Genal")
+  catchment = c("Butiznica", "Velicka", "Lepsamaanjoki", "Albarine", "Bukkosdi", "Genal"),
+  color = c("#8c510a", "#bf812d", "#01665e", "#80cdc1", "#8073ac", "#543005")
 )
 
 hydro_combi <- expand.grid(
@@ -50,8 +51,6 @@ if (!interactive()) {
 preformatting_targets <- list(
   ##############################################################################
   ### DEFINE PATHS #############################################################
-  
-  #
   #Path to local environmental data
   tar_target(
     env_data_path_annika,
@@ -98,8 +97,35 @@ preformatting_targets <- list(
   )
   ,
   
+  #Path to DEM for Genal catchment in Spain (basin area is missing)
+  tar_target(
+    dem_genal_rediam_path,
+    file.path(rootdir, 'data', 'dem_genal', 'rediam', 'MDT_2010_11_AND.tif'),
+    format='file'
+  ),
+  
+  tar_target(
+    flowdir_hydrosheds90m_url,
+    "https://data.hydrosheds.org/file/hydrosheds-v1-dir/eu_dir_3s.zip",
+    format='url'
+  ),
+  
   ##############################################################################
   ### DOWNLOAD DATA ############################################################
+  #Download HydroSHEDS flow direction at 90 m for Europe
+  tar_target(
+    flowdir_hydrosheds90m_path,
+    {
+      hs_dir_path <- download_unzip(
+        url =  flowdir_hydrosheds90m_url,
+        out_dir = file.path('data', 'hydrosheds'), 
+        out_zip=NULL)
+      unzip(file.path(hs_dir_path, 'eu_dir_3s.zip'),
+            exdir = file.path('data', 'hydrosheds'))
+      return(file.path('data', 'hydrosheds', 'eu_dir_3s', 'eu_dir_3s.tif'))
+    }, format = 'file'
+  )
+  ,
   
   #Download amber river barriers dataset
   tar_target(
@@ -143,7 +169,7 @@ preformatting_targets <- list(
                in_env_data_path_common = env_data_path_common)
   ),
   
-  #Correct river site names 
+  #Read and correct river site names 
   tar_target(
     sites_dt,
     hydromod_paths_dt[, format_site_dt(in_path = sites_reachids, 
@@ -174,7 +200,7 @@ preformatting_targets <- list(
   ,
   
   ##############################################################################
-  ### PRE-FORMAT DATA ##########################################################
+  ### PRE-FORMAT HYDROGRAPHIC DATA #############################################
   
   #Subset river network shapefiles to only keep sections within which there
   #are sampling site-reaches (based on sub-catchment file given by countries)
@@ -370,8 +396,15 @@ preformatting_targets <- list(
                          overwrite = T)
     }) %>% setNames(names(site_points_gpkg_list))
   )
-)
-
+  ,
+  
+  tar_target(
+    genal_sites_upa_dt,
+    get_genal_drainage_area(in_flowdir_path = flowdir_hydrosheds90m_path, 
+                            outdir = file.path(resdir, 'gis')
+    )
+  )
+)  
 
 ################################################################################
 ### COMPUTE METRICS ############################################################
@@ -584,7 +617,8 @@ analysis_targets <- list(
     merge_allvars_sites(in_spdiv_local = spdiv_local, 
                         in_spdiv_drn = spdiv_drn,
                         in_hydrocon_compiled = hydrocon_compiled,
-                        in_env_dt = env_dt)
+                        in_env_dt = env_dt,
+                        in_genal_upa = genal_sites_upa_dt)
   )
   ,
   
@@ -604,6 +638,16 @@ analysis_targets <- list(
   tar_target(
     cor_matrices_list,
     compute_cor_matrix(allvars_merged)
+  )
+  ,
+  
+  #Create matrices of correlations between predictors and responses, only for non-perennial sites
+  tar_target(
+    cor_matrices_list_ires, {
+      allvars_merged_ires <- copy(allvars_merged)
+      allvars_merged_ires$dt <- allvars_merged$dt[stream_type=='TR',]
+      return(compute_cor_matrix(allvars_merged_ires))
+    }
   )
   ,
   
@@ -633,10 +677,22 @@ analysis_targets <- list(
                          'STcon.*_directed', 'STcon.*_undirected')
       lapply(hydrovar_list, function(in_var_substr) {
         plot_cor_hydrowindow(in_cor_dt = cor_matrices_list$div_bydrn, 
-                             var_substr = in_var_substr, 
-                             plot=T, 
+                             temporal_var_substr = in_var_substr, 
+                             response_var_list = c('richness', 'invsimpson','Jtm1'),
+                             colors_list = drn_dt$color,
+                             save_plot=T,
                              out_dir = resdir)
-      })%>% setNames(hydrovar_list)
+      }) %>% setNames(hydrovar_list)
+      
+      lapply(hydrovar_list, function(in_var_substr) {
+        plot_cor_hydrowindow(in_cor_dt = cor_matrices_list_ires$div_bydrn, 
+                             temporal_var_substr = in_var_substr, 
+                             response_var_list = c('richness','invsimpson','Jtm1'),
+                             colors_list = drn_dt$color,
+                             save_plot=T,
+                             plot_name_suffix = '_IRES',
+                             out_dir = resdir)
+      }) %>% setNames(paste0(hydrovar_list, '_IRES'))
     }
   )
   ,
@@ -660,7 +716,48 @@ analysis_targets <- list(
                       out_ssn_name = 'ssn_eu',
                       overwrite = T)
   )
+  ,
+  
+  tar_target(
+    ssn_covtypes,
+    expand.grid(
+      c("none", "linear", "spherical", "exponential", "mariah", "epa"),
+      c("none", "spherical", "exponential", "gaussian")) %>%
+      as.data.table %>%
+      setnames(c('down', 'euc')) %>%
+      .[, label := paste(down, euc, sep='_')]
+  )
+  ,
+  
+  tar_target(
+    ssn_richness_hydrowindow, {
+      hydrovar_grid <- expand.grid(
+        c('DurD', 'PDurD', 'FreD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'),
+        paste0(c(10, 30, 90, 365, 3650), 'past')
+      ) 
+      stcon_grid <- expand.grid(paste0('STcon_m', c(10, 30, 90, 365)),
+                                c('_directed', '_undirected'))
+      hydrocon_varlist <- c(paste0(hydrovar_grid$Var1, hydrovar_grid$Var2),
+                            paste0(stcon_grid$Var1, stcon_grid$Var2))
+      
+      lapply(hydrocon_varlist, function(in_hydro_var) {
+        model_ssn_hydrowindow(
+          in_ssn = ssn_eu, 
+          organism = 'miv_nopools',
+          formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country', 
+          hydro_var = in_hydro_var, 
+          response_var = 'richness', 
+          ssn_covtypes = ssn_covtypes)
+      }) %>% setNames(in_hydro_var)
+    }
+  )
 )
+
+# in_ssn = tar_read(ssn_eu)
+# organism = 'miv_nopools'
+# formula_root = 
+# hydro_var = 'DurD60past'
+# response_var = 'richness'
 
 list(preformatting_targets, mapped_hydrotargets, 
      combined_hydrotargets, analysis_targets) %>%

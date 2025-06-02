@@ -969,6 +969,50 @@ define_hydromod_paths <- function(in_hydromod_dir) {
   return(hydro_drn_paths_dt)
 }
 
+#------ get_genal_drainage_area -----------------------------------
+#in_flowdir_path <- tar_read(flowdir_hydrosheds90m_path)
+# outdir <- file.path(resdir, 'gis')
+# in_sites_snapped <- tar_read(site_snapped_gpkg_list)
+
+get_genal_drainage_area <- function(in_flowdir_path, outdir) {
+  out_upa_path <- file.path(outdir, 'genal_hydrosheds90m_upa.tif')
+  
+  #Try computing upstream drainage area based on Modelo Digital de Elevaciones (MDE) de Andalucia
+  # if (!file.exists(out_upa_path)) {
+  #   dem <- terra::rast(in_dem_path) %>%
+  #     project(y="epsg:25830", method = 'bilinear')
+  #   flowdir <- terra::terrain(dem, v = 'flowdir', neighbors = 8)
+  #   cell_area <- terra::cellSize(flowdir, unit = "km")
+  #   upstream_area <- terra::flowAccumulation(flowdir, weight = cell_area, 
+  #                                            filename = out_upa_path)
+  # } else {
+  #   upstream_area <- terra::rast(out_upa_path)
+  # }
+  #But too raw, would need to be hydrologically conditioned, etc.
+  
+  #Use HydroSHEDS 90m flow direction instead
+  if (!file.exists(out_upa_path)) {
+    flowdir <- terra::rast(in_flowdir_path) %>%
+      crop(ext(-6, -4, 36, 37))
+    
+    cell_area <- terra::cellSize(flowdir, unit = "km", transform=TRUE)
+    upstream_area <- terra::flowAccumulation(flowdir, weight = cell_area, 
+                                             filename = out_upa_path)
+  }
+  
+  #Extract area for each site by visual match
+  genal_sites_upa_dt <- data.table(
+    site = paste0('GEN',str_pad(seq(1, 26), width=2, pad='0')),
+    basin_area_km2 = c(5.57, 5.80, 60.15, 0.75, 7.00, 14.38, 73.71, 88.83,
+                       2.17, 13.70, 8.04, 142.69, 7.54, 5.91, 157.33, 3.48,
+                       17.03, 37.57, 8.75, 13.75, 2.89, 250.77, 22.40, 277.11,
+                       320.47, 336.78
+    )
+  )
+  
+  return(genal_sites_upa_dt)
+}
+
 #------ get_drn_hydromod -------------------------------------------------------
 get_drn_hydromod <- function(hydromod_path, varname, selected_sims=NULL) {
   nc <- nc_open(hydromod_path) # open netcdf file
@@ -1006,7 +1050,7 @@ read_envdt <- function(in_env_data_path_annika,
   #       campaign #6, GEN-21 was not sampled
   
   #No oxygen saturation measure for Finland
-  #No basin area for Spain
+  #No basin area for Spain - solved
   #No upstream geology for Hungary
   #No embeddedness, substrate type, oxygen sat, etc. for Dry sites
   
@@ -1470,6 +1514,7 @@ plot_sprich <- function(in_sprich, in_envdt) {
     !(organism %in% c('miv', 'miv_nopools_flying', 'miv_nopools_nonflying')),],
     aes(x=campaign, y=mean_drn_richness_relative)) +
     geom_line(aes(group=drn, color=drn), size=1.2) +
+    scale_color_manual(values=c("#8c510a", "#bf812d", "#01665e", "#80cdc1", "#8073ac", "#543005")) +
     new_scale_color() +
     geom_point(aes(color=per_flowing), size=2) +
     scale_color_distiller(palette='Spectral', direction=1) +
@@ -1481,6 +1526,7 @@ plot_sprich <- function(in_sprich, in_envdt) {
     aes(x=per_flowing, y=mean_drn_richness_relative, color=drn)) +
     geom_point() +
     geom_smooth(method='lm', se=F) +
+    scale_color_manual(values=c("#8c510a", "#bf812d", "#01665e", "#80cdc1", "#8073ac", "#543005")) +
     facet_wrap(~organism, scales='free_y')
   
   overall_lines <- ggplot(
@@ -3307,15 +3353,23 @@ compile_hydrocon_country <- function(in_hydrostats_sub_comb,
 }
 
 #------ merge_allvars_sites ----------------------------------------------------
-# in_country <- 'Croatia'
+# in_country <- 'Spain'
 # in_spdiv_local <- tar_read(spdiv_local)
 # in_spdiv_drn <- tar_read(spdiv_drn)
 # in_hydrocon_compiled <- tar_read(hydrocon_compiled)
 # in_ssn_eu <- tar_read(ssn_eu)
 # in_env_dt <- tar_read(env_dt)
+# in_genal_upa = tar_read(genal_sites_upa_dt)
 
 merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
-                                in_hydrocon_compiled, in_env_dt) {
+                                in_hydrocon_compiled, in_env_dt,
+                                in_genal_upa) {
+  
+  #Fill basin area NAs in environmental data for Genal basin in Spain
+  #https://stackoverflow.com/questions/72940045/replace-na-in-a-table-with-values-in-column-with-another-table-by-conditions-in
+  in_env_dt[is.na(basin_area_km2),
+                    basin_area_km2 :=  in_genal_upa[
+                      .SD, on='site', x.basin_area_km2]]
   
   #Compute state of flow in previous time step (could be inserted much before in the workflow later)
   in_env_dt[, state_of_flow_tm1 := lag(state_of_flow, n=1L), by=site]
@@ -3366,6 +3420,9 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
 }
 
 #------ ordinate_local_env ----------------------------------------------------
+# autoplot(local_env_pca$miv_nopools$pca, data = local_env_pca$miv_nopools$trans_dt, 
+#          loadings = TRUE, loadings.colour = 'blue',
+#          loadings.label = TRUE, loadings.label.size = 5) + theme_bw()
 #in_allvars_merged <- tar_read(allvars_merged)
 ordinate_local_env <- function(in_allvars_merged) {
   allvars_merged_copy <- copy(in_allvars_merged)
@@ -3989,16 +4046,17 @@ check_cor_div_habvol <- function(in_allvars_merged) {
 #------ plot_cor_hydrowindow  --------------------------------------------------
 #For hydrological variables check by time window
 
-# vars_list <- c('DurD', 'PDurD', 'FreD', 'PFreD',
+# hydrovar_list <- c('DurD', 'PDurD', 'FreD', 'PFreD',
 #                'uQ90', 'oQ10', 'maxPQ', 'PmeanQ',
 #                'STcon.*_directed', 'STcon.*_undirected')
 # var_substr <- 'STcon.*_directed'
 # in_cor_dt <- tar_read(cor_matrices_list)$div_bydrn
 
-plot_cor_hydrowindow <-  function(in_cor_dt, var_substr, plot=T, out_dir) {
-  sub_dt <- in_cor_dt[grep(paste0('^', var_substr), variable2),] %>%
+plot_cor_hydrowindow <-  function(in_cor_dt, temporal_var_substr, response_var_list,
+                                  colors_list, save_plot=T, plot_name_suffix="", out_dir) {
+  sub_dt <- in_cor_dt[grep(paste0('^', temporal_var_substr), variable2),] %>%
     .[organism != 'miv',] %>%
-    .[(variable1 %in% c('invsimpson','Jtm1')),] 
+    .[(variable1 %in% response_var_list),] 
   
   sub_dt[, window_d := str_extract(variable2,
                                    '([0-9]+(?=past))|((?<=m)[0-9]+)')] %>%
@@ -4016,13 +4074,14 @@ plot_cor_hydrowindow <-  function(in_cor_dt, var_substr, plot=T, out_dir) {
     geom_line(aes(group=country), color='darkgrey', linewidth=1) +
     geom_line(data=sub_dt[p_value < 0.05,], 
               aes(color=country, group=country), linewidth=1) +
+    scale_color_manual(values=colors_list) +
     facet_grid(organism~variable1) + #, scales='free_y') +
     theme_bw() +
-    ggtitle(var_substr)
+    ggtitle(paste0(temporal_var_substr, plot_name_suffix))
   
-  if (plot) {
-    out_path <- file.path(out_dir, paste0('plot_cor_hydrowindow_', var_substr,
-                                          '.png'))
+  if (save_plot) {
+    out_path <- file.path(out_dir, paste0('plot_cor_hydrowindow_', temporal_var_substr,
+                                          plot_name_suffix, '.png'))
     ggsave(out_path, plot = out_p, 
            height = 15, width = 7.5, units='in', dpi = 300)
   }
@@ -4030,12 +4089,126 @@ plot_cor_hydrowindow <-  function(in_cor_dt, var_substr, plot=T, out_dir) {
   return(out_p)
 }
 
+#------ plot_scatter_lm --------------------------------------------------
+# hydrovar_list <- c('DurD', 'PDurD', 'FreD', 'PFreD', 
+#                    'uQ90', 'oQ10', 'maxPQ', 'PmeanQ',
+#                    'STcon.*_directed', 'STcon.*_undirected')
+# temporal_var_substr <- 'DurD'
+# in_allvars_merged <- tar_read(allvars_merged)
+# response_var = 'richness' #c('richness', 'invsimpson','Jtm1'),
+# colors_list = drn_dt$color
+# plot=T
+# out_dir = resdir
+
+plot_scatter_lm <-  function(in_allvars_merged, temporal_var_substr, response_var,
+                          colors_list, save_plot=T, plot_name_suffix="", out_dir) {
+  
+  dt <- in_allvars_merged$dt
+  x_cols <- grep(paste0('^', temporal_var_substr), names(dt), value=T) %>%
+    .[seq(1, length(.), 2)]
+  
+  dt_melt <- melt(dt, 
+                  id.vars=c(in_allvars_merged$cols$group_cols, response_var), 
+                  measure.vars=x_cols)
+
+  p_lm <- ggplot(dt_melt, 
+                 aes_string(x='value', y=response_var, color='country')) +
+    geom_point(alpha=0.5) +
+    geom_smooth(method='lm', se=F) +
+    scale_color_manual(values=colors_list) +
+    scale_y_sqrt() +
+    facet_grid(organism~variable, scales='free') +
+    theme_bw()
+
+  if (save_plot) {
+    out_path <- file.path(out_dir, paste0('plot_lm_', temporal_var_substr, '_',
+                                          response_var, plot_name_suffix, '.png'))
+    ggsave(out_path, plot = p_lm, 
+           height = 15, width = 15, units='in', dpi = 300)
+  }
+  
+  return(p_lm)
+}
+  
+
+#------ quick_ssn ------
+# in_ssn_eu <- tar_read(ssn_eu)
+# 
+# in_formula = 'richness ~ log10(basin_area_km2) + log10(basin_area_km2):country + DurD60past + DurD60past:country'
+# in_ssn <- in_ssn_eu$miv_nopools$ssn
+# tar_load(ssn_covtypes)
+
+quick_ssn <- function(in_ssn, in_formula, ssn_covtypes) {
+  SSN2::ssn_create_distmat(in_ssn)
+
+  #summary(lm(formula = as.formula(in_formula), data=in_ssn$obs))
+
+  ssn_list <- mapply(function(down_type, euc_type) {
+    print(paste(down_type, euc_type))
+    out_ssn <- ssn_lm(
+      formula = as.formula(in_formula),
+      ssn.object = in_ssn,
+      taildown_type = down_type,
+      euclid_type = euc_type,
+      additive = "afv_qsqrt",
+      partition_factor = ~ country,
+      random = ~ country
+    )
+    return(out_ssn)
+  },
+  down_type = ssn_covtypes$down,
+  euc_type = ssn_covtypes$euc,
+  SIMPLIFY = FALSE) %>%
+    setNames(ssn_covtypes$label)
+  
+  return(ssn_list)
+}
+ 
+#------ model_ssn_hydrowindow --------------------------------------------------
+# hydrovar_list <- c('DurD', 'PDurD', 'FreD', 'PFreD',
+#                'uQ90', 'oQ10', 'maxPQ', 'PmeanQ',
+#                'STcon.*_directed', 'STcon.*_undirected')
+# var_substr <- 'STcon.*_directed'
+
+# in_ssn = tar_read(ssn_eu)
+# organism = 'miv_nopools'
+# formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country'
+# hydro_var = 'DurD60past'
+# response_var = 'richness'
+
+model_ssn_hydrowindow <- function(in_ssn, organism, formula_root, 
+                                  hydro_var, response_var, ssn_covtypes) {
+  full_formula <- paste0(response_var, formula_root,' + ', hydro_var, ' + ',
+                         hydro_var, ':country')
+  
+  ssn_list <- quick_ssn(in_ssn = in_ssn[[organism]]$ssn, 
+                        in_formula = as.formula(full_formula),
+                        ssn_covtypes = ssn_covtypes)
+  
+  ssn_glance <- purrr::map(ssn_list, SSN2::glance,
+                           .id=names(ssn_list)) %>%
+    rbindlist(id='down_euc_types') %>%
+    setorder(AIC) %>%
+    as.data.table %>%
+    .[, `:=`(
+      organism = organism,
+      response_var = response_var,
+      hydro_var = hydro_var
+    )]
+  
+  return(list(
+    ssn_list=ssn_list,
+    ssn_glance=ssn_glance
+  ))
+}
+
 #------ compare standard hydro metrics with flow-duration curve-based metrics ---
-# vars_list <- c('DurD', FreD')
+# vars_list <- c('DurD', 'FreD')
 # var_substr <- vars_list[[1]]
 # in_cor_dt <- tar_read(cor_matrices_list)$div_bydrn
+# color_list = drn_dt$color
 
-plot_hydro_comparison <- function() {
+plot_hydro_comparison <- function(in_cor_dt, color_list) {
   sub_dt_compare <- in_cor_dt[grep(var_substr, variable2),] %>%
     .[organism %in% org_list,] %>%
     .[(variable1 %in% c('invsimpson','Jtm1')),] 
@@ -4054,11 +4227,6 @@ plot_hydro_comparison <- function() {
     theme_bw()
 }  
 
-
-
-
-
-
 #------ model_miv_t ------------------------------------------------------------
 #Model for macroinvertebrates for individual sampling dates
 
@@ -4071,9 +4239,10 @@ plot_hydro_comparison <- function() {
 # in_cor_matrices <- tar_read(cor_matrices_list)
 # library(glmulti)
 
-model_miv_t <- function(in_ssn_eu, in_allvars_merged, in_cor_matrices) {
+model_miv_t <- function(in_ssn_eu, in_allvars_merged, 
+                        in_cor_matrices, ssn_covtypes) {
   
-  #Subset SSN and create distance matrices
+  #Subset SSN and create distance matrices-----
   ssn_miv <- in_ssn_eu$miv_nopools$ssn
   SSN2::ssn_create_distmat(ssn_miv)
   
@@ -4087,13 +4256,13 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged, in_cor_matrices) {
       'noflow_period_dur', 'last_noflowdate', 'PrdD')
   )
 
-  # #Scale data
+  #Scale data-----
   allvars_dt[
     , (hydro_candidates) := lapply(.SD,
                                    function(x) base::scale(x, center=T, scale=T)),
     .SDcols = hydro_candidates]
 
-  #Basic function to train an lm or lmer model
+  #Basic function to train an lm or lmer model-----
   basic_train_mod <- function(in_dt, mod_formula, mod_name, 
                               id_cols = c('site', 'date'), color_var='country') {
     dt_copy <- copy(in_dt)
@@ -4263,7 +4432,7 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged, in_cor_matrices) {
   
   invsimpson_miv_nopools_modlist[['all6_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='invsimpson ~ (1|country)  + meanQ1825past:country + stream_type',
+    mod_formula='invsimpson ~ (1|country)  + meanQ1825past + meanQ1825past:country + stream_type',
     mod_name = 'all6')
   
   # The fact that Model 1 has a substantially lower AIC suggests that its approach
@@ -4279,7 +4448,7 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged, in_cor_matrices) {
   
   invsimpson_miv_nopools_modlist[['all7_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='invsimpson ~ (1|country)  + meanQ1825past:country + stream_type + env_PC2',
+    mod_formula='invsimpson ~ (1|country)  + meanQ1825past + meanQ1825past:country + stream_type + env_PC2',
     mod_name = 'all7')
   
   resid_check_6 <- compute_resid_corr(
@@ -4317,17 +4486,17 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged, in_cor_matrices) {
   
   invsimpson_miv_nopools_modlist[['all8_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='invsimpson ~ (1|country)  + meanQ1825past:country + stream_type + relF60past',
+    mod_formula='invsimpson ~ (1|country)  + meanQ1825past + meanQ1825past:country + stream_type + relF60past',
     mod_name = 'all8')
   
   invsimpson_miv_nopools_modlist[['all9_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='invsimpson ~ (1 + relF60past ||country)  + meanQ1825past:country + stream_type',
+    mod_formula='invsimpson ~ (1 + relF60past ||country) +  meanQ1825past + meanQ1825past:country + stream_type',
     mod_name = 'all9')
   
   invsimpson_miv_nopools_modlist[['all10_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='invsimpson ~ (1|country)  + meanQ1825past:country + stream_type + relF60past:country',
+    mod_formula='invsimpson ~ (1|country)  + meanQ1825past + meanQ1825past:country + stream_type + relF60past:country',
     mod_name = 'all10')
   car::vif(invsimpson_miv_nopools_modlist[['all10_mod']]$mod)
   
@@ -4372,38 +4541,48 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged, in_cor_matrices) {
   
   invsimpson_miv_nopools_modlist[['all11_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='invsimpson ~ (1|country)  + meanQ1825past:country + relF60past:country + DurD3650past',
+    mod_formula='invsimpson ~ (1|country)  + meanQ1825past + meanQ1825past:country + relF60past + relF60past:country + DurD3650past',
     mod_name = 'all11')
 
   invsimpson_miv_nopools_modlist[['all12_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='invsimpson ~ (1|country)  + meanQ1825past:country + relF60past:country + stream_type + DurD1825past',
+    mod_formula='invsimpson ~ (1|country)  + meanQ1825past + meanQ1825past:country + relF60past + relF60past:country + stream_type + DurD1825past',
     mod_name = 'all12')
   
   invsimpson_miv_nopools_modlist[['all13_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='invsimpson ~ (1|country)  + meanQ1825past:country + relF60past:country + stream_type + FreD1825past',
+    mod_formula='invsimpson ~ (1|country)  + meanQ1825past + meanQ1825past:country + relF60past + relF60past:country + stream_type + FreD1825past',
     mod_name = 'all13')
   
   invsimpson_miv_nopools_modlist[['all15_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='invsimpson ~ (1|country)  + meanQ1825past:country + relF60past:country + stream_type +  PmeanQ60past',
+    mod_formula='invsimpson ~ (1|country)  + meanQ1825past + meanQ1825past:country + relF60past+ relF60past:country + stream_type +  PmeanQ60past',
     mod_name = 'all15')
  
   invsimpson_miv_nopools_modlist[['all16_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='invsimpson ~ (1|country)  + meanQ1825past:country + relF60past:country + stream_type +  PDurD365past',
+    mod_formula='invsimpson ~ (1|country)  + meanQ1825past + meanQ1825past:country + relF60past+ relF60past:country + stream_type +  PDurD365past',
     mod_name = 'all16')
   
   #Selected non-spatial model
   invsimpson_miv_nopools_modlist[['all14_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
-    mod_formula='invsimpson ~ (1|country)  + meanQ1825past:country + relF60past:country + stream_type + FreD3650past',
+    mod_formula='invsimpson ~ (1|country)  + meanQ1825past + meanQ1825past:country + relF60past + relF60past:country + stream_type + FreD3650past',
     mod_name = 'all14')
-  residplot(invsimpson_miv_nopools_modlist[['all14_mod']]$mod)
-  sjPlot::plot_model(invsimpson_miv_nopools_modlist[['all14_mod']]$mod)
-  sjPlot::plot_model(invsimpson_miv_nopools_modlist[['all14_mod']]$mod, type='resid')
-  sjPlot::plot_model(invsimpson_miv_nopools_modlist[['all14_mod']]$mod, type='pred')
+  sjPlot::plot_model(invsimpson_miv_nopools_modlist[['all14_mod']]$mod, type='diag')
+  sjPlot::plot_model(invsimpson_miv_nopools_modlist[['all14_mod']]$mod, type='re')
+  sjPlot::plot_model(invsimpson_miv_nopools_modlist[['all14_mod']]$mod, 
+                     type = "pred",  
+                     terms = c("meanQ1825past", "country")) +
+    coord_cartesian(ylim=c(0, 100)) +
+    theme_bw()
+  
+  sjPlot::plot_model(invsimpson_miv_nopools_modlist[['all14_mod']]$mod, 
+                     type = "pred",  
+                     terms = c("relF60past", "country")) +
+    coord_cartesian(ylim=c(0, 50)) +
+    theme_bw()
+  
   
   #1.2. Model invsimpson diversity with space x all countries-------------------
   #Examine Torgegram ------
@@ -4442,8 +4621,8 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged, in_cor_matrices) {
     scale_x_log10() +
     facet_wrap(~dist_type, scales='free')
 
-  #Train models -----------
-  #--Null model ----------------------------------------------------------------
+  #Train SSN models -----------
+  #-- Null model ----------------------------------------------------------------
   ssn_mod_null <- ssn_lm(
     formula = invsimpson ~ 1,
     ssn.object = ssn_miv,
@@ -4455,19 +4634,12 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged, in_cor_matrices) {
   )
   summary(ssn_mod_null)
   SSN2::varcomp(ssn_mod_null)
-
-  probable_covtype <- expand.grid(
-    c("linear", "spherical", "exponential", "mariah", "epa"),
-    c("spherical", "exponential", "gaussian")) %>%
-    as.data.table %>%
-    setnames(c('down', 'euc')) %>%
-    .[, label := paste(down, euc, sep='_')]
-
+  
   #-- Model selected based on LME before --------------------------------------
   ssn_mod14 <- mapply(function(down_type, euc_type) {
     print(paste(down_type, euc_type))
     out_ssn <- ssn_lm(
-      formula = invsimpson ~ (1|country)  + meanQ1825past:country + relF60past:country + stream_type + FreD3650past,
+      formula = invsimpson ~ meanQ1825past:country + relF60past:country + stream_type + FreD3650past,
       ssn.object = ssn_miv,
       taildown_type = down_type,
       euclid_type = euc_type,
@@ -4477,20 +4649,20 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged, in_cor_matrices) {
     )
     return(out_ssn)
   },
-  down_type = probable_covtype$down,
-  euc_type = probable_covtype$euc,
+  down_type = ssn_covtypes$down,
+  euc_type = ssn_covtypes$euc,
   SIMPLIFY = FALSE) %>%
-    setNames(probable_covtype$label)
+    setNames(ssn_covtypes$label)
 
-  mod20_types_glance <- purrr::map(ssn_mod20, SSN2::glance,
-                                      .id=names(ssn_mod20)) %>%
+  mod14_types_glance <- purrr::map(ssn_mod14, SSN2::glance,
+                                      .id=names(ssn_mod14)) %>%
     rbindlist(id='down_euc_types')%>%
     setorder(AIC)
 
 
-  summary(ssn_mod20[['linear_spherical']])
-  SSN2::varcomp(ssn_mod20[['linear_spherical']])
-  SSN2::tidy(ssn_mod20[['linear_spherical']], conf.int = TRUE)
+  summary(ssn_mod14[['mariah_gaussian']])
+  SSN2::varcomp(ssn_mod14[['mariah_gaussian']])
+  SSN2::tidy(ssn_mod14[['mariah_gaussian']], conf.int = TRUE)
 
   #preds <- predict(ssn_mod20[['linear_spherical']], ssn_miv$obs)
 
@@ -4507,10 +4679,10 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged, in_cor_matrices) {
     )
     return(out_ssn)
   },
-  down_type = probable_covtype$down,
-  euc_type = probable_covtype$euc,
+  down_type = ssn_covtypes$down,
+  euc_type = ssn_covtypes$euc,
   SIMPLIFY = FALSE) %>%
-    setNames(probable_covtype$label)
+    setNames(ssn_covtypes$label)
 
   modsimp_types_glance <- purrr::map(ssn_modsimp, SSN2::glance,
                                    .id=names(ssn_modsimp)) %>%
