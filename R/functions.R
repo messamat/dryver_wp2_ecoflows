@@ -4238,7 +4238,7 @@ plot_hydro_comparison <- function(in_cor_dt, color_list) {
 }  
 
 #------ format_ssn_hydrowindow -------------------------------------------------
-format_ssn_hydrowindow <- function() {
+format_ssn_hydrowindow <- function(in_ssnmodels_combined) {
   in_ssnmodels_combined <- tar_read(ssnmodels_combined)
   
   # lapply(
@@ -4262,7 +4262,9 @@ format_ssn_hydrowindow <- function() {
     "(_*[0-9]+past)|(_*m[0-9]+)", "", hydro_var)] %>%
     .[, delta_AICc := (AICc - min(AICc)), by=hydro_var] %>%
     .[, delta_AICc_covtypemean := mean(delta_AICc), 
-      by=.(covtypes, hydro_var_root)]
+      by=.(covtypes, hydro_var_root)] %>%
+    .[, window_d := str_extract(hydro_var, '([0-9]+(?=past))|((?<=m)[0-9]+)')] %>%
+    .[, window_d := factor(window_d, levels=sort(unique(as.integer(window_d))))]
   
   #Plot model delta_AICc (epa stands for Epanechnikov kernel model)
   #Ordered globally
@@ -4279,12 +4281,54 @@ format_ssn_hydrowindow <- function() {
     theme_bw() +
     facet_wrap(~hydro_var_root, scale='free')
   
-  #Get best model table with embedded models
+  #Get best model table for all hydrowindows with embedded models
   ssn_hydrowindow_perf_sub <- ssn_hydrowindow_perf_allvars[, {
-    min_euc_type <- .SD[which.min(delta_AICc_covtypemean), covtypes]
-    .SD[covtypes == min_euc_type]
+    min_aic_covtype <- .SD[which.min(delta_AICc_covtypemean), covtypes]
+    .SD[covtypes == min_aic_covtype]
   }, by = hydro_var_root]
   
+  #Get variance decomposition estimated by model
+  ssn_hydrowindow_varcomp <- ssn_hydrowindow_perf_sub[
+    , SSN2::varcomp(mod[[1]]), 
+    by=.(hydro_var, covtypes, hydro_var_root, window_d)] 
+  
+  #Plot variance decomposition
+  plot_ssn_hydrowindow_varcomp <- ggplot(ssn_hydrowindow_varcomp,
+                                         aes(x=window_d, y=proportion, fill=varcomp)) +
+    geom_bar(stat = 'identity', position='stack') +
+    facet_wrap(~hydro_var_root, scales='free') +
+    coord_cartesian(expand = FALSE) +
+    theme_bw()
+  
+  #Plot best model for each variable for single window
+  ssn_hydrowindow_best <- ssn_hydrowindow_perf_sub[
+    , .SD[which.min(AICc),], 
+    by = hydro_var_root]
+  
+  #Get model predictions
+  mod_preds <- lapply(seq(nrow(ssn_hydrowindow_best)), function(i) {
+    # Subset the data.table to get the current row
+    aug_data <- SSN2::augment(ssn_hydrowindow_best[i, mod[[1]]], 
+                              drop=FALSE) %>%
+      cbind(ssn_hydrowindow_best[i, .(hydro_var, covtypes, hydro_var_root, window_d)])
+    return(aug_data)
+  }) %>% rbindlist
+  
+  ggplot(mod_preds, aes(x=.fitted, y=richness, color=country)) +
+    geom_abline() +
+    geom_point() +
+    geom_smooth(method='lm') +
+    facet_grid(country~hydro_var) +
+    theme_bw()
+
+  plot(ssn_hydrowindow_perf_sub[1, mod[[1]]])
+  
+  ssn_hydrowindow_best[1, augment(mod[[1]], drop=FALSE, sefit=TRUE)]
+  
+  ssn_hydrowindow_best[1, SSN2::tidy(mod[[1]])]
+  summary(ssn_modsimp[['linear_gaussian']])
+  ssn_modsimp[['linear_gaussian ']])
+  SSN2::tidy(ssn_modsimp[['linear_gaussian']], conf.int = TRUE)
   
 }
 

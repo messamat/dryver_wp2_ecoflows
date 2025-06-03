@@ -24,6 +24,7 @@ pkg_vec <- list(
   'phangorn',
   'plotly',
   'predictmeans',
+  'purrr',
   'qs',
   'readxl',
   'reshape2',
