@@ -4149,6 +4149,7 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes, estmethod = "ml") {
       formula = as.formula(in_formula),
       ssn.object = in_ssn,
       taildown_type = down_type,
+      tailup_type = up_type,
       euclid_type = euc_type,
       additive = "afv_qsqrt",
       partition_factor = ~ country,
@@ -4158,6 +4159,7 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes, estmethod = "ml") {
     return(out_ssn)
   },
   down_type = ssn_covtypes$down,
+  up_type = ssn_covtypes$up,
   euc_type = ssn_covtypes$euc,
   SIMPLIFY = FALSE) %>%
     setNames(ssn_covtypes$label)
@@ -4178,11 +4180,11 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes, estmethod = "ml") {
 # response_var = 'richness'
 
 model_ssn_hydrowindow <- function(in_ssn, organism, formula_root, 
-                                  hydro_var_substr, response_var, ssn_covtypes) {
+                                  hydro_var, response_var, ssn_covtypes) {
   
-  hydro_var <- grep(paste0('^', hydro_var_substr), 
-                    names(in_ssn[[organism]]$ssn$obs), 
-                    value=T)
+  # hydro_var <- grep(paste0('^', hydro_var_str), 
+  #                   names(in_ssn[[organism]]$ssn$obs), 
+  #                   value=T)
   
   full_formula <- paste0(response_var, formula_root,' + ', hydro_var, ' + ',
                          hydro_var, ':country')
@@ -4235,20 +4237,52 @@ plot_hydro_comparison <- function(in_cor_dt, color_list) {
 }  
 
 #------ format_ssn_hydrowindow -------------------------------------------------
-in_ssnmodels_combined <- tar_read(ssnmodels_combined)
-
-ssn_hydrowindow_perf_allvars <- lapply(in_ssnmodels_combined,
-                                       function(x) x[['ssn_glance']]) %>%
-  do.call(rbind, .)
-
-ssn_hydrowindow_perf_allvars[, delta_AICc := (AICc - min(AICc)), by=hydro_var] %>%
-  .[, delta_AICc_covtypemean := mean(delta_AICc), by=down_euc_types]
+format_ssn_hydrowindow <- function() {
+  in_ssnmodels_combined <- tar_read(ssnmodels_combined)
   
-ggplot(ssn_hydrowindow_perf_allvars, 
-       aes(x=reorder(as.factor(down_euc_types), delta_AICc_covtypemean),
-           y=delta_AICc)) +
-  geom_boxplot() +
-  scale_y_sqrt()
+  ssn_hydrowindow_perf_allvars <- lapply(in_ssnmodels_combined,
+                                         function(x) {
+                                           cbind(x[['ssn_glance']],
+                                                 list(x[['ssn_list']])
+                                           )}
+  ) %>% do.call(rbind, .)
+  
+  #Identify covariance structure with the lowest AICc across all time windows 
+  #for each hydrological variable
+  ssn_hydrowindow_perf_allvars[, delta_AICc := (AICc - min(AICc)), by=hydro_var] %>%
+    .[, delta_AICc_covtypemean := mean(delta_AICc), by=.(down_euc_types, hydro_var_root)] %>%
+    .[, hydro_var_root := gsub("(_*[0-9]+past)|(_*m[0-9]+)", "", hydro_var)
+    ]
+  
+  #Plot model delta_AICc (epa stands for Epanechnikov kernel model)
+  #Ordered globally
+  ggplot(ssn_hydrowindow_perf_allvars, 
+         aes(x = tidytext::reorder_within(
+           as.factor(down_euc_types), 
+           delta_AICc_covtypemean,
+           hydro_var_root),
+           y = delta_AICc, 
+           fill = hydro_var_root)) +
+    geom_boxplot() +
+    scale_y_sqrt() +
+    coord_flip() +
+    theme_bw() +
+    facet_wrap(~hydro_var_root, scale='free')
+  
+  #Get best model table with embedded models
+  ssn_hydrowindow_perf_allvars[, {
+    min_euc_type <- .SD[which.min(delta_AICc_covtypemean), down_euc_types]
+    .SD[down_euc_types == min_euc_type]
+  }, by = hydro_var_root]
+
+}
+
+
+  
+
+
+
+
 
 #------ model_miv_t ------------------------------------------------------------
 #Model for macroinvertebrates for individual sampling dates

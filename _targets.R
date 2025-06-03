@@ -102,8 +102,8 @@ preformatting_targets <- list(
     dem_genal_rediam_path,
     file.path(rootdir, 'data', 'dem_genal', 'rediam', 'MDT_2010_11_AND.tif'),
     format='file'
-),
-
+  ),
+  
   
   ##############################################################################
   ### DOWNLOAD DATA ############################################################
@@ -120,7 +120,7 @@ preformatting_targets <- list(
         unzip(file.path(hs_dir_path, 'eu_dir_3s.zip'),
               exdir = file.path('data', 'hydrosheds'))
       }
-
+      
       return(out_tif)
     }, format = 'file'
   )
@@ -719,53 +719,58 @@ analysis_targets <- list(
     ssn_covtypes,
     expand.grid(
       c("none", "linear", "spherical", "exponential", "mariah", "epa"),
+      c("none", "linear", "spherical", "exponential", "mariah", "epa"),
       c("none", "spherical", "exponential", "gaussian")) %>%
       as.data.table %>%
-      setnames(c('down', 'euc')) %>%
+      setnames(c('down', 'up', 'euc')) %>%
       .[, label := paste(down, euc, sep='_')]
-  )
-)
+  ),
   
-# in_ssn = tar_read(ssn_eu)
-# organism = 'miv_nopools'
-# formula_root = 
-# hydro_var = 'DurD60past'
-# response_var = 'richness'
-
-mapped_ssntargets <- tarchetypes::tar_map(
-  values = tibble::tibble(hydro_var_substr = {
-    hydrovar_grid <- expand.grid(
-      c('DurD', 'FreD'), #'PDurD', 'FreD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'
-      paste0(c(10, 30, 90, 365, 3650), 'past')
-    ) 
-    stcon_grid <- expand.grid(paste0('STcon_m', c(10, 30, 90, 365)),
-                              c('_directed', '_undirected'))
-    c(
-      paste0(hydrovar_grid$Var1,'.*', hydrovar_grid$Var2),
-      paste0(stcon_grid$Var1, stcon_grid$Var2)
-    )
-  }),
-  names = hydro_var_substr,
   tar_target(
-    ssn_richness_hydrowindow,
+    hydro_vars_forssn,
+    {
+      hydrovar_grid <- expand.grid(
+        c('DurD', 'FreD'), #'PDurD', 'FreD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'
+        paste0(c(30, 90, 365, 3650), 'past')
+      ) 
+      stcon_grid <- expand.grid(paste0('STcon_m', c(30, 90, 365)),
+                                c('_directed', '_undirected'))
+      hydro_regex_list <- c(
+        paste0(hydrovar_grid$Var1,'.*', hydrovar_grid$Var2),
+        paste0(stcon_grid$Var1, stcon_grid$Var2)
+      )
+      
+      lapply(hydro_regex_list, function(var_str) {
+        grep(paste0('^', var_str), 
+             names(ssn_eu[[1]]$ssn$obs), 
+             value=T)
+      }) %>% unlist
+    }
+  ),
+  
+  #Run SSN for each chosen variable and time window
+  tar_target(
+    ssn_richness_hydrowindow_,
     model_ssn_hydrowindow(
       in_ssn = ssn_eu,
       organism = 'miv_nopools',
       formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country',
-      hydro_var_substr = hydro_var_substr,
+      hydro_var_str = hydro_params_df$hydro_var_str,
       response_var = 'richness',
       ssn_covtypes = ssn_covtypes
-    )
+    ),
+    pattern = map(hydro_vars_forssn),
+    iteration = "list"
   )
 )
 
-combined_ssntargets <- list(
-  tar_combine(
-    ssnmodels_combined,
-    mapped_ssntargets[["ssn_richness_hydrowindow"]],
-    command = list(!!!.x)
-  )
-)
+# combined_ssntargets <- list(
+#   tar_combine(
+#     ssnmodels_combined,
+#     mapped_ssntargets[["ssn_richness_hydrowindow"]],
+#     command = list(!!!.x)
+#   )
+# )
 
 
 list(preformatting_targets, mapped_hydrotargets, 
