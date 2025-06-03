@@ -4143,8 +4143,8 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes, estmethod = "ml") {
 
   #summary(lm(formula = as.formula(in_formula), data=in_ssn$obs))
 
-  ssn_list <- mapply(function(down_type, euc_type) {
-    print(paste(down_type, euc_type))
+  ssn_list <- mapply(function(down_type, up_type, euc_type) {
+    print(paste(down_type, up_type, euc_type))
     out_ssn <- ssn_lm(
       formula = as.formula(in_formula),
       ssn.object = in_ssn,
@@ -4178,6 +4178,7 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes, estmethod = "ml") {
 # formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country'
 # hydro_var = 'DurD.*60past'
 # response_var = 'richness'
+# tar_load(ssn_covtypes)
 
 model_ssn_hydrowindow <- function(in_ssn, organism, formula_root, 
                                   hydro_var, response_var, ssn_covtypes) {
@@ -4191,12 +4192,12 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
   
   ssn_list <- quick_ssn(in_ssn = in_ssn[[organism]]$ssn, 
                         in_formula = as.formula(full_formula),
-                        ssn_covtypes = ssn_covtypes,
+                        ssn_covtypes = ssn_covtypes, #ssn_covtypes[sample(144, 10)],
                         estmethod = "ml")
   
   ssn_glance <- purrr::map(ssn_list, SSN2::glance,
                            .id=names(ssn_list)) %>%
-    rbindlist(id='down_euc_types') %>%
+    rbindlist(id='covtypes') %>%
     setorder(AIC) %>%
     as.data.table %>%
     .[, `:=`(
@@ -4240,25 +4241,34 @@ plot_hydro_comparison <- function(in_cor_dt, color_list) {
 format_ssn_hydrowindow <- function() {
   in_ssnmodels_combined <- tar_read(ssnmodels_combined)
   
-  ssn_hydrowindow_perf_allvars <- lapply(in_ssnmodels_combined,
-                                         function(x) {
-                                           cbind(x[['ssn_glance']],
-                                                 list(x[['ssn_list']])
-                                           )}
-  ) %>% do.call(rbind, .)
+  # lapply(
+  #   in_ssnmodels_combined, function(x) {
+  #     setnames(setDT(x[['ssn_glance']]), 'down_euc_types', 'covtypes')})
+  
+  ssn_hydrowindow_perf_allvars <- lapply(
+    in_ssnmodels_combined, function(x) {
+      merge(
+        x[['ssn_glance']],
+        data.table(covtypes=names(x[['ssn_list']]),
+                   mod=x[['ssn_list']]),
+        by='covtypes'
+      )
+  }) %>% 
+    do.call(rbind, .) 
   
   #Identify covariance structure with the lowest AICc across all time windows 
   #for each hydrological variable
-  ssn_hydrowindow_perf_allvars[, delta_AICc := (AICc - min(AICc)), by=hydro_var] %>%
-    .[, delta_AICc_covtypemean := mean(delta_AICc), by=.(down_euc_types, hydro_var_root)] %>%
-    .[, hydro_var_root := gsub("(_*[0-9]+past)|(_*m[0-9]+)", "", hydro_var)
-    ]
+  ssn_hydrowindow_perf_allvars[, hydro_var_root := gsub(
+    "(_*[0-9]+past)|(_*m[0-9]+)", "", hydro_var)] %>%
+    .[, delta_AICc := (AICc - min(AICc)), by=hydro_var] %>%
+    .[, delta_AICc_covtypemean := mean(delta_AICc), 
+      by=.(covtypes, hydro_var_root)]
   
   #Plot model delta_AICc (epa stands for Epanechnikov kernel model)
   #Ordered globally
   ggplot(ssn_hydrowindow_perf_allvars, 
          aes(x = tidytext::reorder_within(
-           as.factor(down_euc_types), 
+           as.factor(covtypes), 
            delta_AICc_covtypemean,
            hydro_var_root),
            y = delta_AICc, 
@@ -4270,11 +4280,12 @@ format_ssn_hydrowindow <- function() {
     facet_wrap(~hydro_var_root, scale='free')
   
   #Get best model table with embedded models
-  ssn_hydrowindow_perf_allvars[, {
-    min_euc_type <- .SD[which.min(delta_AICc_covtypemean), down_euc_types]
-    .SD[down_euc_types == min_euc_type]
+  ssn_hydrowindow_perf_sub <- ssn_hydrowindow_perf_allvars[, {
+    min_euc_type <- .SD[which.min(delta_AICc_covtypemean), covtypes]
+    .SD[covtypes == min_euc_type]
   }, by = hydro_var_root]
-
+  
+  
 }
 
 

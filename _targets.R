@@ -755,7 +755,7 @@ analysis_targets <- list(
       in_ssn = ssn_eu,
       organism = 'miv_nopools',
       formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country',
-      hydro_var_str = hydro_params_df$hydro_var_str,
+      hydro_var = hydro_vars_forssn,
       response_var = 'richness',
       ssn_covtypes = ssn_covtypes
     ),
@@ -774,8 +774,7 @@ analysis_targets <- list(
 
 
 list(preformatting_targets, mapped_hydrotargets, 
-     combined_hydrotargets, analysis_targets,
-     mapped_ssntargets, combined_ssntargets) %>%
+     combined_hydrotargets, analysis_targets) %>%
   unlist(recursive = FALSE)
 
 
