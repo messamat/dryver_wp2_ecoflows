@@ -4138,7 +4138,7 @@ plot_scatter_lm <-  function(in_allvars_merged, temporal_var_substr, response_va
 # in_ssn <- in_ssn_eu$miv_nopools$ssn
 # tar_load(ssn_covtypes)
 
-quick_ssn <- function(in_ssn, in_formula, ssn_covtypes) {
+quick_ssn <- function(in_ssn, in_formula, ssn_covtypes, estmethod = "ml") {
   SSN2::ssn_create_distmat(in_ssn)
 
   #summary(lm(formula = as.formula(in_formula), data=in_ssn$obs))
@@ -4152,7 +4152,8 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes) {
       euclid_type = euc_type,
       additive = "afv_qsqrt",
       partition_factor = ~ country,
-      random = ~ country
+      random = ~ country,
+      estmethod = estmethod
     )
     return(out_ssn)
   },
@@ -4173,17 +4174,23 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes) {
 # in_ssn = tar_read(ssn_eu)
 # organism = 'miv_nopools'
 # formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country'
-# hydro_var = 'DurD60past'
+# hydro_var = 'DurD.*60past'
 # response_var = 'richness'
 
 model_ssn_hydrowindow <- function(in_ssn, organism, formula_root, 
-                                  hydro_var, response_var, ssn_covtypes) {
+                                  hydro_var_substr, response_var, ssn_covtypes) {
+  
+  hydro_var <- grep(paste0('^', hydro_var_substr), 
+                    names(in_ssn[[organism]]$ssn$obs), 
+                    value=T)
+  
   full_formula <- paste0(response_var, formula_root,' + ', hydro_var, ' + ',
                          hydro_var, ':country')
   
   ssn_list <- quick_ssn(in_ssn = in_ssn[[organism]]$ssn, 
                         in_formula = as.formula(full_formula),
-                        ssn_covtypes = ssn_covtypes)
+                        ssn_covtypes = ssn_covtypes,
+                        estmethod = "ml")
   
   ssn_glance <- purrr::map(ssn_list, SSN2::glance,
                            .id=names(ssn_list)) %>%
@@ -4226,6 +4233,22 @@ plot_hydro_comparison <- function(in_cor_dt, color_list) {
     coord_fixed() +
     theme_bw()
 }  
+
+#------ format_ssn_hydrowindow -------------------------------------------------
+in_ssnmodels_combined <- tar_read(ssnmodels_combined)
+
+ssn_hydrowindow_perf_allvars <- lapply(in_ssnmodels_combined,
+                                       function(x) x[['ssn_glance']]) %>%
+  do.call(rbind, .)
+
+ssn_hydrowindow_perf_allvars[, delta_AICc := (AICc - min(AICc)), by=hydro_var] %>%
+  .[, delta_AICc_covtypemean := mean(delta_AICc), by=down_euc_types]
+  
+ggplot(ssn_hydrowindow_perf_allvars, 
+       aes(x=reorder(as.factor(down_euc_types), delta_AICc_covtypemean),
+           y=delta_AICc)) +
+  geom_boxplot() +
+  scale_y_sqrt()
 
 #------ model_miv_t ------------------------------------------------------------
 #Model for macroinvertebrates for individual sampling dates

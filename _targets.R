@@ -102,13 +102,8 @@ preformatting_targets <- list(
     dem_genal_rediam_path,
     file.path(rootdir, 'data', 'dem_genal', 'rediam', 'MDT_2010_11_AND.tif'),
     format='file'
-  ),
-  
-  tar_target(
-    flowdir_hydrosheds90m_url,
-    "https://data.hydrosheds.org/file/hydrosheds-v1-dir/eu_dir_3s.zip",
-    format='url'
-  ),
+),
+
   
   ##############################################################################
   ### DOWNLOAD DATA ############################################################
@@ -116,13 +111,17 @@ preformatting_targets <- list(
   tar_target(
     flowdir_hydrosheds90m_path,
     {
-      hs_dir_path <- download_unzip(
-        url =  flowdir_hydrosheds90m_url,
-        out_dir = file.path('data', 'hydrosheds'), 
-        out_zip=NULL)
-      unzip(file.path(hs_dir_path, 'eu_dir_3s.zip'),
-            exdir = file.path('data', 'hydrosheds'))
-      return(file.path('data', 'hydrosheds', 'eu_dir_3s', 'eu_dir_3s.tif'))
+      out_tif <- file.path('data', 'hydrosheds', 'eu_dir_3s', 'eu_dir_3s.tif')
+      if (!file.exists(file.path('data', 'hydrosheds', 'eu_dir_3s', 'eu_dir_3s.tif'))) {
+        hs_dir_path <- download_unzip(
+          url =  "https://data.hydrosheds.org/file/hydrosheds-v1-dir/eu_dir_3s.zip",
+          out_dir = file.path('data', 'hydrosheds'), 
+          out_zip=NULL)
+        unzip(file.path(hs_dir_path, 'eu_dir_3s.zip'),
+              exdir = file.path('data', 'hydrosheds'))
+      }
+
+      return(out_tif)
     }, format = 'file'
   )
   ,
@@ -453,8 +452,6 @@ combined_hydrotargets <- list(
   )
 )
 
-
-#Compute local species richness
 analysis_targets <- list(
   #Prepare data for STcon
   tar_target(
@@ -727,40 +724,53 @@ analysis_targets <- list(
       setnames(c('down', 'euc')) %>%
       .[, label := paste(down, euc, sep='_')]
   )
-  ,
-  
-  tar_target(
-    ssn_richness_hydrowindow, {
-      hydrovar_grid <- expand.grid(
-        c('DurD', 'PDurD', 'FreD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'),
-        paste0(c(10, 30, 90, 365, 3650), 'past')
-      ) 
-      stcon_grid <- expand.grid(paste0('STcon_m', c(10, 30, 90, 365)),
-                                c('_directed', '_undirected'))
-      hydrocon_varlist <- c(paste0(hydrovar_grid$Var1, hydrovar_grid$Var2),
-                            paste0(stcon_grid$Var1, stcon_grid$Var2))
-      
-      lapply(hydrocon_varlist, function(in_hydro_var) {
-        model_ssn_hydrowindow(
-          in_ssn = ssn_eu, 
-          organism = 'miv_nopools',
-          formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country', 
-          hydro_var = in_hydro_var, 
-          response_var = 'richness', 
-          ssn_covtypes = ssn_covtypes)
-      }) %>% setNames(in_hydro_var)
-    }
-  )
 )
-
+  
 # in_ssn = tar_read(ssn_eu)
 # organism = 'miv_nopools'
 # formula_root = 
 # hydro_var = 'DurD60past'
 # response_var = 'richness'
 
+mapped_ssntargets <- tarchetypes::tar_map(
+  values = tibble::tibble(hydro_var_substr = {
+    hydrovar_grid <- expand.grid(
+      c('DurD', 'FreD'), #'PDurD', 'FreD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'
+      paste0(c(10, 30, 90, 365, 3650), 'past')
+    ) 
+    stcon_grid <- expand.grid(paste0('STcon_m', c(10, 30, 90, 365)),
+                              c('_directed', '_undirected'))
+    c(
+      paste0(hydrovar_grid$Var1,'.*', hydrovar_grid$Var2),
+      paste0(stcon_grid$Var1, stcon_grid$Var2)
+    )
+  }),
+  names = hydro_var_substr,
+  tar_target(
+    ssn_richness_hydrowindow,
+    model_ssn_hydrowindow(
+      in_ssn = ssn_eu,
+      organism = 'miv_nopools',
+      formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country',
+      hydro_var_substr = hydro_var_substr,
+      response_var = 'richness',
+      ssn_covtypes = ssn_covtypes
+    )
+  )
+)
+
+combined_ssntargets <- list(
+  tar_combine(
+    ssnmodels_combined,
+    mapped_ssntargets[["ssn_richness_hydrowindow"]],
+    command = list(!!!.x)
+  )
+)
+
+
 list(preformatting_targets, mapped_hydrotargets, 
-     combined_hydrotargets, analysis_targets) %>%
+     combined_hydrotargets, analysis_targets,
+     mapped_ssntargets, combined_ssntargets) %>%
   unlist(recursive = FALSE)
 
 
