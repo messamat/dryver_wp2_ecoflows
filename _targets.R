@@ -631,6 +631,12 @@ analysis_targets <- list(
   )
   ,
   
+  tar_target(
+    biof_vs_sedi_plots,
+    plot_edna_biof_vs_sedi(in_allvars_merged=allvars_merged) 
+  )
+  ,
+  
   #Create matrices of correlations between predictors and responses, and among predictors
   tar_target(
     cor_matrices_list,
@@ -759,7 +765,7 @@ analysis_targets <- list(
       response_var = 'richness',
       ssn_covtypes = ssn_covtypes
     ),
-    pattern = map(hydro_vars_forssn),
+    pattern = cross(hydro_vars_forssn, organism),
     iteration = "list"
   )
 )

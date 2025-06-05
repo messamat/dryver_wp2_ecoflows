@@ -3365,6 +3365,25 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
                                 in_hydrocon_compiled, in_env_dt,
                                 in_genal_upa) {
   
+  #List column names by originating dt
+  dtcols <- list(
+    div = setdiff(names(spdiv), 
+                  c(names(in_hydrocon_compiled), names(in_env_dt))),
+    hydro_con = setdiff(names(in_hydrocon_compiled), 
+                        c(names(spdiv), names(in_env_dt))),
+    env = setdiff(names(in_env_dt),
+                  c(names(spdiv), names(in_hydrocon_compiled))),
+    group_cols = c("running_id", "site", "date", "campaign", "organism", 
+                   "organism_class", "country", "UID", "stream_type", 
+                   "state_of_flow", "state_of_flow_tm1"),
+    exclude_cols = c("ncampaigns", "name", "isflowing", "reach_length",
+                     "noflow_period", "noflow_period_dur", "last_noflowdate", "drn",
+                     "if_ip_number_and_size_2_axes_+_depth_of_the_pools",
+                     "latitude", "longitude", "reach_id", "hy", "month",
+                     'min_wetted_width', 'left_river_bank_slope', 'right_river_bank_slope',
+                     'qsim')
+  )
+  
   #Fill basin area NAs in environmental data for Genal basin in Spain
   #https://stackoverflow.com/questions/72940045/replace-na-in-a-table-with-values-in-column-with-another-table-by-conditions-in
   in_env_dt[is.na(basin_area_km2),
@@ -3380,11 +3399,27 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
   setDT(in_spdiv_drn)
   spdiv <- merge(in_spdiv_local, in_spdiv_drn,
                  by=c('country', 'organism'))
-  
-  #Merge diversity metrics with hydro_con
+  #Fill in date for merging with hydrological data
   spdiv[site=='GEN04' & campaign=='1', 
         date := as.Date('2021-05-30')] #Same as GEN02 and GEN07, the closest sites sampled that campaign
   
+  #Create "organism_class" column for labeling/coloring/merging
+  spdiv[, organism_class := gsub('_[a-z]+', '', organism)]
+  
+  #Compute average metric between sediment and biofilm for eDNA
+  avg_spdiv_edna <- spdiv[
+    organism_class %in% c('dia', 'fun', 'bac'), 
+    lapply(.SD, function(x) mean(x, na.rm=T)), 
+    by = eval(names(spdiv)[names(spdiv) %in% 
+                             setdiff(dtcols$group_cols, 'organism')]),
+    .SDcols = setdiff(dtcols$div, 
+                      c(dtcols$group_cols, dtcols$exclude_cols))
+  ] %>%
+    .[, organism := organism_class]
+  
+  spdiv <- rbind(spdiv, avg_spdiv_edna, use.names=T, fill=T)
+  
+  #Merge diversity metrics with hydro_con
   spdiv_hydro_con <- merge(spdiv, in_hydrocon_compiled,
                            by=c('date', 'site'), all.x=T) 
   
@@ -3395,29 +3430,48 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
   all_vars_merged <- merge(spdiv_hydro_con, in_env_dt[, env_subcols, with=F],
                            by=c('site', 'campaign'), all.x=T)
   
-  #List column names by originating dt
-  dtcols <- list(
-    div = setdiff(names(spdiv), 
-                  c(names(in_hydrocon_compiled), names(in_env_dt))),
-    hydro_con = setdiff(names(in_hydrocon_compiled), 
-                        c(names(spdiv), names(in_env_dt))),
-    env = setdiff(names(in_env_dt),
-                  c(names(spdiv), names(in_hydrocon_compiled))),
-    group_cols = c("running_id", "site", "date", "campaign", "organism", "country",
-                   "UID", "stream_type", "state_of_flow", "state_of_flow_tm1"),
-    exclude_cols = c("ncampaigns", "name", "isflowing", "reach_length",
-                     "noflow_period", "noflow_period_dur", "last_noflowdate", "drn",
-                     "if_ip_number_and_size_2_axes_+_depth_of_the_pools",
-                     "latitude", "longitude", "reach_id", "hy", "month",
-                     'min_wetted_width', 'left_river_bank_slope', 'right_river_bank_slope',
-                     'qsim')
-  )
-  
   return(list(
     dt = all_vars_merged,
     cols = dtcols)
   )
 }
+
+
+#------ plot_edna_biof_vs_sedi -------------------------------------------------
+#in_allvars_merged <- tar_read(allvars_merged)$dt
+
+plot_edna_biof_vs_sedi <- function(in_allvars_merged) {
+  allvars_edna <- allvars_merged[organism_class %in% c('dia', 'fun', 'bac'),] 
+  allvars_edna[, edna_source := gsub('^[a-z]+_', '', organism)]
+  
+  #Compare richness by source of edna (biofilm vs sediment), organism and country
+  rich_cast <- dcast(allvars_edna, 
+                    country+site+date+organism_class~edna_source, 
+                    value.var = 'richness')
+  p_richness <- ggplot(rich_cast, aes(x=biof, y=sedi)) + 
+    geom_point() + 
+    geom_abline() + 
+    coord_fixed() +
+    facet_grid(organism_class~country)
+  
+  #Compare gamma by source of edna (biofilm vs sediment), organism and country
+  site_gamma_cast <- dcast(allvars_edna, 
+                    country+site+date+organism_class~edna_source, 
+                    value.var = 'Gamma')
+  p_site_gamma <- ggplot(site_gamma_cast, aes(x=biof, y=sedi)) + 
+    geom_point() + 
+    geom_abline() + 
+    coord_fixed() +
+    facet_grid(organism_class~country)
+  
+  return(list(
+    richness=p_richness,
+    site_gamma=p_site_gamma
+  ))
+  
+  
+}
+
 
 #------ ordinate_local_env ----------------------------------------------------
 # autoplot(local_env_pca$miv_nopools$pca, data = local_env_pca$miv_nopools$trans_dt, 
@@ -3620,7 +3674,7 @@ create_ssn_europe <- function(in_network_path,
   
   setDT(in_allvars_merged$dt)[country == 'Czech Republic', country := 'Czech']
   sites_lsn_attri <- merge(sites_lsn,
-                          in_allvars_merged$dt, 
+                           in_allvars_merged$dt, 
                           by=c('country', 'site')) %>%
     merge(in_local_env_pca$dt_all,
           by=c('site', 'date', 'country', 'organism'))
@@ -3779,9 +3833,9 @@ compute_cor_matrix <- function(in_allvars_merged) {
 }
 
 #------ plot_cor_heatmaps -------------------------------------------------------
-# in_cor_matrices <- tar_read(cor_matrices_list)
-# in_allvars_merged <- tar_read(allvars_merged)
-# p_threshold <- 0.05
+in_cor_matrices <- tar_read(cor_matrices_list)
+in_allvars_merged <- tar_read(allvars_merged)
+p_threshold <- 0.05
 
 create_correlation_heatmap <- function(cor_matrix, p_matrix, title,
                                        p_threshold = 1,
@@ -3810,7 +3864,7 @@ create_correlation_heatmap <- function(cor_matrix, p_matrix, title,
 plot_cor_heatmaps <- function(in_cor_matrices, in_allvars_merged,
                               p_threshold = 1) {
   org_list <- unique(in_cor_matrices$div$organism) %>%
-    setdiff('miv_nopools')
+    setdiff('miv')
   country_list <- unique(in_cor_matrices$hydroenv_bydrn$country)
   
   # # --- 1. Hydroenv Correlation ---
@@ -4240,10 +4294,10 @@ plot_hydro_comparison <- function(in_cor_dt, color_list) {
 #------ format_ssn_hydrowindow -------------------------------------------------
 format_ssn_hydrowindow <- function(in_ssnmodels_combined) {
   in_ssnmodels_combined <- tar_read(ssnmodels_combined)
-  
-  # lapply(
-  #   in_ssnmodels_combined, function(x) {
-  #     setnames(setDT(x[['ssn_glance']]), 'down_euc_types', 'covtypes')})
+# 
+#   lapply(
+#     in_ssnmodels_combined, function(x) {
+#       setnames(setDT(x[['ssn_glance']]), 'down_euc_types', 'covtypes')})
   
   ssn_hydrowindow_perf_allvars <- lapply(
     in_ssnmodels_combined, function(x) {
@@ -4322,22 +4376,12 @@ format_ssn_hydrowindow <- function(in_ssnmodels_combined) {
     theme_bw()
 
   plot(ssn_hydrowindow_perf_sub[1, mod[[1]]])
-  
-  ssn_hydrowindow_best[1, augment(mod[[1]], drop=FALSE, sefit=TRUE)]
-  
   ssn_hydrowindow_best[1, SSN2::tidy(mod[[1]])]
-  summary(ssn_modsimp[['linear_gaussian']])
-  ssn_modsimp[['linear_gaussian ']])
-  SSN2::tidy(ssn_modsimp[['linear_gaussian']], conf.int = TRUE)
+  ssn_hydrowindow_best[1, SSN2::summary(mod[[1]])]
   
+  
+  ssn_hydrowindow_perf_sub[1, sjPlot::plot_model(mod[[1]], type = "pred")]
 }
-
-
-  
-
-
-
-
 
 #------ model_miv_t ------------------------------------------------------------
 #Model for macroinvertebrates for individual sampling dates
