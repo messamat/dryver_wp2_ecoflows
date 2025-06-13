@@ -23,10 +23,12 @@ bio_dir <- file.path('data', 'wp2', '01_WP2 final data')
 #datdir <- file.path('data', 'data_annika')
 resdir <- 'results'
 
+#Set more efficient data storage
 tar_option_set(format = "qs")
 
 metacols <- c('campaign', 'site', 'running_id', 'country', 'date',
               'summa_sample', 'sample.id', 'sample_id', 'organism')
+
 drn_dt <- data.table(
   country = c("Croatia", "Czech", "Finland", "France",  "Hungary", "Spain"),
   catchment = c("Butiznica", "Velicka", "Lepsamaanjoki", "Albarine", "Bukkosdi", "Genal"),
@@ -40,10 +42,11 @@ hydro_combi <- expand.grid(
 
 if (!interactive()) {
   perf_ratio <- 0.7 #Set how much you want to push your computer (% of cores and RAM)
-  nthreads <- min(nrow(drn_dt), round(parallel::detectCores(logical=F)*perf_ratio))
+  nthreads <- round(parallel::detectCores(logical=F)*perf_ratio)
   future::plan("future::multisession", workers=nthreads)
   total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
   options(future.globals.maxSize = perf_ratio*total_ram)
+  #tar_option_set(controller = crew_controller_local(workers = nthreads)) #Set up parallel computing in targets
 }
 
 #--------------------------  Define targets plan -------------------------------
@@ -194,7 +197,7 @@ preformatting_targets <- list(
     bio_dt,
     read_biodt(path_list = bio_data_paths,
                in_metadata_edna = metadata_edna,
-               include_bacteria = F)
+               include_bacteria = T)
   )
   ,
   
@@ -567,6 +570,32 @@ analysis_targets <- list(
     }) %>% setNames(names(STcon_undirected_list))
   ),
   
+  #Compute distance to nearest wet site for each reach and time step
+  tar_target(
+    dist_to_wet_undirected,
+    future_lapply(names(preformatted_data_STcon), function(in_country) {
+      dist_to_nearest_wet(
+        sites_status_matrix = preformatted_data_STcon[[in_country]]$sites_status_matrix,
+        network_structure = preformatted_data_STcon[[in_country]]$network_structure, 
+        routing_mode = 'all', 
+        raw_dist_matrix = preformatted_data_STcon[[in_country]]$river_dist_mat, 
+        in_net_shp_path = network_ssnready_shp_list[[in_country]])
+    }) %>% setNames(names(STcon_undirected_list))
+  ),
+  
+  #Compute distance to nearest wet site for each reach and time step
+  tar_target(
+    dist_to_wet_directed,
+    future_lapply(names(preformatted_data_STcon), function(in_country) {
+      dist_to_nearest_wet(
+        sites_status_matrix = preformatted_data_STcon[[in_country]]$sites_status_matrix,
+        network_structure = preformatted_data_STcon[[in_country]]$network_structure, 
+        routing_mode = 'in', 
+        raw_dist_matrix = preformatted_data_STcon[[in_country]]$river_dist_mat, 
+        in_net_shp_path = network_ssnready_shp_list[[in_country]])
+    }) %>% setNames(names(STcon_undirected_list))
+  ),
+  
   #Compile hydrostats and connectivity data together as dt
   tar_target(
     hydrocon_compiled,
@@ -720,7 +749,15 @@ analysis_targets <- list(
                       overwrite = T)
   )
   ,
+  #All organisms: max 12
+  tar_target(
+    organism_list,
+    c('miv_nopools') #, 'miv_nopools_flying', 'miv_nopools_nonflying')
+      #unique(allvars_merged$dt$organism)
+  )
+  ,
   
+  #Define all types of spatial covariance structure to test: 144 unique combinations
   tar_target(
     ssn_covtypes,
     expand.grid(
@@ -729,17 +766,18 @@ analysis_targets <- list(
       c("none", "spherical", "exponential", "gaussian")) %>%
       as.data.table %>%
       setnames(c('down', 'up', 'euc')) %>%
-      .[, label := paste(down, euc, sep='_')]
+      .[, label := paste(down, up, euc, sep='_')]
   ),
   
+  #Define all hydrological variables: 14 (max ~73)
   tar_target(
-    hydro_vars_forssn,
+    hydro_vars_forssn, 
     {
       hydrovar_grid <- expand.grid(
         c('DurD', 'FreD'), #'PDurD', 'FreD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'
         paste0(c(30, 90, 365, 3650), 'past')
       ) 
-      stcon_grid <- expand.grid(paste0('STcon_m', c(30, 90, 365)),
+      stcon_grid <- expand.grid(paste0('STcon_m', c(30, 365)),
                                 c('_directed', '_undirected'))
       hydro_regex_list <- c(
         paste0(hydrovar_grid$Var1,'.*', hydrovar_grid$Var2),
@@ -752,22 +790,23 @@ analysis_targets <- list(
              value=T)
       }) %>% unlist
     }
-  ),
+  )
+  # ,
   
   #Run SSN for each chosen variable and time window
-  tar_target(
-    ssn_richness_hydrowindow_,
-    model_ssn_hydrowindow(
-      in_ssn = ssn_eu,
-      organism = 'miv_nopools',
-      formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country',
-      hydro_var = hydro_vars_forssn,
-      response_var = 'richness',
-      ssn_covtypes = ssn_covtypes
-    ),
-    pattern = cross(hydro_vars_forssn, organism),
-    iteration = "list"
-  )
+  # tar_target(
+  #   ssn_richness_hydrowindow_,
+  #   model_ssn_hydrowindow(
+  #     in_ssn = ssn_eu,
+  #     organism = organism_list,
+  #     formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country',
+  #     hydro_var = hydro_vars_forssn,
+  #     response_var = 'richness',
+  #     ssn_covtypes = ssn_covtypes
+  #   ),
+  #   pattern = cross(hydro_vars_forssn, organism_list),
+  #   iteration = "list"
+  # )
 )
 
 # combined_ssntargets <- list(

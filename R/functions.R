@@ -2578,6 +2578,7 @@ compute_hydrostats_drn <- function(in_network_path,
     
     if ('nsim' %in% names(intermod_dt)) {
       q_stats <- list()
+      #Compute hydrological statistics for entire DRN
       q_stats$drn <- intermod_dt[, 
                                  compute_hydrostats_intermittence(
                                    in_hydromod_dt = .SD,
@@ -2585,6 +2586,7 @@ compute_hydrostats_drn <- function(in_network_path,
                                    scale = 'drn')$drn, 
                                  by = nsim] 
       
+      #Compute hydrological statistics for individual sites
       q_stats$site <- intermod_dt[, 
                                   compute_hydrostats_intermittence(
                                     in_hydromod_dt = .SD,
@@ -3011,7 +3013,7 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
   # which is not exactly "from anymore" it is an ID of the vertex
   V(net_graph)$UID <- as.character(nodes_cat$UID)
   
-  #Compute edge distances for distance matrices
+  #Compute edge length for distance matrices
   E(net_graph)$weight <- as.integer(net_dt$length_m)
   
   #Compute distance matrix (in integer, lighter to handle -- one-meter difference does not matter)
@@ -3291,6 +3293,92 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
 }
 
 
+#------ dist_to_nearest_wet ----------------------------------------------------
+#' Calculate distance to nearest active site
+#'
+#' This function calculates the distance to the nearest active site based on 
+#' spatiotemporal graph networks. 
+#'
+#' The initial use for this function is to quantify the distance to the nearest
+#' perennial site, but it does not necessarily need to quantify water presence.
+#' Each cell value must represent a feature defining connectivity "on" or "off" 
+#' and that can be transmitted to build meaningful links in a spatiotemporal 
+#' graph.
+#'
+#' Requires: assertthat, data.table, igraph, magrittr, purrr
+#'
+#' @param sites_status_matrix A matrix representing the status of the site (wet/dry, 
+#' active/inactive). 
+#' The dataset should have columns for each site and rows for each monitored day.
+#' Warning: no other columns should be included (e.g., date, other IDs)
+#' @param network_structure A square matrix representing the basic connections among 
+#' sites (adjacency matrix): for a given site (row), each adjacent connected 
+#' site (column) is given a value of 1, all others 0. Must have the same number
+#' of rows and columns as there are columns in sites_status_matrix.
+#' @param routing_mode The direction for graph connectivity when directed, 
+#' can be "in" (routing from upstream if directed), "out" (routing from 
+#' downstream if directed), or "all". See ?igraph or ?igraph::closeness
+#' for a better understanding. 
+#' @param dist_matrix A distance matrix representing the distances between sites.
+#' Can be any type of distance (euclidean, environmental, topographic, ...) 
+#' between pairs of sites
+#' 
+
+# in_country <- 'Croatia'
+# in_preformatted_data = tar_read(preformatted_data_STcon)[[in_country]]
+# in_net_shp_path <- tar_read(network_ssnready_shp_list)[[in_country]]
+# sites_status_matrix = in_preformatted_data$sites_status_matrix
+# network_structure = in_preformatted_data$network_structure
+# raw_dist_matrix <- in_preformatted_data$river_dist_mat
+# routing_mode = 'in'
+
+dist_to_nearest_wet <- function(sites_status_matrix, network_structure, 
+                                routing_mode, raw_dist_matrix, in_net_shp_path) {
+  
+  a <- graph_from_adjacency_matrix(network_structure, 
+                                   mode = 'directed', 
+                                   diag = FALSE)
+  
+  dist_matrix <- distances(a, mode = routing_mode, algorithm = "unweighted")*
+    raw_dist_matrix
+  
+  #For each time step and reach, compute nearest wet site
+  sites_status_matrix[sites_status_matrix==0] <- Inf
+  
+  dist_to_nearest_wet <- sites_status_matrix[,{
+    ts_status <- as.numeric(as.matrix(.SD))
+    pair_dist_status <- dist_matrix*as.numeric(as.matrix(.SD))
+    pair_dist_status[is.na(pair_dist_status)] <- Inf
+    as.list(Rfast::colMins(pair_dist_status, value=T))
+  }
+  ,  by=date] %>% 
+    setnames(names(sites_status_matrix))
+  
+  #Merge to UID for subsequent use
+  dist_to_nearest_wet_melt <- melt(dist_to_nearest_wet,
+                                   id.vars = 'date', 
+                                   variable.name = 'ID',
+                                   variable.factor = FALSE) %>%
+    .[, ID := as.integer(ID)]
+  
+  #Get original network data
+  net_dt <- in_net_shp_path %>%
+    as.data.table %>%
+    setorder(from)
+  
+  #Identify the outlet (NA in to_cat_shp)
+  outlet_from <- net_dt[is.na(net_dt$to_cat_shp),]$to 
+  
+  IDs_sel <- unique(dist_to_nearest_wet_melt$ID) %>%
+    setdiff(outlet_from) 
+  UIDs_to_assign <- net_dt[match(IDs_sel, net_dt$from), list(ID=IDs_sel, UID)]
+  
+  dist_to_nearest_wet_UID <- merge(dist_to_nearest_wet_melt, 
+                                   UIDs_to_assign, 
+                                   by='ID')
+  
+  return(dist_to_nearest_wet_UID)
+}
 #------ compile_hydrocon_country -----------------------------------------------
 # in_hydrostats_sub_comb <- tar_read(hydrostats_sub_comb)
 # in_STcon_directed <- tar_read(STcon_directed_formatted)
@@ -3365,25 +3453,6 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
                                 in_hydrocon_compiled, in_env_dt,
                                 in_genal_upa) {
   
-  #List column names by originating dt
-  dtcols <- list(
-    div = setdiff(names(spdiv), 
-                  c(names(in_hydrocon_compiled), names(in_env_dt))),
-    hydro_con = setdiff(names(in_hydrocon_compiled), 
-                        c(names(spdiv), names(in_env_dt))),
-    env = setdiff(names(in_env_dt),
-                  c(names(spdiv), names(in_hydrocon_compiled))),
-    group_cols = c("running_id", "site", "date", "campaign", "organism", 
-                   "organism_class", "country", "UID", "stream_type", 
-                   "state_of_flow", "state_of_flow_tm1"),
-    exclude_cols = c("ncampaigns", "name", "isflowing", "reach_length",
-                     "noflow_period", "noflow_period_dur", "last_noflowdate", "drn",
-                     "if_ip_number_and_size_2_axes_+_depth_of_the_pools",
-                     "latitude", "longitude", "reach_id", "hy", "month",
-                     'min_wetted_width', 'left_river_bank_slope', 'right_river_bank_slope',
-                     'qsim')
-  )
-  
   #Fill basin area NAs in environmental data for Genal basin in Spain
   #https://stackoverflow.com/questions/72940045/replace-na-in-a-table-with-values-in-column-with-another-table-by-conditions-in
   in_env_dt[is.na(basin_area_km2),
@@ -3406,6 +3475,26 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
   #Create "organism_class" column for labeling/coloring/merging
   spdiv[, organism_class := gsub('_[a-z]+', '', organism)]
   
+  
+  #List column names by originating dt
+  dtcols <- list(
+    div = setdiff(names(spdiv), 
+                  c(names(in_hydrocon_compiled), names(in_env_dt))),
+    hydro_con = setdiff(names(in_hydrocon_compiled), 
+                        c(names(spdiv), names(in_env_dt))),
+    env = setdiff(names(in_env_dt),
+                  c(names(spdiv), names(in_hydrocon_compiled))),
+    group_cols = c("running_id", "site", "date", "campaign", "organism", 
+                   "organism_class", "country", "UID", "stream_type", 
+                   "state_of_flow", "state_of_flow_tm1"),
+    exclude_cols = c("ncampaigns", "name", "isflowing", "reach_length",
+                     "noflow_period", "noflow_period_dur", "last_noflowdate", "drn",
+                     "if_ip_number_and_size_2_axes_+_depth_of_the_pools",
+                     "latitude", "longitude", "reach_id", "hy", "month",
+                     'min_wetted_width', 'left_river_bank_slope', 'right_river_bank_slope',
+                     'qsim')
+  )
+
   #Compute average metric between sediment and biofilm for eDNA
   avg_spdiv_edna <- spdiv[
     organism_class %in% c('dia', 'fun', 'bac'), 
@@ -3441,7 +3530,7 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
 #in_allvars_merged <- tar_read(allvars_merged)$dt
 
 plot_edna_biof_vs_sedi <- function(in_allvars_merged) {
-  allvars_edna <- allvars_merged[organism_class %in% c('dia', 'fun', 'bac'),] 
+  allvars_edna <- setDT(in_allvars_merged$dt)[organism_class %in% c('dia', 'fun', 'bac'),] 
   allvars_edna[, edna_source := gsub('^[a-z]+_', '', organism)]
   
   #Compare richness by source of edna (biofilm vs sediment), organism and country
@@ -3769,8 +3858,6 @@ create_ssn_europe <- function(in_network_path,
   
   return(out_ssn_list)
 }
-
-
 
 #------ compute_cor_matrix -----------------------------------------------------
 #in_allvars_merged <- tar_read(allvars_merged)
