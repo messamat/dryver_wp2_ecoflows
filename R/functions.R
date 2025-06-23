@@ -368,7 +368,7 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
     #   keep_column = 'hy',
     #   na.rm=TRUE)
     
-    #Compute moving-window statistics --------------------------------------------
+    #Compute moving-window DurD and FreD statistics --------------------------------------------
     rollingstep_short <- c(10, 30, 60, 90, 120, 180)
     rollingstep_long <- c(365, 365*5, 365*10)
     rollingstep <- c(rollingstep_short, rollingstep_long)
@@ -3293,7 +3293,7 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
 }
 
 
-#------ dist_to_nearest_wet ----------------------------------------------------
+#------ compute_Fdist ----------------------------------------------------
 #' Calculate distance to nearest active site
 #'
 #' This function calculates the distance to the nearest active site based on 
@@ -3332,7 +3332,7 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
 # raw_dist_matrix <- in_preformatted_data$river_dist_mat
 # routing_mode = 'in'
 
-dist_to_nearest_wet <- function(sites_status_matrix, network_structure, 
+compute_Fdist <- function(sites_status_matrix, network_structure, 
                                 routing_mode, raw_dist_matrix, in_net_shp_path) {
   
   a <- graph_from_adjacency_matrix(network_structure, 
@@ -3346,7 +3346,6 @@ dist_to_nearest_wet <- function(sites_status_matrix, network_structure,
   sites_status_matrix[sites_status_matrix==0] <- Inf
   
   dist_to_nearest_wet <- sites_status_matrix[,{
-    ts_status <- as.numeric(as.matrix(.SD))
     pair_dist_status <- dist_matrix*as.numeric(as.matrix(.SD))
     pair_dist_status[is.na(pair_dist_status)] <- Inf
     as.list(Rfast::colMins(pair_dist_status, value=T))
@@ -3379,6 +3378,35 @@ dist_to_nearest_wet <- function(sites_status_matrix, network_structure,
   
   return(dist_to_nearest_wet_UID)
 }
+
+#------ compute_Fdist_rolling ----------------------------------------------------
+# in_country <- 'Croatia'
+# dist_to_wet <- tar_read(dist_to_wet_directed)[[in_country]]
+# sites_dt <- as.data.table(vect(tar_read(site_snapped_gpkg_list)[[in_country]]))
+
+compute_Fdist_rolling <- function(in_Fdist_dt, in_sites_dt) {
+  rollingstep_short <- c(10, 30, 60, 90, 120, 180)
+  rollingstep_long <- c(365, 365*5, 365*10)
+  rollingstep <- c(rollingstep_short, rollingstep_long)
+  Fdist_sites_rolling <- in_Fdist_dt[UID %in% unique(in_sites_dt$UID),] %>% 
+    .[,
+      paste0("Fdist_mean_", rollingstep, "past") :=
+        frollapply(Fdist, n=rollingstep, 
+                   FUN=mean, 
+                   align='right'), by = .(UID)
+    ]
+  
+  Fdist_sites_rolling[,
+                       paste0("Fdist_max_", rollingstep, "past") :=
+                         frollapply(Fdist, n=rollingstep, 
+                                    FUN=max, 
+                                    align='right'), by = .(UID)
+  ]
+  
+  return(Fdist_sites_rolling)
+}
+
+
 #------ compile_hydrocon_country -----------------------------------------------
 # in_hydrostats_sub_comb <- tar_read(hydrostats_sub_comb)
 # in_STcon_directed <- tar_read(STcon_directed_formatted)

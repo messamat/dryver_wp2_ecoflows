@@ -572,28 +572,34 @@ analysis_targets <- list(
   
   #Compute distance to nearest wet site for each reach and time step
   tar_target(
-    dist_to_wet_undirected,
+    Fdist_network_undirected,
     future_lapply(names(preformatted_data_STcon), function(in_country) {
-      dist_to_nearest_wet(
+      compute_Fdist(
         sites_status_matrix = preformatted_data_STcon[[in_country]]$sites_status_matrix,
         network_structure = preformatted_data_STcon[[in_country]]$network_structure, 
         routing_mode = 'all', 
         raw_dist_matrix = preformatted_data_STcon[[in_country]]$river_dist_mat, 
-        in_net_shp_path = network_ssnready_shp_list[[in_country]])
-    }) %>% setNames(names(STcon_undirected_list))
+        in_net_shp_path = network_ssnready_shp_list[[in_country]]
+      ) %>%
+        compute_Fdist_rolling(
+          in_sites_dt=as.data.table(vect(site_snapped_gpkg_list)[[in_country]]))
+    }) %>% setNames(names(preformatted_data_STcon))
   ),
   
   #Compute distance to nearest wet site for each reach and time step
   tar_target(
-    dist_to_wet_directed,
+    Fdist_network_directed,
     future_lapply(names(preformatted_data_STcon), function(in_country) {
-      dist_to_nearest_wet(
+      compute_Fdist(
         sites_status_matrix = preformatted_data_STcon[[in_country]]$sites_status_matrix,
         network_structure = preformatted_data_STcon[[in_country]]$network_structure, 
         routing_mode = 'in', 
         raw_dist_matrix = preformatted_data_STcon[[in_country]]$river_dist_mat, 
-        in_net_shp_path = network_ssnready_shp_list[[in_country]])
-    }) %>% setNames(names(STcon_undirected_list))
+        in_net_shp_path = network_ssnready_shp_list[[in_country]]
+        ) %>%
+        compute_Fdist_rolling(
+          in_sites_dt=as.data.table(vect(site_snapped_gpkg_list)[[in_country]]))
+    }) %>% setNames(names(preformatted_data_STcon))
   ),
   
   #Compile hydrostats and connectivity data together as dt
