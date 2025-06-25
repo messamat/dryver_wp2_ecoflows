@@ -43,10 +43,10 @@ hydro_combi <- expand.grid(
 if (!interactive()) {
   perf_ratio <- 0.7 #Set how much you want to push your computer (% of cores and RAM)
   nthreads <- round(parallel::detectCores(logical=F)*perf_ratio)
-  future::plan("future::multisession", workers=nthreads)
+  #future::plan("future::multisession", workers=nthreads)
   total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
   options(future.globals.maxSize = perf_ratio*total_ram)
-  #tar_option_set(controller = crew_controller_local(workers = nthreads)) #Set up parallel computing in targets
+  tar_option_set(controller = crew_controller_local(workers = nthreads)) #Set up parallel computing in targets
 }
 
 #--------------------------  Define targets plan -------------------------------
@@ -197,7 +197,7 @@ preformatting_targets <- list(
     bio_dt,
     read_biodt(path_list = bio_data_paths,
                in_metadata_edna = metadata_edna,
-               include_bacteria = T)
+               include_bacteria = T) 
   )
   ,
   
@@ -572,7 +572,7 @@ analysis_targets <- list(
   
   #Compute distance to nearest wet site for each reach and time step
   tar_target(
-    Fdist_network_undirected,
+    Fdist_undirected,
     future_lapply(names(preformatted_data_STcon), function(in_country) {
       compute_Fdist(
         sites_status_matrix = preformatted_data_STcon[[in_country]]$sites_status_matrix,
@@ -581,14 +581,19 @@ analysis_targets <- list(
         raw_dist_matrix = preformatted_data_STcon[[in_country]]$river_dist_mat, 
         in_net_shp_path = network_ssnready_shp_list[[in_country]]
       ) %>%
-        compute_Fdist_rolling(
-          in_sites_dt=as.data.table(vect(site_snapped_gpkg_list)[[in_country]]))
+        compute_Fdist_rolling( #Compute average and max distance within rolling windows
+          in_sites_dt=as.data.table(vect(site_snapped_gpkg_list[[in_country]]))) %>%
+        melt(id.vars=c('date', 'UID'), #Convert to long format
+             measure.vars = grep('Fdist_', names(.), value=T),
+             value.name = 'fdist_value')
     }) %>% setNames(names(preformatted_data_STcon))
   ),
   
   #Compute distance to nearest wet site for each reach and time step
+  #To avoid issues with infinites when reach has no wet upstream segments, 
+  #convert infinite to twice the maximum distance to wet upstream segment otherwise
   tar_target(
-    Fdist_network_directed,
+    Fdist_directed,
     future_lapply(names(preformatted_data_STcon), function(in_country) {
       compute_Fdist(
         sites_status_matrix = preformatted_data_STcon[[in_country]]$sites_status_matrix,
@@ -597,8 +602,13 @@ analysis_targets <- list(
         raw_dist_matrix = preformatted_data_STcon[[in_country]]$river_dist_mat, 
         in_net_shp_path = network_ssnready_shp_list[[in_country]]
         ) %>%
-        compute_Fdist_rolling(
-          in_sites_dt=as.data.table(vect(site_snapped_gpkg_list)[[in_country]]))
+        .[is.infinite(Fdist), #Replace infinite Fdist with twice max otherwise
+          Fdist := .[!is.infinite(Fdist), 2*max(Fdist)]] %>%
+        compute_Fdist_rolling( #Compute average and max distance within rolling windows
+          in_sites_dt=as.data.table(vect(site_snapped_gpkg_list[[in_country]]))) %>%
+        melt(id.vars=c('date', 'UID'), #Convert to long format
+             measure.vars = grep('Fdist_', names(.), value=T),
+             value.name = 'fdist_value') 
     }) %>% setNames(names(preformatted_data_STcon))
   ),
   
@@ -609,6 +619,8 @@ analysis_targets <- list(
       compile_hydrocon_country(hydrostats_sub_comb,
                                STcon_directed_formatted,
                                STcon_undirected_formatted,
+                               Fdist_directed,
+                               Fdist_undirected,
                                site_snapped_gpkg_list, 
                                in_country)
     }) %>% rbindlist 
@@ -712,7 +724,8 @@ analysis_targets <- list(
     corplots_div_hydrowindow, {
       hydrovar_list <- c('DurD', 'PDurD', 'FreD', 'PFreD', 
                          'uQ90', 'oQ10', 'maxPQ', 'PmeanQ',
-                         'STcon.*_directed', 'STcon.*_undirected')
+                         'STcon.*_directed', 'STcon.*_undirected',
+                         'Fdist.*_directed', 'Fdist.*_undirected')
       lapply(hydrovar_list, function(in_var_substr) {
         plot_cor_hydrowindow(in_cor_dt = cor_matrices_list$div_bydrn, 
                              temporal_var_substr = in_var_substr, 
@@ -758,7 +771,8 @@ analysis_targets <- list(
   #All organisms: max 12
   tar_target(
     organism_list,
-    c('miv_nopools') #, 'miv_nopools_flying', 'miv_nopools_nonflying')
+    c('miv_nopools', 'miv_nopools_flying', 'miv_nopools_nonflying', 
+      'fun', 'dia', 'bac')
       #unique(allvars_merged$dt$organism)
   )
   ,
@@ -775,19 +789,22 @@ analysis_targets <- list(
       .[, label := paste(down, up, euc, sep='_')]
   ),
   
-  #Define all hydrological variables: 14 (max ~73)
+  #Define all hydrological variables: 16 (max ~73)
   tar_target(
     hydro_vars_forssn, 
     {
       hydrovar_grid <- expand.grid(
         c('DurD', 'FreD'), #'PDurD', 'FreD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'
-        paste0(c(30, 90, 365, 3650), 'past')
+        paste0(c(30, 365, 3650), 'past')
       ) 
       stcon_grid <- expand.grid(paste0('STcon_m', c(30, 365)),
                                 c('_directed', '_undirected'))
+      fdist_grid <- expand.grid(paste0('Fdist_mean_', c(30, 365), 'past'),
+                                c('_directed', '_undirected'))
       hydro_regex_list <- c(
         paste0(hydrovar_grid$Var1,'.*', hydrovar_grid$Var2),
-        paste0(stcon_grid$Var1, stcon_grid$Var2)
+        paste0(stcon_grid$Var1, stcon_grid$Var2),
+        paste0(fdist_grid$Var1, fdist_grid$Var2)
       )
       
       lapply(hydro_regex_list, function(var_str) {
@@ -797,11 +814,27 @@ analysis_targets <- list(
       }) %>% unlist
     }
   )
-  # ,
+  ,
   
-  #Run SSN for each chosen variable and time window
+  #Run a first SSN with a single hydrological variable for each organism 
+  #to determine the top spatial covariance types
+  tar_target(
+    ssn_richness_covtype,
+    model_ssn_hydrowindow(
+      in_ssn = ssn_eu,
+      organism = organism_list,
+      formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country',
+      hydro_var = 'DurD365past',
+      response_var = 'richness',
+      ssn_covtypes = ssn_covtypes
+    ),
+    pattern = map(organism_list),
+    iteration = "list"
+  )
+    
+  # #Run SSN for each chosen variable and time window
   # tar_target(
-  #   ssn_richness_hydrowindow_,
+  #   ssn_richness_hydrowindow,
   #   model_ssn_hydrowindow(
   #     in_ssn = ssn_eu,
   #     organism = organism_list,
@@ -814,15 +847,19 @@ analysis_targets <- list(
   #   iteration = "list"
   # )
 )
+  
 
-# combined_ssntargets <- list(
-#   tar_combine(
-#     ssnmodels_combined,
-#     mapped_ssntargets[["ssn_richness_hydrowindow"]],
-#     command = list(!!!.x)
-#   )
-# )
+# ssn_master_table <- lapply(ssn_richness_hydrowindow_, function(x) x$ssn_glance) %>%
+#   rbindlist
 
+  # combined_ssntargets <- list(
+  #   tar_combine(
+  #     ssnmodels_combined,
+  #     mapped_ssntargets[["ssn_richness_hydrowindow"]],
+  #     command = list(!!!.x)
+  #   )
+  # )
+  
 
 list(preformatting_targets, mapped_hydrotargets, 
      combined_hydrotargets, analysis_targets) %>%

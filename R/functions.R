@@ -1296,22 +1296,22 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
   dt_list$fun_sedi[
     is.na(date),
     date := in_metadata_edna[sample_type=='sediment', .(running_id, date)][
-      .SD, on='running_id', x.date]]
+      .SD, on='running_id', x.date]] 
   dt_list$fun_biof[
     is.na(date),
     date := in_metadata_edna[sample_type=='biofilm', .(running_id, date)][
-      .SD, on='running_id', x.date]]
+      .SD, on='running_id', x.date]] 
+  
   #Replace dates in dia_biof, which seem erroneous
   dt_list$dia_biof[
     ,
     date := in_metadata_edna[sample_type=='biofilm', .(running_id, date)][
-      .SD, on='running_id', x.date]] %>%
-    .[running_id!='GEN04_1', ] #Not in metadata, only for some organisms. Too unsure. Otherwise: use 2021-05-30', Same as GEN02 and GEN07, the closest sites sampled that campaign
+      .SD, on='running_id', x.date]] 
 
   #Add Campaign and Site to bacteria data, then remove pool sites
   dt_list$bac_sedi[, c('site', 'campaign') := tstrsplit(v1, '_')] %>%
     setnames('v1', 'running_id') %>%
-    .[, campaign := as.integer(campaign)]
+    .[, campaign := as.integer(campaign)] 
   dt_list$bac_biof[, c('site', 'campaign') := tstrsplit(v1, '_')] %>%
     setnames('v1', 'running_id') %>%
     .[, campaign := as.integer(campaign)]
@@ -1355,13 +1355,14 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
   #Correct typo in date for fungi  
   dt_list$fun_sedi[date == as.Date("2012-02-25"), 
                    date := as.Date("2021-02-25")]
+
   dt_list$fun_biof[date == as.Date("2012-02-25"), 
                    date := as.Date("2021-02-25")]
   
   if (!include_bacteria) {
     dt_list <- dt_list[!grepl('bac_', names(dt_list))]
   }
-
+  
   return(dt_list)
 }
 
@@ -3324,7 +3325,7 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
 #' between pairs of sites
 #' 
 
-# in_country <- 'Croatia'
+# in_country <- 'Spain'
 # in_preformatted_data = tar_read(preformatted_data_STcon)[[in_country]]
 # in_net_shp_path <- tar_read(network_ssnready_shp_list)[[in_country]]
 # sites_status_matrix = in_preformatted_data$sites_status_matrix
@@ -3335,18 +3336,26 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
 compute_Fdist <- function(sites_status_matrix, network_structure, 
                                 routing_mode, raw_dist_matrix, in_net_shp_path) {
   
-  a <- graph_from_adjacency_matrix(network_structure, 
+  #Get a matrix of adjacency relationship among segments that includes routing mode
+  #(1 if connected, Inf if not connected -- depending on routing mode)
+  routed_adjacency <- graph_from_adjacency_matrix(network_structure, 
                                    mode = 'directed', 
-                                   diag = FALSE)
+                                   diag = FALSE) %>%
+    distances(mode = routing_mode, 
+              algorithm = "unweighted")
+  routed_adjacency[!is.infinite(routed_adjacency)] <- 1
   
-  dist_matrix <- distances(a, mode = routing_mode, algorithm = "unweighted")*
-    raw_dist_matrix
+  #To turn on or off the "routing mode" parameter
+  #When routing mode is "in", Inf values for sites downstream (inverse when mode is "out")
+  #value of 0 for site to itself, and actual distance value for sites upstream (downstream if mode is out)
+  directed_dist_matrix <- routed_adjacency*raw_dist_matrix
   
   #For each time step and reach, compute nearest wet site
-  sites_status_matrix[sites_status_matrix==0] <- Inf
+  #Convert self-distance to Inf to avoid taking it in account with column minimums
+  sites_status_matrix[sites_status_matrix==0] <- Inf 
   
   dist_to_nearest_wet <- sites_status_matrix[,{
-    pair_dist_status <- dist_matrix*as.numeric(as.matrix(.SD))
+    pair_dist_status <- directed_dist_matrix*as.numeric(as.matrix(.SD)) #Multiple distance by site status (Inf is dry, 1 is wet)
     pair_dist_status[is.na(pair_dist_status)] <- Inf
     as.list(Rfast::colMins(pair_dist_status, value=T))
   }
@@ -3358,7 +3367,8 @@ compute_Fdist <- function(sites_status_matrix, network_structure,
                                    id.vars = 'date', 
                                    variable.name = 'ID',
                                    variable.factor = FALSE) %>%
-    .[, ID := as.integer(ID)]
+    .[, ID := as.integer(ID)] %>%
+    setnames('value', 'Fdist')
   
   #Get original network data
   net_dt <- in_net_shp_path %>%
@@ -3375,19 +3385,24 @@ compute_Fdist <- function(sites_status_matrix, network_structure,
   dist_to_nearest_wet_UID <- merge(dist_to_nearest_wet_melt, 
                                    UIDs_to_assign, 
                                    by='ID')
-  
+
   return(dist_to_nearest_wet_UID)
 }
 
 #------ compute_Fdist_rolling ----------------------------------------------------
-# in_country <- 'Croatia'
-# dist_to_wet <- tar_read(dist_to_wet_directed)[[in_country]]
-# sites_dt <- as.data.table(vect(tar_read(site_snapped_gpkg_list)[[in_country]]))
+# in_country <- 'Czech'
+# in_Fdist_dt <- tar_read(dist_to_wet_directed)[[in_country]]
+# in_sites_dt <- as.data.table(vect(tar_read(site_snapped_gpkg_list)[[in_country]]))
+# setnames(setDT(in_Fdist_dt), 'value', 'Fdist')
+# 
+# check <- compute_Fdist_rolling(in_Fdist_dt, in_sites_dt)
 
 compute_Fdist_rolling <- function(in_Fdist_dt, in_sites_dt) {
-  rollingstep_short <- c(10, 30, 60, 90, 120, 180)
+  rollingstep_short <-  c(10, 30, 60, 90, 120, 180)
   rollingstep_long <- c(365, 365*5, 365*10)
   rollingstep <- c(rollingstep_short, rollingstep_long)
+  
+  #Compute mean Fdist within rolling window, only for sites
   Fdist_sites_rolling <- in_Fdist_dt[UID %in% unique(in_sites_dt$UID),] %>% 
     .[,
       paste0("Fdist_mean_", rollingstep, "past") :=
@@ -3396,6 +3411,7 @@ compute_Fdist_rolling <- function(in_Fdist_dt, in_sites_dt) {
                    align='right'), by = .(UID)
     ]
   
+  #Compute max Fdist within rolling window, only for sites
   Fdist_sites_rolling[,
                        paste0("Fdist_max_", rollingstep, "past") :=
                          frollapply(Fdist, n=rollingstep, 
@@ -3411,12 +3427,16 @@ compute_Fdist_rolling <- function(in_Fdist_dt, in_sites_dt) {
 # in_hydrostats_sub_comb <- tar_read(hydrostats_sub_comb)
 # in_STcon_directed <- tar_read(STcon_directed_formatted)
 # in_STcon_undirected <- tar_read(STcon_undirected_formatted)
-# in_snapped_sites_gpkg_list <- tar_read(snapped_sites_gpkg_list)
+# in_Fdist_directed <- tar_read(Fdist_network_directed)
+# in_Fdist_undirected <- tar_read(Fdist_network_undirected)
+# in_site_snapped_gpkg_list <- tar_read(site_snapped_gpkg_list)
 # in_country <- 'Spain'
 
 compile_hydrocon_country <- function(in_hydrostats_sub_comb, 
                                      in_STcon_directed,
                                      in_STcon_undirected, 
+                                     in_Fdist_directed,
+                                     in_Fdist_undirected,
                                      in_site_snapped_gpkg_list,
                                      in_country) {
   
@@ -3456,13 +3476,23 @@ compile_hydrocon_country <- function(in_hydrostats_sub_comb,
   #   dcast(date+UID+nsim~variable, value.var = 'stcon_value') %>%
   #   .[, nsim := as.integer(nsim)]
   
+  #Format Fdist data
+  in_Fdist_directed[[in_country]][, variable := paste0(variable, '_directed')]
+  in_Fdist_undirected[[in_country]][, variable := paste0(variable, '_undirected')]
+  Fdist_cast <- rbind(in_Fdist_directed[[in_country]],
+                      in_Fdist_undirected[[in_country]]) %>%
+    dcast(date+UID~variable, value.var = 'fdist_value')
+
+  #Merge all statistics
   out_dt <- merge(hydrostats_isflowing_site[, cols_to_keep_site, with=F],
                   hydrostats_isflowing_drn[, cols_to_keep_drn, with=F],
                   by='date') %>%
     merge(hydrostats_qsim, by=c('date', 'site')) %>%
     merge(in_sites_dt[country_sub == in_country,
                       .(site, UID)], ., by='site') %>%
-    merge(STcon_cast, by=c('date', 'UID'), all.x=T)
+    merge(STcon_cast, by=c('date', 'UID'), all.x=T) %>%
+    merge(Fdist_cast, by=c('date', 'UID'), all.x=T)
+    
   # merge(STcon_cast, by=c('date', 'UID', 'nsim'), all.x=T) #with nsim
   
   return(out_dt)  
@@ -3495,11 +3525,10 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
   #Merge diversity data
   setDT(in_spdiv_drn)
   spdiv <- merge(in_spdiv_local, in_spdiv_drn,
-                 by=c('country', 'organism'))
-  #Fill in date for merging with hydrological data
-  spdiv[site=='GEN04' & campaign=='1', 
-        date := as.Date('2021-05-30')] #Same as GEN02 and GEN07, the closest sites sampled that campaign
-  
+                 by=c('country', 'organism')) %>%
+    .[!(site=='GEN04' & campaign=='1'),]
+  #Remove GEN04_1 from all organisms, no local environmental data, sampled only for eDNA. Too unsure.
+
   #Create "organism_class" column for labeling/coloring/merging
   spdiv[, organism_class := gsub('_[a-z]+', '', organism)]
   
@@ -3594,7 +3623,7 @@ plot_edna_biof_vs_sedi <- function(in_allvars_merged) {
 # autoplot(local_env_pca$miv_nopools$pca, data = local_env_pca$miv_nopools$trans_dt, 
 #          loadings = TRUE, loadings.colour = 'blue',
 #          loadings.label = TRUE, loadings.label.size = 5) + theme_bw()
-#in_allvars_merged <- tar_read(allvars_merged)
+# in_allvars_merged <- tar_read(allvars_merged)
 ordinate_local_env <- function(in_allvars_merged) {
   allvars_merged_copy <- copy(in_allvars_merged)
   
@@ -3645,9 +3674,9 @@ ordinate_local_env <- function(in_allvars_merged) {
   #                                           num_pca_axes = 4)
   
   #2. Compute PCA for eDNA data ------------------------------------------------
-  edna_orglist <- c('dia_sedi', 'dia_biof', 
-                    'fun_sedi', 'fun_biof', 
-                    'bac_sedi_nopools', 'bac_biof_nopools')
+  edna_orglist <- c('dia_sedi', 'dia_biof', 'dia', 
+                    'fun_sedi', 'fun_biof',  'fun',
+                    'bac_sedi_nopools', 'bac_biof_nopools', 'bac')
   
   env_cols_edna <- c('filamentous_algae', 'incrusted_algae', 
                      'macrophyte_cover', 'leaf_litter_cover','moss_cover', 
@@ -3702,7 +3731,9 @@ ordinate_local_env <- function(in_allvars_merged) {
     out_list_edna$dt)
   
 
-  out_dt <- rbind(out_dt_miv, out_dt_edna)
+  out_dt <- rbind(out_dt_miv, out_dt_edna) %>%
+    .[, organism_class := gsub('_[a-z]+', '', organism)] %>%
+    data.table::unique(by=c('country', 'site', 'date', 'organism_class'))
 
   return(list(
     miv_nopools = out_list_miv,
@@ -3794,7 +3825,7 @@ create_ssn_europe <- function(in_network_path,
                            in_allvars_merged$dt, 
                           by=c('country', 'site')) %>%
     merge(in_local_env_pca$dt_all,
-          by=c('site', 'date', 'country', 'organism'))
+          by=c('site', 'date', 'country', 'organism_class'))
   
   sites_list <- list(sites = sites_lsn_attri)
   
@@ -3863,7 +3894,7 @@ create_ssn_europe <- function(in_network_path,
   
   
   #Assemble an SSN for each organism 
-  #(so that it only includes data for the  correpsonding sites and dates)
+  #(so that it only includes data for the  corresponding sites and dates)
   out_ssn_list <- lapply(unique(sites_list_lsn$sites$organism), function(in_org) {
     out_ssn_path <- paste0(out_dir, '_', out_ssn_name, '_', in_org, '.ssn')
     
@@ -4342,12 +4373,12 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes, estmethod = "ml") {
 #                'STcon.*_directed', 'STcon.*_undirected')
 # var_substr <- 'STcon.*_directed'
 
-# in_ssn = tar_read(ssn_eu)
-# organism = 'miv_nopools'
-# formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country'
-# hydro_var = 'DurD.*60past'
-# response_var = 'richness'
-# tar_load(ssn_covtypes)
+in_ssn = tar_read(ssn_eu)
+organism = 'miv_nopools_flying'
+formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country'
+hydro_var = 'DurD365past'
+response_var = 'richness'
+tar_load(ssn_covtypes)
 
 model_ssn_hydrowindow <- function(in_ssn, organism, formula_root, 
                                   hydro_var, response_var, ssn_covtypes) {
@@ -4358,6 +4389,7 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
   
   full_formula <- paste0(response_var, formula_root,' + ', hydro_var, ' + ',
                          hydro_var, ':country')
+  
   
   ssn_list <- quick_ssn(in_ssn = in_ssn[[organism]]$ssn, 
                         in_formula = as.formula(full_formula),
@@ -5123,9 +5155,6 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
 #   coord_flip() +
 #   theme(axis.text.y = element_text(
 #     colour = class_colors_ward_morecl))
-
-
-
 
 #------ tabulate_cor_matrix ----------------------------------------------------
 #------ plot_spdiv_local -------------------------------------------------------
