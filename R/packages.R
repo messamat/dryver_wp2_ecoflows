@@ -22,6 +22,7 @@ pkg_vec <- list(
   'memuse',
   'MuMIn', 
   'ncdf4',
+  'patchwork',
   'phangorn',
   'plotly',
   'predictmeans',

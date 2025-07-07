@@ -4496,73 +4496,6 @@ select_ssn_covariance <- function(in_ssnmodels) {
 # 
 # in_organism <- 'miv_nopools'
 
-plot_ssn2_marginal_effects <- function(
-    in_mod,                # fitted SSN2 model
-    hydro_var,          # the covariate you want to VARY
-    fixed_var,          # the covariate you want to FIX at mean
-    fixed_var_mean,
-    group_var = "country",
-    n_points = 100
-) {
-  # Get fixed effects
-  fixef_dt <- SSN2::tidy(in_mod) %>% as.data.table()
-  
-  # Identify base terms
-  intercept <- fixef_dt[term == "(Intercept)", estimate]
-  b_hydro   <- fixef_dt[term == hydro_var, estimate]
-  b_fixed   <- fixef_dt[term == fixed_var, estimate]
-  
-  # Find interaction slopes for hydro
-  interaction_pattern <- paste0(group_var, ".*:", hydro_var)
-  hydro_interactions <- fixef_dt[grepl(interaction_pattern, term)]
-  hydro_interactions[, group := sub(paste0(group_var, "(.*):.*"), "\\1", term)]
-  hydro_interactions <- hydro_interactions[, .(group = group, b_hydro_group = estimate)]
-  
-  # Find interaction slopes for fixed covariate
-  fixed_pattern <- paste0(fixed_var, ":", group_var)
-  fixed_interactions <- fixef_dt[str_starts(term, fixed(fixed_pattern)),]
-  fixed_interactions[, group := sub(paste0(fixed_var, ":.*", group_var, "(.*)"), "\\1", term)]
-  fixed_interactions <- fixed_interactions[, .(group = group, b_fixed_group = estimate)]
-  
-  # Get observed data to build range & mean
-  mod_obs <- in_mod$ssn.object$obs %>% as.data.table()
-  
-  # Build new data grid: hydro varies, fixed stays constant
-  grid_hydro <- mod_obs[, .(
-    hydro = seq(min(get(hydro_var), na.rm = TRUE),
-                max(get(hydro_var), na.rm = TRUE),
-                length.out = n_points)
-  ), by = group_var]
-  
-  newdata_dt <- copy(grid_hydro)
-  setnames(newdata_dt, old = group_var, new = "group")
-  newdata_dt[, fixed := fixed_var_mean]
-  
-  # Merge interactions
-  newdata_dt <- merge(newdata_dt, hydro_interactions, by = "group", all.x = TRUE)
-  newdata_dt <- merge(newdata_dt, fixed_interactions, by = "group", all.x = TRUE)
-  
-  # Fill NA with 0 if no interaction
-  newdata_dt[is.na(b_hydro_group), b_hydro_group := 0]
-  newdata_dt[is.na(b_fixed_group), b_fixed_group := 0]
-  
-  # Calculate predicted
-  newdata_dt[, predicted :=
-               intercept +
-               (b_hydro + b_hydro_group) * hydro +
-               (b_fixed + b_fixed_group) * fixed
-  ]
-  
-  # Plot
-  ggplot(newdata_dt, aes(x = hydro, y = predicted, color = group)) +
-    geom_line(linewidth = 1) +
-    labs(
-      x = hydro_var,
-      y = "Predicted",
-      color = group_var
-    ) +
-    theme_bw()
-}
 
 format_ssn_hydrowindow <- function(in_ssnmodels, in_organism) {
 # 
@@ -4627,7 +4560,8 @@ format_ssn_hydrowindow <- function(in_ssnmodels, in_organism) {
     return(aug_data)
   }) %>% rbindlist
   
-  mod_preds_plot <- ggplot(mod_preds, 
+  #Plot observation vs predictions
+  obs_preds_plot <- ggplot(mod_preds, 
                            aes(x=.fitted, y=richness, color=country)) +
     geom_abline() +
     geom_point() +
@@ -4635,49 +4569,115 @@ format_ssn_hydrowindow <- function(in_ssnmodels, in_organism) {
     facet_grid(country~hydro_var) +
     theme_bw()
   
-  ggplot(mod_preds[hydro_var == "DurD3650past",], 
-         aes(x = DurD3650past, y = .fitted, color = country)) +
+  mod_preds_melt <- mod_preds[, 
+                              c(ssn_hydrowindow_best$hydro_var, 'country', 
+                                'basin_area_km2', '.fitted'), 
+                              with=F] %>%
+    melt(id.vars=c('country', 'basin_area_km2', '.fitted'))
+  
+  #Plot predictor variable vs predictions
+  x_preds_plot <- ggplot(mod_preds_melt, 
+         aes(x = value, y = .fitted, color = country)) +
     geom_point() +
     geom_smooth(method='lm') +
-    facet_wrap(~country) +
+    facet_wrap(country~variable, scales='free') +
     theme_bw()
-  
-  ssn_hydrowindow_best[1, SSN2::tidy(mod[[1]])]
-  ssn_hydrowindow_best[4, summary(mod[[1]])]
-  
-  in_mod <-  ssn_hydrowindow_best[1, mod[[1]]]
-  
-  #Get model effects
-  fixef_dt <- SSN2::tidy(ssn_hydrowindow_best[1, mod[[1]]]) %>% as.data.table
-  
-  interaction_effects <- fixef_dt[grepl(":DurD3650past", term),] %>%
-    .[, country := sub("country(.*):DurD3650past", "\\1", term)] %>%
-    .[, list(country=country, 
-             hydro_interaction=estimate)] 
-  
-  #Get new data
-  mod_obs <- in_mod$ssn.object$obs %>% as.data.table
-  
-  newdata_dt <- mod_obs[,
-                       list(DurD3650past = seq(min(DurD3650past),
-                                               max(DurD3650past),
-                                               length.out = 100)
-                       ), by=country] %>%
-    .[, `log10(basin_area_km2)` := mean(log10(mod_obs$basin_area_km2))] %>%
-    merge(interaction_effects, by='country')
-  
-  newdata_dt[, predicted := 
-               fixef_dt[term=="(Intercept)", estimate] +
-               fixef_dt[term=="DurD3650past", estimate] * DurD3650past +
-               hydro_interaction * DurD3650past+
-               fixef_dt[term=="log10(basin_area_km2)", estimate] * `log10(basin_area_km2)` 
-  ]
-  
-  ggplot(newdata_dt, aes(x=DurD3650past, y=predicted, color=country)) +
-    geom_line() +
-    theme_bw()
-  
 
+  #Plot the "marginal" effect of each hydrological variable while
+  #keeping surface area at global mean and global intercept
+  plot_ssn2_marginal_effects <- function(
+    in_mod,                # fitted SSN2 model
+    hydro_var,          # the covariate you want to VARY
+    fixed_var,          # the covariate you want to FIX at mean
+    fixed_var_mean,
+    group_var = "country",
+    n_points = 100
+  ) {
+    # Get fixed effects
+    fixef_dt <- SSN2::tidy(in_mod) %>% as.data.table()
+    
+    # Identify base terms
+    intercept <- fixef_dt[term == "(Intercept)", estimate]
+    b_hydro   <- fixef_dt[term == hydro_var, estimate]
+    b_fixed   <- fixef_dt[term == fixed_var, estimate]
+    
+    # Find interaction slopes for hydro
+    interaction_pattern <- paste0(group_var, ".*:", hydro_var)
+    hydro_interactions <- fixef_dt[grepl(interaction_pattern, term)]
+    hydro_interactions[, group := sub(paste0(group_var, "(.*):.*"), "\\1", term)]
+    hydro_interactions <- hydro_interactions[, .(group = group, b_hydro_group = estimate)]
+    
+    # Find interaction slopes for fixed covariate
+    fixed_pattern <- paste0(fixed_var, ":", group_var)
+    fixed_interactions <- fixef_dt[str_starts(term, fixed(fixed_pattern)),]
+    fixed_interactions[, group := sub(paste0(fixed_var, ":.*", group_var, "(.*)"), "\\1", term)]
+    fixed_interactions <- fixed_interactions[, .(group = group, b_fixed_group = estimate)]
+    
+    # Get observed data to build range & mean
+    mod_obs <- in_mod$ssn.object$obs %>% as.data.table()
+    
+    # Build new data grid: hydro varies, fixed stays constant
+    grid_hydro <- mod_obs[, .(
+      hydro = seq(min(get(hydro_var), na.rm = TRUE),
+                  max(get(hydro_var), na.rm = TRUE),
+                  length.out = n_points)
+    ), by = group_var]
+    
+    newdata_dt <- copy(grid_hydro)
+    setnames(newdata_dt, old = group_var, new = "group")
+    newdata_dt[, fixed := fixed_var_mean]
+    
+    # Merge interactions
+    newdata_dt <- merge(newdata_dt, hydro_interactions, by = "group", all.x = TRUE)
+    newdata_dt <- merge(newdata_dt, fixed_interactions, by = "group", all.x = TRUE)
+    
+    # Fill NA with 0 if no interaction
+    newdata_dt[is.na(b_hydro_group), b_hydro_group := 0]
+    newdata_dt[is.na(b_fixed_group), b_fixed_group := 0]
+    
+    # Calculate predicted
+    newdata_dt[, predicted :=
+                 intercept +
+                 (b_hydro + b_hydro_group) * hydro +
+                 (b_fixed + b_fixed_group) * fixed
+    ]
+    
+    # Plot
+    out_plot <- ggplot(newdata_dt, aes(x = hydro, y = predicted, color = group)) +
+      geom_line(linewidth = 1) +
+      labs(
+        x = hydro_var,
+        y = "Predicted",
+        color = group_var
+      ) +
+      theme_bw()
+    
+    return(out_plot)
+  }
+  
+  marginal_plot <- lapply(
+    unique(ssn_hydrowindow_best$hydro_var), 
+    function(in_hydro_var) {
+      in_mod <- ssn_hydrowindow_best[hydro_var == in_hydro_var, mod[[1]]]
+      
+      out_plot <- plot_ssn2_marginal_effects(
+        in_mod =  in_mod,
+        hydro_var = in_hydro_var,
+        fixed_var = "log10(basin_area_km2)",
+        fixed_var_mean = mean(log10(in_mod$ssn.object$obs[["basin_area_km2"]])),
+        group_var = "country"
+      )
+      return(out_plot)
+    })  %>%
+    patchwork::wrap_plots(.)
+  
+  return(list(
+    dt = ssn_hydrowindow_perf_allvars,
+    plot_varcomp = plot_ssn_hydrowindow_varcomp,
+    plot_obs_preds = obs_preds_plot,
+    plot_x_preds = x_preds_plot,
+    plot_marginal = marginal_plot
+  ))
 }
 
 #------ model_miv_t ------------------------------------------------------------

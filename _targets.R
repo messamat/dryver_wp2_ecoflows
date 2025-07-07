@@ -891,6 +891,15 @@ analysis_targets <- list(
     ssn_covtype_selected,
     select_ssn_covariance(in_ssnmodels=ssn_richness_hydrowindow)
   )
+  ,
+  
+  tar_target(
+    ssn_richness_hydrowindow_formatted,
+    future_lapply(organism_list, function(in_organism) {
+      format_ssn_hydrowindow(in_ssnmodels = ssn_richness_hydrowindow, 
+                             in_organism = in_organism)
+    }) %>% setnames(organism_list)
+  )
 )
 
 
