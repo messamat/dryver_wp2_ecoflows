@@ -3623,7 +3623,9 @@ plot_edna_biof_vs_sedi <- function(in_allvars_merged) {
 # autoplot(local_env_pca$miv_nopools$pca, data = local_env_pca$miv_nopools$trans_dt, 
 #          loadings = TRUE, loadings.colour = 'blue',
 #          loadings.label = TRUE, loadings.label.size = 5) + theme_bw()
-# in_allvars_merged <- tar_read(allvars_merged)
+
+#in_allvars_merged <- tar_read(allvars_merged)
+
 ordinate_local_env <- function(in_allvars_merged) {
   allvars_merged_copy <- copy(in_allvars_merged)
   
@@ -3733,7 +3735,8 @@ ordinate_local_env <- function(in_allvars_merged) {
 
   out_dt <- rbind(out_dt_miv, out_dt_edna) %>%
     .[, organism_class := gsub('_[a-z]+', '', organism)] %>%
-    data.table::unique(by=c('country', 'site', 'date', 'organism_class'))
+    .[, organism := NULL] %>%
+    unique(by=c('country', 'site', 'date', 'organism_class')) 
 
   return(list(
     miv_nopools = out_list_miv,
@@ -4373,12 +4376,12 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes, estmethod = "ml") {
 #                'STcon.*_directed', 'STcon.*_undirected')
 # var_substr <- 'STcon.*_directed'
 
-in_ssn = tar_read(ssn_eu)
-organism = 'miv_nopools_flying'
-formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country'
-hydro_var = 'DurD365past'
-response_var = 'richness'
-tar_load(ssn_covtypes)
+# in_ssn = tar_read(ssn_eu)
+# organism = 'miv_nopools_flying'
+# formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country'
+# hydro_var = 'DurD365past'
+# response_var = 'richness'
+# tar_load(ssn_covtypes)
 
 model_ssn_hydrowindow <- function(in_ssn, organism, formula_root, 
                                   hydro_var, response_var, ssn_covtypes) {
@@ -4438,16 +4441,141 @@ plot_hydro_comparison <- function(in_cor_dt, color_list) {
     theme_bw()
 }  
 
+#------ select_ssn_covariance -------------------------------------------------
+#in_ssnmodels <- tar_read(ssn_richness_hydrowindow)
+
+select_ssn_covariance <- function(in_ssnmodels) {
+  #Rank covariance structures by average delta_AICc by organism
+  ssn_glance_bind <- lapply(in_ssnmodels, `[[`, "ssn_glance") %>%
+    rbindlist
+  
+  ssn_glance_bind[, delta_AICc := (AICc - min(AICc)),
+                  by=.(hydro_var, organism)] %>%
+    .[, `:=`(delta_AICc_covtypemean = mean(delta_AICc), 
+             delta_AICc_covtypemedian = median(delta_AICc),
+             n = .N), by=.(organism, covtypes)]
+  
+  covtype_stats <- ssn_glance_bind[, .(delta_AICc_covtypemean,
+                      delta_AICc_covtypemedian,
+                      organism,
+                      covtypes,
+                      n)] %>%
+    unique
+  
+  covtype_stats_plot <- ggplot(ssn_glance_bind, 
+                               aes(x=tidytext::reorder_within(
+                                 as.factor(covtypes), 
+                                 delta_AICc_covtypemean,
+                                 organism), 
+                                 y=delta_AICc)) +
+    geom_boxplot() +
+    coord_flip() +
+    tidytext::scale_x_reordered() +  
+    facet_wrap(~organism, scales='free')
+  
+  covtype_selected <- covtype_stats[, 
+                                    .SD[which.min(delta_AICc_covtypemean),], 
+                                    by=organism]
+  
+  return(list(
+    dt = covtype_stats,
+    dt_sub = covtype_selected,
+    plot = covtype_stats_plot
+   
+  ))
+}
+
 #------ format_ssn_hydrowindow -------------------------------------------------
-format_ssn_hydrowindow <- function(in_ssnmodels_combined) {
-  in_ssnmodels_combined <- tar_read(ssnmodels_combined)
+# in_ssnmodels <- tar_read(ssn_richness_hydrowindow)
+# in_covtype_selected <- select_ssn_covariance(in_ssnmodels)
+# tar_load(ssn_richness_models_to_run)
+# 
+# ssn_model_names <- do.call(rbind, ssn_richness_models_to_run)[,1:2] %>%
+#   as.data.table
+# in_ssnmodels <- cbind(ssn_model_names, in_ssnmodels)
+# 
+# in_organism <- 'miv_nopools'
+
+plot_ssn2_marginal_effects <- function(
+    in_mod,                # fitted SSN2 model
+    hydro_var,          # the covariate you want to VARY
+    fixed_var,          # the covariate you want to FIX at mean
+    fixed_var_mean,
+    group_var = "country",
+    n_points = 100
+) {
+  # Get fixed effects
+  fixef_dt <- SSN2::tidy(in_mod) %>% as.data.table()
+  
+  # Identify base terms
+  intercept <- fixef_dt[term == "(Intercept)", estimate]
+  b_hydro   <- fixef_dt[term == hydro_var, estimate]
+  b_fixed   <- fixef_dt[term == fixed_var, estimate]
+  
+  # Find interaction slopes for hydro
+  interaction_pattern <- paste0(group_var, ".*:", hydro_var)
+  hydro_interactions <- fixef_dt[grepl(interaction_pattern, term)]
+  hydro_interactions[, group := sub(paste0(group_var, "(.*):.*"), "\\1", term)]
+  hydro_interactions <- hydro_interactions[, .(group = group, b_hydro_group = estimate)]
+  
+  # Find interaction slopes for fixed covariate
+  fixed_pattern <- paste0(fixed_var, ":", group_var)
+  fixed_interactions <- fixef_dt[str_starts(term, fixed(fixed_pattern)),]
+  fixed_interactions[, group := sub(paste0(fixed_var, ":.*", group_var, "(.*)"), "\\1", term)]
+  fixed_interactions <- fixed_interactions[, .(group = group, b_fixed_group = estimate)]
+  
+  # Get observed data to build range & mean
+  mod_obs <- in_mod$ssn.object$obs %>% as.data.table()
+  
+  # Build new data grid: hydro varies, fixed stays constant
+  grid_hydro <- mod_obs[, .(
+    hydro = seq(min(get(hydro_var), na.rm = TRUE),
+                max(get(hydro_var), na.rm = TRUE),
+                length.out = n_points)
+  ), by = group_var]
+  
+  newdata_dt <- copy(grid_hydro)
+  setnames(newdata_dt, old = group_var, new = "group")
+  newdata_dt[, fixed := fixed_var_mean]
+  
+  # Merge interactions
+  newdata_dt <- merge(newdata_dt, hydro_interactions, by = "group", all.x = TRUE)
+  newdata_dt <- merge(newdata_dt, fixed_interactions, by = "group", all.x = TRUE)
+  
+  # Fill NA with 0 if no interaction
+  newdata_dt[is.na(b_hydro_group), b_hydro_group := 0]
+  newdata_dt[is.na(b_fixed_group), b_fixed_group := 0]
+  
+  # Calculate predicted
+  newdata_dt[, predicted :=
+               intercept +
+               (b_hydro + b_hydro_group) * hydro +
+               (b_fixed + b_fixed_group) * fixed
+  ]
+  
+  # Plot
+  ggplot(newdata_dt, aes(x = hydro, y = predicted, color = group)) +
+    geom_line(linewidth = 1) +
+    labs(
+      x = hydro_var,
+      y = "Predicted",
+      color = group_var
+    ) +
+    theme_bw()
+}
+
+format_ssn_hydrowindow <- function(in_ssnmodels, in_organism) {
 # 
 #   lapply(
-#     in_ssnmodels_combined, function(x) {
+#     in_ssnmodels, function(x) {
 #       setnames(setDT(x[['ssn_glance']]), 'down_euc_types', 'covtypes')})
   
+
+  org_covtype <- in_covtype_selected$dt_sub[organism==in_organism,][['covtypes']]
+  
   ssn_hydrowindow_perf_allvars <- lapply(
-    in_ssnmodels_combined, function(x) {
+    in_ssnmodels[organism==in_organism, in_ssnmodels],
+    function(x) {
       merge(
         x[['ssn_glance']],
         data.table(covtypes=names(x[['ssn_list']]),
@@ -4455,54 +4583,38 @@ format_ssn_hydrowindow <- function(in_ssnmodels_combined) {
         by='covtypes'
       )
   }) %>% 
-    do.call(rbind, .) 
+    do.call(rbind, .) %>%
+    .[covtypes==org_covtype,]
+  remove(in_ssnmodels)
   
   #Identify covariance structure with the lowest AICc across all time windows 
   #for each hydrological variable
   ssn_hydrowindow_perf_allvars[, hydro_var_root := gsub(
     "(_*[0-9]+past)|(_*m[0-9]+)", "", hydro_var)] %>%
-    .[, delta_AICc := (AICc - min(AICc)), by=hydro_var] %>%
-    .[, delta_AICc_covtypemean := mean(delta_AICc), 
-      by=.(covtypes, hydro_var_root)] %>%
     .[, window_d := str_extract(hydro_var, '([0-9]+(?=past))|((?<=m)[0-9]+)')] %>%
     .[, window_d := factor(window_d, levels=sort(unique(as.integer(window_d))))]
   
-  #Plot model delta_AICc (epa stands for Epanechnikov kernel model)
-  #Ordered globally
-  ggplot(ssn_hydrowindow_perf_allvars, 
-         aes(x = tidytext::reorder_within(
-           as.factor(covtypes), 
-           delta_AICc_covtypemean,
-           hydro_var_root),
-           y = delta_AICc, 
-           fill = hydro_var_root)) +
-    geom_boxplot() +
-    scale_y_sqrt() +
-    coord_flip() +
-    theme_bw() +
-    facet_wrap(~hydro_var_root, scale='free')
-  
-  #Get best model table for all hydrowindows with embedded models
-  ssn_hydrowindow_perf_sub <- ssn_hydrowindow_perf_allvars[, {
-    min_aic_covtype <- .SD[which.min(delta_AICc_covtypemean), covtypes]
-    .SD[covtypes == min_aic_covtype]
-  }, by = hydro_var_root]
-  
   #Get variance decomposition estimated by model
-  ssn_hydrowindow_varcomp <- ssn_hydrowindow_perf_sub[
+  ssn_hydrowindow_varcomp <- ssn_hydrowindow_perf_allvars[
     , SSN2::varcomp(mod[[1]]), 
     by=.(hydro_var, covtypes, hydro_var_root, window_d)] 
   
   #Plot variance decomposition
-  plot_ssn_hydrowindow_varcomp <- ggplot(ssn_hydrowindow_varcomp,
-                                         aes(x=window_d, y=proportion, fill=varcomp)) +
-    geom_bar(stat = 'identity', position='stack') +
-    facet_wrap(~hydro_var_root, scales='free') +
+  plot_ssn_hydrowindow_varcomp <- ggplot(
+    ssn_hydrowindow_varcomp[proportion > 0, ],
+    aes(x = window_d, y = proportion, fill = varcomp)
+  ) +
+    geom_bar(stat = "identity", position = "stack") +
+    geom_text(
+      aes(label = round(100 * proportion)),
+      position = position_stack(vjust = 0.5),
+      colour = "black") +
+    facet_wrap(~hydro_var_root, scales = "free") +
     coord_cartesian(expand = FALSE) +
     theme_bw()
   
   #Plot best model for each variable for single window
-  ssn_hydrowindow_best <- ssn_hydrowindow_perf_sub[
+  ssn_hydrowindow_best <- ssn_hydrowindow_perf_allvars[
     , .SD[which.min(AICc),], 
     by = hydro_var_root]
   
@@ -4515,19 +4627,57 @@ format_ssn_hydrowindow <- function(in_ssnmodels_combined) {
     return(aug_data)
   }) %>% rbindlist
   
-  ggplot(mod_preds, aes(x=.fitted, y=richness, color=country)) +
+  mod_preds_plot <- ggplot(mod_preds, 
+                           aes(x=.fitted, y=richness, color=country)) +
     geom_abline() +
     geom_point() +
     geom_smooth(method='lm') +
     facet_grid(country~hydro_var) +
     theme_bw()
-
-  plot(ssn_hydrowindow_perf_sub[1, mod[[1]]])
+  
+  ggplot(mod_preds[hydro_var == "DurD3650past",], 
+         aes(x = DurD3650past, y = .fitted, color = country)) +
+    geom_point() +
+    geom_smooth(method='lm') +
+    facet_wrap(~country) +
+    theme_bw()
+  
   ssn_hydrowindow_best[1, SSN2::tidy(mod[[1]])]
-  ssn_hydrowindow_best[1, SSN2::summary(mod[[1]])]
+  ssn_hydrowindow_best[4, summary(mod[[1]])]
   
+  in_mod <-  ssn_hydrowindow_best[1, mod[[1]]]
   
-  ssn_hydrowindow_perf_sub[1, sjPlot::plot_model(mod[[1]], type = "pred")]
+  #Get model effects
+  fixef_dt <- SSN2::tidy(ssn_hydrowindow_best[1, mod[[1]]]) %>% as.data.table
+  
+  interaction_effects <- fixef_dt[grepl(":DurD3650past", term),] %>%
+    .[, country := sub("country(.*):DurD3650past", "\\1", term)] %>%
+    .[, list(country=country, 
+             hydro_interaction=estimate)] 
+  
+  #Get new data
+  mod_obs <- in_mod$ssn.object$obs %>% as.data.table
+  
+  newdata_dt <- mod_obs[,
+                       list(DurD3650past = seq(min(DurD3650past),
+                                               max(DurD3650past),
+                                               length.out = 100)
+                       ), by=country] %>%
+    .[, `log10(basin_area_km2)` := mean(log10(mod_obs$basin_area_km2))] %>%
+    merge(interaction_effects, by='country')
+  
+  newdata_dt[, predicted := 
+               fixef_dt[term=="(Intercept)", estimate] +
+               fixef_dt[term=="DurD3650past", estimate] * DurD3650past +
+               hydro_interaction * DurD3650past+
+               fixef_dt[term=="log10(basin_area_km2)", estimate] * `log10(basin_area_km2)` 
+  ]
+  
+  ggplot(newdata_dt, aes(x=DurD3650past, y=predicted, color=country)) +
+    geom_line() +
+    theme_bw()
+  
+
 }
 
 #------ model_miv_t ------------------------------------------------------------
@@ -5048,6 +5198,8 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
 
 
 }
+
+
 
 ################################################################################
 ################################################################################

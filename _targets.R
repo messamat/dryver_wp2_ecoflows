@@ -43,10 +43,10 @@ hydro_combi <- expand.grid(
 if (!interactive()) {
   perf_ratio <- 0.7 #Set how much you want to push your computer (% of cores and RAM)
   nthreads <- round(parallel::detectCores(logical=F)*perf_ratio)
-  #future::plan("future::multisession", workers=nthreads)
+  future::plan("future::multisession", workers=nthreads)
   total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
   options(future.globals.maxSize = perf_ratio*total_ram)
-  tar_option_set(controller = crew_controller_local(workers = nthreads)) #Set up parallel computing in targets
+  # tar_option_set(controller = crew_controller_local(workers = nthreads)) #Set up parallel computing in targets
 }
 
 #--------------------------  Define targets plan -------------------------------
@@ -720,34 +720,34 @@ analysis_targets <- list(
   
   #Plot spearman's correlation between hydro metrics by time window 
   #and site-specific richness and t-minus1 betadiv
-  tar_target(
-    corplots_div_hydrowindow, {
-      hydrovar_list <- c('DurD', 'PDurD', 'FreD', 'PFreD', 
-                         'uQ90', 'oQ10', 'maxPQ', 'PmeanQ',
-                         'STcon.*_directed', 'STcon.*_undirected',
-                         'Fdist.*_directed', 'Fdist.*_undirected')
-      lapply(hydrovar_list, function(in_var_substr) {
-        plot_cor_hydrowindow(in_cor_dt = cor_matrices_list$div_bydrn, 
-                             temporal_var_substr = in_var_substr, 
-                             response_var_list = c('richness', 'invsimpson','Jtm1'),
-                             colors_list = drn_dt$color,
-                             save_plot=T,
-                             out_dir = resdir)
-      }) %>% setNames(hydrovar_list)
-      
-      lapply(hydrovar_list, function(in_var_substr) {
-        plot_cor_hydrowindow(in_cor_dt = cor_matrices_list_ires$div_bydrn, 
-                             temporal_var_substr = in_var_substr, 
-                             response_var_list = c('richness','invsimpson','Jtm1'),
-                             colors_list = drn_dt$color,
-                             save_plot=T,
-                             plot_name_suffix = '_IRES',
-                             out_dir = resdir)
-      }) %>% setNames(paste0(hydrovar_list, '_IRES'))
-    }
-  )
-  ,
-  
+  # tar_target(
+  #   corplots_div_hydrowindow, {
+  #     hydrovar_list <- c('DurD', 'PDurD', 'FreD', 'PFreD', 
+  #                        'uQ90', 'oQ10', 'maxPQ', 'PmeanQ',
+  #                        'STcon.*_directed', 'STcon.*_undirected',
+  #                        'Fdist.*_directed', 'Fdist.*_undirected')
+  #     lapply(hydrovar_list, function(in_var_substr) {
+  #       plot_cor_hydrowindow(in_cor_dt = cor_matrices_list$div_bydrn, 
+  #                            temporal_var_substr = in_var_substr, 
+  #                            response_var_list = c('richness', 'invsimpson','Jtm1'),
+  #                            colors_list = drn_dt$color,
+  #                            save_plot=T,
+  #                            out_dir = resdir)
+  #     }) %>% setNames(hydrovar_list)
+  #     
+  #     lapply(hydrovar_list, function(in_var_substr) {
+  #       plot_cor_hydrowindow(in_cor_dt = cor_matrices_list_ires$div_bydrn, 
+  #                            temporal_var_substr = in_var_substr, 
+  #                            response_var_list = c('richness','invsimpson','Jtm1'),
+  #                            colors_list = drn_dt$color,
+  #                            save_plot=T,
+  #                            plot_name_suffix = '_IRES',
+  #                            out_dir = resdir)
+  #     }) %>% setNames(paste0(hydrovar_list, '_IRES'))
+  #   }
+  # )
+  # ,
+  # 
   #Ordinate local environmental variables to use axes in regression models
   tar_target(
     local_env_pca,
@@ -773,7 +773,6 @@ analysis_targets <- list(
     organism_list,
     c('miv_nopools', 'miv_nopools_flying', 'miv_nopools_nonflying', 
       'fun', 'dia', 'bac')
-      #unique(allvars_merged$dt$organism)
   )
   ,
   
@@ -795,11 +794,11 @@ analysis_targets <- list(
     {
       hydrovar_grid <- expand.grid(
         c('DurD', 'FreD'), #'PDurD', 'FreD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'
-        paste0(c(30, 365, 3650), 'past')
+        paste0(c(30, 60, 90, 365, 3650), 'past')
       ) 
-      stcon_grid <- expand.grid(paste0('STcon_m', c(30, 365)),
+      stcon_grid <- expand.grid(paste0('STcon_m', c(30, 60, 90, 180, 365)),
                                 c('_directed', '_undirected'))
-      fdist_grid <- expand.grid(paste0('Fdist_mean_', c(30, 365), 'past'),
+      fdist_grid <- expand.grid(paste0('Fdist_mean_', c(30, 60, 90, 180, 365, 3650), 'past'),
                                 c('_directed', '_undirected'))
       hydro_regex_list <- c(
         paste0(hydrovar_grid$Var1,'.*', hydrovar_grid$Var2),
@@ -816,8 +815,8 @@ analysis_targets <- list(
   )
   ,
   
-  #Run a first SSN with a single hydrological variable for each organism 
-  #to determine the top spatial covariance types
+  # Run a first SSN with a single hydrological variable for each organism
+  # to determine the top spatial covariance types
   tar_target(
     ssn_richness_covtype,
     model_ssn_hydrowindow(
@@ -831,27 +830,77 @@ analysis_targets <- list(
     pattern = map(organism_list),
     iteration = "list"
   )
-    
-  # #Run SSN for each chosen variable and time window
-  # tar_target(
-  #   ssn_richness_hydrowindow,
-  #   model_ssn_hydrowindow(
-  #     in_ssn = ssn_eu,
-  #     organism = organism_list,
-  #     formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country',
-  #     hydro_var = hydro_vars_forssn,
-  #     response_var = 'richness',
-  #     ssn_covtypes = ssn_covtypes
-  #   ),
-  #   pattern = cross(hydro_vars_forssn, organism_list),
-  #   iteration = "list"
-  # )
-)
+  ,
   
+  #Select the top 5 covariance structures for each organism based on AIC and 
+  #structure the models to run
+  tar_target(
+    ssn_richness_models_to_run,
+    {
+      #Get top 5 covtypes by organism
+      selected_covtypes <- lapply(ssn_richness_covtype, `[[`, "ssn_glance") %>%
+        rbindlist %>%
+        .[, .SD[order(AIC)][1:5, .(covtypes)], by = organism]
+      
+      #Convert to named list by organism
+      covtypes_by_organism <- selected_covtypes[, .(covtypes = list(covtypes)), by = organism]
+      
+      #Build a list of model setups (one per organism × hydro_var)
+      model_setups <- CJ(
+        organism = covtypes_by_organism$organism,
+        hydro_var = hydro_vars_forssn
+      )
+      
+      #Attach covtypes to each setup
+      model_setup_list <- list()
+      for (org in unique(covtypes_by_organism$organism)) {
+        for (hv in hydro_vars_forssn) {
+          model_setup_list[[length(model_setup_list) + 1]] <- list(
+            organism = org,
+            hydro_var = hv,
+            covtypes = covtypes_by_organism[organism==org,]$covtypes[[1]]
+          )
+        }
+      }
+      
+      return(model_setup_list)
+    }
+  )
+  ,
+  
+  #Run SSN for each chosen variable and time window
+  tar_target(
+    ssn_richness_hydrowindow,
+    future_lapply(
+      ssn_richness_models_to_run,
+      function(model_setup) {
+        print(model_setup)
+        model_ssn_hydrowindow(
+          in_ssn = ssn_eu,
+          organism = model_setup$organism,
+          formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country',
+          hydro_var = model_setup$hydro_var,
+          response_var = 'richness',
+          ssn_covtypes = ssn_covtypes[label %in% model_setup$covtypes, ]
+        )
+      })
+  )
+  ,
+  
+  tar_target(
+    ssn_covtype_selected,
+    select_ssn_covariance(in_ssnmodels=ssn_richness_hydrowindow)
+  )
+)
 
-# ssn_master_table <- lapply(ssn_richness_hydrowindow_, function(x) x$ssn_glance) %>%
-#   rbindlist
 
+#Create table of performance metrics for different covariance structures for each organism
+
+  
+#Then select best covariance structure across variables
+#Plot model results in terms of variance compartments and performance: a plot for each organism, a panel for each variable
+#Run for other diversity indices
+  
   # combined_ssntargets <- list(
   #   tar_combine(
   #     ssnmodels_combined,
