@@ -4343,7 +4343,7 @@ plot_scatter_lm <-  function(in_allvars_merged, temporal_var_substr, response_va
 
 quick_ssn <- function(in_ssn, in_formula, ssn_covtypes, 
                       estmethod = "ml", 
-                      partition_formula = as.formula("~ country + campaign"),
+                      partition_formula = as.formula("~ as.factor(campaign)"),
                       random_formula = as.formula("~ country")) {
   SSN2::ssn_create_distmat(in_ssn)
   
@@ -4493,24 +4493,17 @@ select_ssn_covariance <- function(in_ssnmodels) {
 # in_covtype_selected <- select_ssn_covariance(in_ssnmodels)
 # tar_load(ssn_richness_models_to_run)
 # 
-# ssn_model_names <- do.call(rbind, ssn_richness_models_to_run)[,1:2] %>%
-#   as.data.table
-# in_ssnmodels <- cbind(ssn_model_names, in_ssnmodels)
-# 
 # in_organism <- 'miv_nopools'
 
 
-format_ssn_hydrowindow <- function(in_ssnmodels, in_organism) {
-# 
-#   lapply(
-#     in_ssnmodels, function(x) {
-#       setnames(setDT(x[['ssn_glance']]), 'down_euc_types', 'covtypes')})
-  
+format_ssn_hydrowindow <- function(in_ssnmodels, 
+                                   in_organism, 
+                                   in_covtype_selected) {
 
   org_covtype <- in_covtype_selected$dt_sub[organism==in_organism,][['covtypes']]
   
   ssn_hydrowindow_perf_allvars <- lapply(
-    in_ssnmodels[organism==in_organism, in_ssnmodels],
+    in_ssnmodels[organism==in_organism, ssn_richness_hydrowindow],
     function(x) {
       merge(
         x[['ssn_glance']],
@@ -4682,6 +4675,9 @@ format_ssn_hydrowindow <- function(in_ssnmodels, in_organism) {
     plot_marginal = marginal_plot
   ))
 }
+
+
+#------ model_miv_yr -----------------------------------------------------------
 
 #------ model_miv_t ------------------------------------------------------------
 #Model for macroinvertebrates for individual sampling dates

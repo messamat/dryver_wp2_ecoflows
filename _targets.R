@@ -895,19 +895,26 @@ analysis_targets <- list(
   
   tar_target(
     ssn_richness_hydrowindow_formatted,
-    future_lapply(organism_list, function(in_organism) {
-      format_ssn_hydrowindow(in_ssnmodels = ssn_richness_hydrowindow, 
-                             in_organism = in_organism)
-    }) %>% setnames(organism_list)
+    {
+      ssn_model_names <- do.call(rbind, ssn_richness_models_to_run)[,1:2] %>%
+        as.data.table
+      ssnmodels <- cbind(ssn_model_names, ssn_richness_hydrowindow)
+      
+      out_list <- lapply(organism_list, function(in_organism) {
+        print(in_organism)
+        format_ssn_hydrowindow(in_ssnmodels = ssnmodels, 
+                               in_organism = in_organism,
+                               in_covtype_selected = ssn_covtype_selected)
+      }) 
+      names(out_list) <- organism_list
+    
+      return(out_list)
+    }
   )
 )
 
 
 #Create table of performance metrics for different covariance structures for each organism
-
-  
-#Then select best covariance structure across variables
-#Plot model results in terms of variance compartments and performance: a plot for each organism, a panel for each variable
 #Run for other diversity indices
   
   # combined_ssntargets <- list(
