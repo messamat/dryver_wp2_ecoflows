@@ -4341,11 +4341,14 @@ plot_scatter_lm <-  function(in_allvars_merged, temporal_var_substr, response_va
 # in_ssn <- in_ssn_eu$miv_nopools$ssn
 # tar_load(ssn_covtypes)
 
-quick_ssn <- function(in_ssn, in_formula, ssn_covtypes, estmethod = "ml") {
+quick_ssn <- function(in_ssn, in_formula, ssn_covtypes, 
+                      estmethod = "ml", 
+                      partition_formula = as.formula("~ country + campaign"),
+                      random_formula = as.formula("~ country")) {
   SSN2::ssn_create_distmat(in_ssn)
-
+  
   #summary(lm(formula = as.formula(in_formula), data=in_ssn$obs))
-
+  
   ssn_list <- mapply(function(down_type, up_type, euc_type) {
     print(paste(down_type, up_type, euc_type))
     out_ssn <- ssn_lm(
@@ -4355,8 +4358,8 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes, estmethod = "ml") {
       tailup_type = up_type,
       euclid_type = euc_type,
       additive = "afv_qsqrt",
-      partition_factor = ~ country,
-      random = ~ country,
+      partition_factor = partition_formula,
+      random = random_formula,
       estmethod = estmethod
     )
     return(out_ssn)
