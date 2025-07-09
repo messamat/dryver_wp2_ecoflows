@@ -2545,7 +2545,7 @@ reassign_netids <- function(rivnet_path, strahler_dt,
 }
 #------ compute_hydrostats_drn -------------------------------------------------
 # in_drn <- 'Czech'
-# varname <-  'qsim' #'isflowing' #qsim
+# varname <-  'isflowing' #qsim
 # in_sites_dt <- tar_read(sites_dt)[country == in_drn,]
 # in_network_path <- tar_read(network_ssnready_gpkg_list)[[in_drn]]
 # in_hydromod_drn <- tar_read_raw((paste0('hydromod_dt_', in_drn, '_', varname)))
@@ -2641,6 +2641,34 @@ subset_hydrostats <- function(hydrostats, in_country, in_bio_dt) {
     hydrostats <- hydrostats[date>=min_date & date<=max_date,]
   }
   return(hydrostats)
+}
+
+
+#------ summarize_hydrostats ------------------------------------------------------
+#in_hydrocon_compiled <- tar_read(hydrocon_compiled)
+
+#Compute summary statistics over the period of sampling for relevant hydrological
+#and connectivity statistics
+summarize_sampling_hydrocon <- function(in_hydrocon_compiled) {
+  hydrocon_summmarized <- in_hydrocon_compiled[, list( #`:=`
+    DurD_samp = sum(isflowing==0), #Total number of no-flow days 
+    FreD_samp = length(.SD[!is.na(noflow_period), unique(noflow_period)]), #Total number of no-flow periods 
+    DurD_max_samp = nafill(as.integer(max(noflow_period_dur, na.rm=T)), fill=0), #Maximum duration of no-flow period
+    DurD_avg_samp = nafill(.SD[!duplicated(noflow_period), mean(noflow_period_dur, na.rm=T)], fill=0), #AVerage duration of no-flow period (same as DurD/FreD)
+    RelF_avg_samp = mean(relF),
+    RelF_min_samp = min(relF),
+    qsim_avg_samp = mean(qsim),
+    Pqsim_avg_samp = mean(Pqsim),
+    PmeanQ10past_max_samp = max(PmeanQ10past),
+    STcon_m10_directed_avg_samp = mean(STcon_m10_directed, na.rm=T),
+    STcon_m10_undirected_avg_samp = mean(STcon_m10_undirected, na.rm=T),
+    Fdist_mean_10past_directed_avg_samp = mean(Fdist_mean_10past_directed),
+    Fdist_mean_10past_undirected_avg_samp = mean(Fdist_mean_10past_undirected)
+    #PDurD_samp =
+    #PDurdmax_samp = 
+  ), by=.(site, UID)]
+  
+  return(hydrocon_summmarized)
 }
 
 #------ format_sites_dt ----------------------------------------------------------
@@ -4675,9 +4703,6 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
     plot_marginal = marginal_plot
   ))
 }
-
-
-#------ model_miv_yr -----------------------------------------------------------
 
 #------ model_miv_t ------------------------------------------------------------
 #Model for macroinvertebrates for individual sampling dates
