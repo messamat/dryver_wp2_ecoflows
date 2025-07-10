@@ -801,53 +801,53 @@ analysis_targets <- list(
   # MODEL SITES x DATE
   ##############################################################################
   #Ordinate local environmental variables to use axes in regression models
-  tar_target(
-    local_env_pca,
-    ordinate_local_env(in_allvars_dt = allvars_merged$dt)
-  ),
-  
-  #Create Spatial Stream Network (SSN) object
-  tar_target(
-    ssn_eu,
-    create_ssn_europe(in_network_path = network_ssnready_shp_list,
-                      in_sites_path = site_snapped_gpkg_list,
-                      in_allvars_dt = allvars_merged$dt,
-                      in_local_env_pca = local_env_pca,
-                      in_barriers_path = barrier_snapped_gpkg_list,
-                      in_hydromod = hydromod_comb,
-                      out_dir = file.path(resdir, 'ssn'),
-                      out_ssn_name = 'ssn_eu',
-                      overwrite = T)
-  )
-  ,
-  
-  #Define all hydrological variables: 16 (max ~73)
-  tar_target(
-    hydro_vars_forssn, 
-    {
-      hydrovar_grid <- expand.grid(
-        c('DurD', 'FreD'), #'PDurD', 'FreD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'
-        paste0(c(30, 60, 90, 365, 3650), 'past')
-      ) 
-      stcon_grid <- expand.grid(paste0('STcon_m', c(30, 60, 90, 180, 365)),
-                                c('_directed', '_undirected'))
-      fdist_grid <- expand.grid(paste0('Fdist_mean_', c(30, 60, 90, 180, 365, 3650), 'past'),
-                                c('_directed', '_undirected'))
-      hydro_regex_list <- c(
-        paste0(hydrovar_grid$Var1,'.*', hydrovar_grid$Var2),
-        paste0(stcon_grid$Var1, stcon_grid$Var2),
-        paste0(fdist_grid$Var1, fdist_grid$Var2)
-      )
-      
-      lapply(hydro_regex_list, function(var_str) {
-        grep(paste0('^', var_str), 
-             names(ssn_eu[[1]]$ssn$obs), 
-             value=T)
-      }) %>% unlist
-    }
-  )
-  ,
-  
+  # tar_target(
+  #   local_env_pca,
+  #   ordinate_local_env(in_allvars_dt = allvars_merged$dt)
+  # ),
+  # 
+  # #Create Spatial Stream Network (SSN) object
+  # tar_target(
+  #   ssn_eu,
+  #   create_ssn_europe(in_network_path = network_ssnready_shp_list,
+  #                     in_sites_path = site_snapped_gpkg_list,
+  #                     in_allvars_dt = allvars_merged$dt,
+  #                     in_local_env_pca = local_env_pca,
+  #                     in_barriers_path = barrier_snapped_gpkg_list,
+  #                     in_hydromod = hydromod_comb,
+  #                     out_dir = file.path(resdir, 'ssn'),
+  #                     out_ssn_name = 'ssn_eu',
+  #                     overwrite = T)
+  # )
+  # ,
+  # 
+  # #Define all hydrological variables: 16 (max ~73)
+  # tar_target(
+  #   hydro_vars_forssn, 
+  #   {
+  #     hydrovar_grid <- expand.grid(
+  #       c('DurD', 'FreD'), #'PDurD', 'FreD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'
+  #       paste0(c(30, 60, 90, 365, 3650), 'past')
+  #     ) 
+  #     stcon_grid <- expand.grid(paste0('STcon_m', c(30, 60, 90, 180, 365)),
+  #                               c('_directed', '_undirected'))
+  #     fdist_grid <- expand.grid(paste0('Fdist_mean_', c(30, 60, 90, 180, 365, 3650), 'past'),
+  #                               c('_directed', '_undirected'))
+  #     hydro_regex_list <- c(
+  #       paste0(hydrovar_grid$Var1,'.*', hydrovar_grid$Var2),
+  #       paste0(stcon_grid$Var1, stcon_grid$Var2),
+  #       paste0(fdist_grid$Var1, fdist_grid$Var2)
+  #     )
+  #     
+  #     lapply(hydro_regex_list, function(var_str) {
+  #       grep(paste0('^', var_str), 
+  #            names(ssn_eu[[1]]$ssn$obs), 
+  #            value=T)
+  #     }) %>% unlist
+  #   }
+  # )
+  # ,
+  # 
   # # Run a first SSN with a single hydrological variable for each organism
   # # to determine the top spatial covariance types
   # tar_target(
@@ -865,7 +865,7 @@ analysis_targets <- list(
   # )
   # ,
   # 
-  # #Select the top 5 covariance structures for each organism based on AIC and 
+  # #Select the top 5 covariance structures for each organism based on AIC and
   # #structure the models to run
   # tar_target(
   #   ssn_richness_models_to_run,
@@ -874,16 +874,16 @@ analysis_targets <- list(
   #     selected_covtypes <- lapply(ssn_richness_covtype, `[[`, "ssn_glance") %>%
   #       rbindlist %>%
   #       .[, .SD[order(AIC)][1:5, .(covtypes)], by = organism]
-  #     
+  # 
   #     #Convert to named list by organism
   #     covtypes_by_organism <- selected_covtypes[, .(covtypes = list(covtypes)), by = organism]
-  #     
+  # 
   #     #Build a list of model setups (one per organism × hydro_var)
   #     model_setups <- CJ(
   #       organism = covtypes_by_organism$organism,
   #       hydro_var = hydro_vars_forssn
   #     )
-  #     
+  # 
   #     #Attach covtypes to each setup
   #     model_setup_list <- list()
   #     for (org in unique(covtypes_by_organism$organism)) {
@@ -895,7 +895,7 @@ analysis_targets <- list(
   #         )
   #       }
   #     }
-  #     
+  # 
   #     return(model_setup_list)
   #   }
   # )
@@ -932,15 +932,15 @@ analysis_targets <- list(
   #     ssn_model_names <- do.call(rbind, ssn_richness_models_to_run)[,1:2] %>%
   #       as.data.table
   #     ssnmodels <- cbind(ssn_model_names, ssn_richness_hydrowindow)
-  #     
+  # 
   #     out_list <- lapply(organism_list, function(in_organism) {
   #       print(in_organism)
-  #       format_ssn_hydrowindow(in_ssnmodels = ssnmodels, 
+  #       format_ssn_hydrowindow(in_ssnmodels = ssnmodels,
   #                              in_organism = in_organism,
   #                              in_covtype_selected = ssn_covtype_selected)
-  #     }) 
+  #     })
   #     names(out_list) <- organism_list
-  #   
+  # 
   #     return(out_list)
   #   }
   # )
@@ -968,7 +968,14 @@ analysis_targets <- list(
                       out_ssn_name = 'ssn_eu',
                       overwrite = T)
   )
+  ,
   
+  tar_target(
+    ssn_summarized_maps,
+    map_ssn_summarized(in_ssn_summarized = ssn_eu_summarized,
+                      in_allvars_merged = allvars_merged,
+                      selected_organism_list = organism_list)
+  )
 )
 
 

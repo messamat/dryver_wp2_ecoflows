@@ -11,6 +11,7 @@ pkg_vec <- list(
   'ggnewscale',
   'ggnetwork',
   'ggplot2',
+  'ggspatial',
   'gridExtra',
   'Hmisc',
   'igraph',
