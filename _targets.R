@@ -727,7 +727,13 @@ analysis_targets <- list(
   tar_target(
     cor_heatmaps,
     plot_cor_heatmaps(in_cor_matrices = cor_matrices_list, 
-                      in_allvars_merged = allvars_merged,
+                      p_threshold = 0.05)
+  )
+  ,
+  
+  tar_target(
+    cor_heatmaps_summarized,
+    plot_cor_heatmaps(in_cor_matrices = cor_matrices_list_summarized, 
                       p_threshold = 0.05)
   )
   ,
@@ -770,6 +776,10 @@ analysis_targets <- list(
   # )
   # ,
   # 
+  
+  ##############################################################################
+  # MODEL SITES x DATE
+  ##############################################################################
   #Ordinate local environmental variables to use axes in regression models
   tar_target(
     local_env_pca,
@@ -933,6 +943,17 @@ analysis_targets <- list(
       return(out_list)
     }
   )
+  ,
+  ##############################################################################
+  # MODEL SITES SUMMARIZED
+  ##############################################################################
+  #Ordinate local environmental variables to use axes in regression models
+  tar_target(
+    local_env_pca_summarized,
+    ordinate_local_env(in_allvars_merged = allvars_merged)
+  )
+  
+  
 )
 
 

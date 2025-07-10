@@ -3695,9 +3695,9 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
                            by=c('site', 'campaign'), all.x=T)
   
   
-  #------------- Create data.table summarized by site across campaigns ---------
+  #------------ Create data.table summarized by site across campaigns ---------
   all_vars_summarized <- merge(
-    spdiv[!duplicated(site), 
+    spdiv[!duplicated(paste(site, organism)), 
           intersect(names(spdiv), c(group_cols, dtcols$div_summarized)), 
           with=F],
     in_hydrocon_summarized[, 
@@ -3879,6 +3879,7 @@ ordinate_local_env <- function(in_allvars_merged) {
     dt_all = out_dt
   ))
 }
+
 #------ create_ssn_europe ------------------------------------------------------
 # in_network_path = tar_read(network_ssnready_shp_list)
 # in_sites_path = tar_read(site_snapped_gpkg_list)
@@ -4078,7 +4079,7 @@ compute_cor_matrix <- function(in_allvars_merged) {
   # 2. By Organism (Div x (Hydro + Env))
   cor_div <- compute_cor_matrix_inner(
     dt,
-    group_vars = "organism_class",
+    group_vars = "organism",
     x_cols = cols_by_origin$div,
     y_cols = c(cols_by_origin$hydro_con, 
                cols_by_origin$env_num),
@@ -4131,8 +4132,7 @@ compute_cor_matrix_summarized <- function(in_allvars_merged) {
     group_vars = "organism",
     x_cols = cols_by_origin$div_summarized,
     y_cols = c(cols_by_origin$hydro_con_summarized, 
-               cols_by_o
-               rigin$env_summarized_num),
+               cols_by_origin$env_summarized_num),
     exclude_diagonal = FALSE)
   
   # # 3. By Country (Hydro + Env)
@@ -4179,10 +4179,13 @@ create_correlation_heatmap <- function(cor_matrix, p_matrix, title,
   return(heatmap)
 }
 
-plot_cor_heatmaps <- function(in_cor_matrices, in_allvars_merged,
+plot_cor_heatmaps <- function(in_cor_matrices,
                               p_threshold = 1) {
   org_list <- unique(in_cor_matrices$div$organism) %>%
-    setdiff('miv')
+    setdiff(c('miv', 
+              'bac_biof', 'bac_sedi',  "bac_biof_nopools",  "bac_sedi_nopools",
+              "dia_biof", "dia_sedi", "fun_biof", "fun_sedi")
+    )
   country_list <- unique(in_cor_matrices$hydroenv_bydrn$country)
   
   # # --- 1. Hydroenv Correlation ---
@@ -4217,7 +4220,7 @@ plot_cor_heatmaps <- function(in_cor_matrices, in_allvars_merged,
   # --- 2. By Organism (Div x (Hydro + Env)) ---
   div_heatmaps <- lapply(org_list, function(org) {
     div_sub <- in_cor_matrices$div[organism == org,] %>%
-      .[variable1 %in% in_allvars_merged$cols$div,]
+      .[variable1 %in% in_cor_matrices$cols_by_origin$div,]
     
     # Convert to matrices
     cor_matrix_org <- dcast(div_sub, 
@@ -4269,34 +4272,39 @@ plot_cor_heatmaps <- function(in_cor_matrices, in_allvars_merged,
   }) %>% setNames(country_list)
   
   # --- 4. Div x Hydroenv Correlation by Country (Non-square) ---
-  div_country_heatmaps <- lapply(country_list, function(in_country) {
-    lapply(org_list, function(org) {
-      div_hydro_sub <- in_cor_matrices$div_bydrn[
-        country == in_country & organism == org,]
-      
-      cor_matrix_div_hydro <- dcast(div_hydro_sub, variable1 ~ variable2, 
-                                    value.var = "correlation")
-      rnames <- cor_matrix_div_hydro$variable1
-      cor_matrix_div_hydro <- as.matrix(cor_matrix_div_hydro[, -1])
-      rownames(cor_matrix_div_hydro) <- rnames
-      cor_matrix_div_hydro[is.na(cor_matrix_div_hydro)] <- 0L
-      
-      p_matrix_div_hydro <- dcast(div_hydro_sub, variable1 ~ variable2, 
-                                  value.var = "p_value")
-      p_matrix_div_hydro <- as.matrix(p_matrix_div_hydro[, -1])
-      rownames(p_matrix_div_hydro) <- rnames
-      p_matrix_div_hydro [is.na(p_matrix_div_hydro )] <- 1L
-      
-      heatmap_div_hydro <- create_correlation_heatmap(
-        cor_matrix = cor_matrix_div_hydro,
-        p_matrix = p_matrix_div_hydro,
-        title = paste("Div x Hydro/Env - Country:", in_country,
-                      "- Organism:", org),
-        p_threshold = p_threshold,
-        is_square = FALSE)
-      
-    }) %>% setNames(org_list)
-  }) %>% setNames(country_list)
+  if (!is.null(in_cor_matrices$div_bydrn)) {
+    div_country_heatmaps <- lapply(country_list, function(in_country) {
+      lapply(org_list, function(org) {
+        div_hydro_sub <- in_cor_matrices$div_bydrn[
+          country == in_country & organism == org,]
+        
+        cor_matrix_div_hydro <- dcast(div_hydro_sub, variable1 ~ variable2, 
+                                      value.var = "correlation")
+        rnames <- cor_matrix_div_hydro$variable1
+        cor_matrix_div_hydro <- as.matrix(cor_matrix_div_hydro[, -1])
+        rownames(cor_matrix_div_hydro) <- rnames
+        cor_matrix_div_hydro[is.na(cor_matrix_div_hydro)] <- 0L
+        
+        p_matrix_div_hydro <- dcast(div_hydro_sub, variable1 ~ variable2, 
+                                    value.var = "p_value")
+        p_matrix_div_hydro <- as.matrix(p_matrix_div_hydro[, -1])
+        rownames(p_matrix_div_hydro) <- rnames
+        p_matrix_div_hydro [is.na(p_matrix_div_hydro )] <- 1L
+        
+        heatmap_div_hydro <- create_correlation_heatmap(
+          cor_matrix = cor_matrix_div_hydro,
+          p_matrix = p_matrix_div_hydro,
+          title = paste("Div x Hydro/Env - Country:", in_country,
+                        "- Organism:", org),
+          p_threshold = p_threshold,
+          is_square = FALSE)
+        
+      }) %>% setNames(org_list)
+    }) %>% setNames(country_list)
+  } else {
+    div_country_heatmaps <- NULL
+  }
+
   
   return(list(
     hydroenv = hydroenv_heatmap,
@@ -5364,6 +5372,9 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
   
 }
 
+
+
+#------ map_div ----------------------------------------------------------------
 
 
 ################################################################################
