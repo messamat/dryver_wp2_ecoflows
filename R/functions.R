@@ -3760,9 +3760,9 @@ plot_edna_biof_vs_sedi <- function(in_allvars_merged) {
 #          loadings.label = TRUE, loadings.label.size = 5) + theme_bw()
 
 # in_allvars_dt <- tar_read(allvars_merged)$dt_summarized
-by_date=F
+# by_date=F
 
-ordinate_local_env <- function(in_allvars_dt, by_date=T) {
+ordinate_local_env <- function(in_allvars_dt) {
   #1. Compute PCA for miv_nopools ----------------------------------------------
   env_cols_miv <- c('avg_velocity_macroinvertebrates', 'embeddedness',
                     'bedrock', 'particle_size', 'oxygen_sat', 'filamentous_algae',
@@ -3773,7 +3773,7 @@ ordinate_local_env <- function(in_allvars_dt, by_date=T) {
   #'oxygen_mg_l' missing for entire country
   
   id_cols <- c('site', 'country')
-  if (by_date) {
+  if ('date' %in% names(in_allvars_dt)) {
     id_cols <- c(id_cols, 'date')
   }
   
@@ -3889,8 +3889,8 @@ ordinate_local_env <- function(in_allvars_dt, by_date=T) {
 # in_network_path = tar_read(network_ssnready_shp_list)
 # in_sites_path = tar_read(site_snapped_gpkg_list)
 # in_barriers_path = tar_read(barrier_snapped_gpkg_list)
-# in_allvars_merged = tar_read(allvars_merged)
-# in_local_env_pca = ordinate_local_env(in_allvars_merged)
+# in_allvars_merged = tar_read(allvars_merged)$dt
+# in_local_env_pca = tar_read(local_env_pca)
 # in_hydromod = tar_read(hydromod_comb)
 # out_dir = 'results/ssn'
 # out_ssn_name = 'all_drns'
@@ -3898,7 +3898,7 @@ ordinate_local_env <- function(in_allvars_dt, by_date=T) {
 
 create_ssn_europe <- function(in_network_path,
                               in_sites_path,
-                              in_allvars_merged,
+                              in_allvars_dt,
                               in_local_env_pca,
                               in_barriers_path,
                               in_hydromod,
@@ -3908,6 +3908,11 @@ create_ssn_europe <- function(in_network_path,
   
   if (!dir.exists(out_dir)) {
     dir.create(out_dir)
+  }
+  
+  id_cols <- c('site', 'country')
+  if ('date' %in% names(in_allvars_dt)) {
+    id_cols <- c(id_cols, 'date')
   }
   
   lsn_path <- file.path(out_dir,
@@ -3928,9 +3933,12 @@ create_ssn_europe <- function(in_network_path,
     hydromod_country <- in_hydromod[[
       paste0('hydromod_dt_', in_country, '_qsim')]]
     
+    #Link q data - keep only full hydrological years, 
+    #Exclude 2022 because includes period after sampling
     net_hydro <- merge(net_proj,
                        hydromod_country$data_all[
-                         date < as.Date('2021-10-01', '%Y-%m-%d'),  #Link q data
+                         (date >= as.Date('1960-10-01', '%Y-%m-%d')) &
+                           (date < as.Date('2021-10-01', '%Y-%m-%d')),  
                          list(mean_qsim = mean(qsim, na.rm=T)), 
                          by=reach_id],
                        by.x = 'cat', by.y = 'reach_id')
@@ -3964,12 +3972,12 @@ create_ssn_europe <- function(in_network_path,
     overwrite = TRUE
   )
   
-  setDT(in_allvars_merged$dt)[country == 'Czech Republic', country := 'Czech']
+  setDT(in_allvars_dt)[country == 'Czech Republic', country := 'Czech']
   sites_lsn_attri <- merge(sites_lsn,
-                           in_allvars_merged$dt, 
+                           in_allvars_dt, 
                            by=c('country', 'site')) %>%
     merge(in_local_env_pca$dt_all,
-          by=c('site', 'date', 'country', 'organism_class'))
+          by=c(id_cols, 'organism_class'))
   
   sites_list <- list(sites = sites_lsn_attri)
   
@@ -4040,7 +4048,7 @@ create_ssn_europe <- function(in_network_path,
   #Assemble an SSN for each organism 
   #(so that it only includes data for the  corresponding sites and dates)
   out_ssn_list <- lapply(unique(sites_list_lsn$sites$organism), function(in_org) {
-    out_ssn_path <- paste0(out_dir, '_', out_ssn_name, '_', in_org, '.ssn')
+    out_ssn_path <- file.path(out_dir, paste0(out_ssn_name, '_', in_org, '.ssn'))
     
     out_ssn <- ssn_assemble(
       edges = edges_lsn,
