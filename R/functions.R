@@ -3526,17 +3526,78 @@ compile_hydrocon_country <- function(in_hydrostats_sub_comb,
   return(out_dt)  
 }
 
+#------ summarize_env ---------------------------------------------------------
+# in_env_dt <- tar_read(env_dt)
+
+summarize_env <- function(in_env_dt) {
+  # dynamic_vars <- c(
+  #   'avg_depth_macroinvertebrates',
+  #   'avg_velocity_macroinvertebrates',
+  #   'embeddedness',
+  #   'bedrock',
+  #   'boulders',
+  #   'cobbles',
+  #   'gravel',
+  #   'sand',
+  #   'particle size',
+  #   'maximum depth',
+  #   'oxygen_sat',
+  #   'discharge_l_s',
+  #   'filamentous algae',
+  #   'macrophyte cover',
+  #   'leaf_litter_cover',
+  #   'moss_cover',
+  #   'wood_cover',
+  #   'average_wetted_width',
+  #   'conductivity_micros_cm',
+  #   'max_wetted_width_m',
+  #   'min_wetted_width_m',
+  #   'oxygen_mg_l',
+  #   'ph',
+  #   'temperature_c')
+  
+  group_cols <- c('drn', 'site', 'stream_type')
+  exclude_cols <- c('if_ip_number_and_size_2_axes_+_depth_of_the_pools',
+                    'campaign', 'date', 'state_of_flow')
+  dat_cols <- setdiff(names(in_env_dt), c(group_cols, exclude_cols))
+  #str(in_env_dt[, dat_cols, with=F])
+  env_summarized <- in_env_dt[state_of_flow != 'D', 
+                              lapply(.SD, function(x) mean(x, na.rm=T)),
+                              .SDcols = dat_cols,
+                              by=group_cols]
+  
+  env_summarized_nopools <- in_env_dt[state_of_flow == 'F',
+                                      lapply(.SD, function(x) mean(x, na.rm=T)),
+                                      .SDcols = dat_cols,
+                                      by=group_cols]
+  
+  country_env_plot <- ggplot(melt(env_summarized, id.vars=group_cols),
+                             aes(x=drn, y=value, fill=drn)) +
+    geom_boxplot() +
+    facet_wrap(~variable, scales='free')
+  
+  return(list(
+    dt_all = env_summarized,
+    dt_nopools = env_summarized_nopools,
+    plot = country_env_plot
+  ))
+}
+
+
 #------ merge_allvars_sites ----------------------------------------------------
 # in_country <- 'Spain'
 # in_spdiv_local <- tar_read(spdiv_local)
 # in_spdiv_drn <- tar_read(spdiv_drn)
 # in_hydrocon_compiled <- tar_read(hydrocon_compiled)
+# in_hydrocon_summarized <- tar_read(hydrocon_summarized)
 # in_ssn_eu <- tar_read(ssn_eu)
 # in_env_dt <- tar_read(env_dt)
+# in_env_summarized <- tar_read(env_summarized)
 # in_genal_upa = tar_read(genal_sites_upa_dt)
 
 merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
-                                in_hydrocon_compiled, in_env_dt,
+                                in_hydrocon_compiled, in_hydrocon_summarized,
+                                in_env_dt, in_env_summarized,
                                 in_genal_upa) {
   
   #Fill basin area NAs in environmental data for Genal basin in Spain
@@ -3562,22 +3623,37 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
   
   
   #List column names by originating dt
+  group_cols = c("running_id", "site", "date", "campaign", "organism", 
+                 "organism_class", "country", "UID", "stream_type", 
+                 "state_of_flow", "state_of_flow_tm1")
+  exclude_cols = c("ncampaigns", "name", "isflowing", "reach_length",
+                   "noflow_period", "noflow_period_dur", "last_noflowdate", "drn",
+                   "if_ip_number_and_size_2_axes_+_depth_of_the_pools",
+                   "latitude", "longitude", "reach_id", "hy", "month",
+                   'min_wetted_width', 'left_river_bank_slope', 'right_river_bank_slope',
+                   'qsim')
+  
   dtcols <- list(
     div = setdiff(names(spdiv), 
-                  c(names(in_hydrocon_compiled), names(in_env_dt))),
+                  c(group_cols, exclude_cols,
+                    names(in_hydrocon_compiled), names(in_env_dt))),
+    div_summarized = c("mean_richness",
+                     "JBDtotal", "JRepl", "JRichDif", "JRepl/BDtotal", "JRichDif/BDtotal",
+                     "RBDtotal", "RRepl", "RRichDif", "RRepl/BDtotal", "RRichDif/BDtotal",
+                     "Gamma", "Beta", "mAlpha"), 
     hydro_con = setdiff(names(in_hydrocon_compiled), 
-                        c(names(spdiv), names(in_env_dt))),
+                        c(group_cols, exclude_cols,
+                          names(spdiv), names(in_env_dt))),
+    hydro_con_summarized = setdiff(names(in_hydrocon_summarized), 
+                                   c(group_cols, exclude_cols,
+                                     names(spdiv), names(in_env_dt))), 
     env = setdiff(names(in_env_dt),
-                  c(names(spdiv), names(in_hydrocon_compiled))),
-    group_cols = c("running_id", "site", "date", "campaign", "organism", 
-                   "organism_class", "country", "UID", "stream_type", 
-                   "state_of_flow", "state_of_flow_tm1"),
-    exclude_cols = c("ncampaigns", "name", "isflowing", "reach_length",
-                     "noflow_period", "noflow_period_dur", "last_noflowdate", "drn",
-                     "if_ip_number_and_size_2_axes_+_depth_of_the_pools",
-                     "latitude", "longitude", "reach_id", "hy", "month",
-                     'min_wetted_width', 'left_river_bank_slope', 'right_river_bank_slope',
-                     'qsim')
+                  c(group_cols, exclude_cols,
+                    names(spdiv), names(in_hydrocon_compiled))),
+    env_summarized = setdiff(names(in_env_summarized$dt_nopools),
+                             c(group_cols, exclude_cols)),
+    group_cols =  group_cols,
+    exclude_cols = exclude_cols
   )
 
   #Compute average metric between sediment and biofilm for eDNA
@@ -3593,19 +3669,37 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
   
   spdiv <- rbind(spdiv, avg_spdiv_edna, use.names=T, fill=T)
   
+  
+  #------------ Create data.table for individual site and campaigns ------------
   #Merge diversity metrics with hydro_con
   spdiv_hydro_con <- merge(spdiv, in_hydrocon_compiled,
                            by=c('date', 'site'), all.x=T) 
-  
+    
   #Merge environmental variables
   setDT(in_env_dt)
-  env_subcols <-  c('site', 'campaign', 
-                    setdiff(names(in_env_dt), names(spdiv_hydro_con)))
-  all_vars_merged <- merge(spdiv_hydro_con, in_env_dt[, env_subcols, with=F],
+  all_vars_merged <- merge(spdiv_hydro_con, 
+                           in_env_dt[, c(dtcols$env, 'site', 'campaign'), with=F],
                            by=c('site', 'campaign'), all.x=T)
+  
+
+  #------------- Create data.table summarized by site across campaigns ---------
+  all_vars_summarized <- merge(
+    spdiv[!duplicated(site), 
+          intersect(names(spdiv), c(group_cols, dtcols$div_summarized)), 
+          with=F],
+    in_hydrocon_summarized[, 
+                           c(dtcols$hydro_con_summarized, 'site'), 
+                           with=F], 
+    by='site', all.x=T) %>%
+    merge(in_env_summarized$dt_nopools[, 
+                                       c(dtcols$env_summarized, 'site'), 
+                                       with=F],
+          by='site', all.x=T) %>%
+    .[, c('campaign', 'date') := NULL]
   
   return(list(
     dt = all_vars_merged,
+    dt_summarized = all_vars_summarized,
     cols = dtcols)
   )
 }
@@ -3950,69 +4044,94 @@ create_ssn_europe <- function(in_network_path,
 }
 
 #------ compute_cor_matrix -----------------------------------------------------
-#in_allvars_merged <- tar_read(allvars_merged)
+# in_allvars_merged <- tar_read(allvars_merged)
+
 compute_cor_matrix <- function(in_allvars_merged) {
   dt <- in_allvars_merged$dt
+  dt_summarized <- in_allvars_merged$dt_summarized
   cols_by_origin <- in_allvars_merged$cols
-  exclude_cols <- cols_by_origin$exclude_cols
-  group_cols <- cols_by_origin$group_cols
   
   #Pre-formatting
   dt[is.na(noflow_period_dur), noflow_period_dur := 0]
-  dt[, avg_bank_slope := rowMeans(.SD),
-     .SDcols=c('left_river_bank_slope', 'right_river_bank_slope')]
   dt[, PrdD := as.numeric(PrdD)]
   
-  #Define columns to group by and columns to correlate
-  div_cols <- setdiff(cols_by_origin$div, c(exclude_cols, group_cols))
-  hydrocon_cols <- setdiff(cols_by_origin$hydro_con, c(exclude_cols, group_cols))
-  env_cols <- c(setdiff(cols_by_origin$env, c(exclude_cols, group_cols)),
-                'avg_bank_slope')
-  
-  # --- Calculate Correlations ---
+  # --- Calculate Correlations for each site and date ---
   # 1. Overall Correlation (Hydro + Env)
   cor_hydroenv <- compute_cor_matrix_inner(
     dt,
-    x_cols = c(hydrocon_cols, env_cols),
+    x_cols = c(cols_by_origin$hydro_con, cols_by_origin$env),
     exclude_diagonal = FALSE) 
   
   # 2. By Organism (Div x (Hydro + Env))
   cor_div <- compute_cor_matrix_inner(
     dt,
-    group_vars = "organism",
-    x_cols = div_cols,
-    y_cols = c(hydrocon_cols, env_cols),
+    group_vars = "organism_class",
+    x_cols = cols_by_origin$div,
+    y_cols = c(cols_by_origin$hydro_con, cols_by_origin$env),
     exclude_diagonal = FALSE) 
   
   # 3. By Country (Hydro + Env)
   cor_hydroenv_bydrn <- compute_cor_matrix_inner(
     dt,
     group_vars = "country",
-    x_cols = c(hydrocon_cols, env_cols),
+    x_cols = c(cols_by_origin$hydro_con, cols_by_origin$env),
     exclude_diagonal = FALSE)  
   
   # 4. By Organism and Country (Div x (Hydro + Env))
   cor_div_bydrn <- compute_cor_matrix_inner(
     dt,
     group_vars = c("organism", "country"),
-    x_cols = div_cols,
-    y_cols = c(hydrocon_cols, env_cols),
+    x_cols = cols_by_origin$div,
+    y_cols = c(cols_by_origin$hydro_con, cols_by_origin$env),
     exclude_diagonal = FALSE) 
+  
+  # --- Calculate Correlations for each site summarized ---
+  # 1. Overall Correlation (Hydro + Env)
+  cor_hydroenv_summarized <- compute_cor_matrix_inner(
+    dt_summarized,
+    x_cols = c(cols_by_origin$hydro_con_summarized, cols_by_origin$env_summarized),
+    exclude_diagonal = FALSE) 
+  
+  # # 2. By Organism (Div x (Hydro + Env))
+  cor_div_summarized <- compute_cor_matrix_inner(
+    dt_summarized,
+    group_vars = "organism",
+    x_cols = cols_by_origin$div_summarized,
+    y_cols = c(cols_by_origin$hydro_con_summarized, cols_by_origin$env_summarized),
+    exclude_diagonal = FALSE)
+   
+  # # 3. By Country (Hydro + Env)
+  cor_hydroenv_bydrn_summarized <- compute_cor_matrix_inner(
+    dt_summarized,
+    group_vars = "country",
+    x_cols = c(cols_by_origin$hydro_con_summarized, cols_by_origin$env_summarized),
+    exclude_diagonal = FALSE)
+
+  # 4. By Organism and Country (Div x (Hydro + Env))
+  cor_div_bydrn_summarized <- compute_cor_matrix_inner(
+    dt_summarized,
+    group_vars = c("organism", "country"),
+    x_cols = cols_by_origin$div_summarized,
+    y_cols = c(cols_by_origin$hydro_con_summarized, cols_by_origin$env_summarized),
+    exclude_diagonal = FALSE)
   
   return(list(hydroenv = cor_hydroenv,
               div = cor_div,
               hydroenv_bydrn = cor_hydroenv_bydrn,
               div_bydrn = cor_div_bydrn,
-              div_cols = div_cols,
-              hydrocon_cols = hydrocon_cols,
-              env_col = env_cols
+              hydroenv_summarized = cor_hydroenv_summarized,
+              div_summarized = cor_div_summarized,
+              hydroenv_bydrn_summarized = cor_hydroenv_bydrn_summarized,
+              div_bydrn_summarized = cor_div_bydrn_summarized,
+              
+              cols_by_origin = cols_by_origin
   ))
 }
 
 #------ plot_cor_heatmaps -------------------------------------------------------
-in_cor_matrices <- tar_read(cor_matrices_list)
-in_allvars_merged <- tar_read(allvars_merged)
-p_threshold <- 0.05
+# in_cor_matrices <- tar_read(cor_matrices_list)
+# in_allvars_merged <- tar_read(allvars_merged)
+# p_threshold <- 0.05
 
 create_correlation_heatmap <- function(cor_matrix, p_matrix, title,
                                        p_threshold = 1,

@@ -633,6 +633,12 @@ analysis_targets <- list(
   )
   ,
   
+  tar_target(
+    env_summarized,
+    summarize_env(in_env_dt = env_dt)
+  )
+  ,
+  
   #Compute local taxonomic diversity
   tar_target(
     spdiv_local,
@@ -667,8 +673,9 @@ analysis_targets <- list(
     merge_allvars_sites(in_spdiv_local = spdiv_local, 
                         in_spdiv_drn = spdiv_drn,
                         in_hydrocon_compiled = hydrocon_compiled,
-                        #in_hydrocon_summarized = hydrocon_summarized,
+                        in_hydrocon_summarized = hydrocon_summarized,
                         in_env_dt = env_dt,
+                        in_env_summarized = env_summarized,
                         in_genal_upa = genal_sites_upa_dt)
   )
   ,
@@ -690,7 +697,7 @@ analysis_targets <- list(
     plot_edna_biof_vs_sedi(in_allvars_merged=allvars_merged) 
   )
   ,
-  
+
   #Create matrices of correlations between predictors and responses, and among predictors
   tar_target(
     cor_matrices_list,
