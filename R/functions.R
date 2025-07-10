@@ -1287,7 +1287,7 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
   
   #Remove spaces in running id
   in_metadata_edna[, running_id := gsub(' ', '', running_id)]
-
+  
   #Fill NAs in dates with eDNA metadata if possible
   dt_list$dia_sedi[
     is.na(date),
@@ -1307,7 +1307,7 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
     ,
     date := in_metadata_edna[sample_type=='biofilm', .(running_id, date)][
       .SD, on='running_id', x.date]] 
-
+  
   #Add Campaign and Site to bacteria data, then remove pool sites
   dt_list$bac_sedi[, c('site', 'campaign') := tstrsplit(v1, '_')] %>%
     setnames('v1', 'running_id') %>%
@@ -1355,7 +1355,7 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
   #Correct typo in date for fungi  
   dt_list$fun_sedi[date == as.Date("2012-02-25"), 
                    date := as.Date("2021-02-25")]
-
+  
   dt_list$fun_biof[date == as.Date("2012-02-25"), 
                    date := as.Date("2021-02-25")]
   
@@ -1490,7 +1490,7 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
       .[, `:=`(organism = in_biodt[1, .(organism)][[1]],
                beta_s_drn_std = (beta_s_drn-1)/(nsites-1),
                beta_t_s_drn_std = (beta_t_s_drn-1)/(nsteps-1) 
-               )] 
+      )] 
   }
   
   return(out_dt)
@@ -3362,13 +3362,13 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
 # routing_mode = 'in'
 
 compute_Fdist <- function(sites_status_matrix, network_structure, 
-                                routing_mode, raw_dist_matrix, in_net_shp_path) {
+                          routing_mode, raw_dist_matrix, in_net_shp_path) {
   
   #Get a matrix of adjacency relationship among segments that includes routing mode
   #(1 if connected, Inf if not connected -- depending on routing mode)
   routed_adjacency <- graph_from_adjacency_matrix(network_structure, 
-                                   mode = 'directed', 
-                                   diag = FALSE) %>%
+                                                  mode = 'directed', 
+                                                  diag = FALSE) %>%
     distances(mode = routing_mode, 
               algorithm = "unweighted")
   routed_adjacency[!is.infinite(routed_adjacency)] <- 1
@@ -3413,7 +3413,7 @@ compute_Fdist <- function(sites_status_matrix, network_structure,
   dist_to_nearest_wet_UID <- merge(dist_to_nearest_wet_melt, 
                                    UIDs_to_assign, 
                                    by='ID')
-
+  
   return(dist_to_nearest_wet_UID)
 }
 
@@ -3441,10 +3441,10 @@ compute_Fdist_rolling <- function(in_Fdist_dt, in_sites_dt) {
   
   #Compute max Fdist within rolling window, only for sites
   Fdist_sites_rolling[,
-                       paste0("Fdist_max_", rollingstep, "past") :=
-                         frollapply(Fdist, n=rollingstep, 
-                                    FUN=max, 
-                                    align='right'), by = .(UID)
+                      paste0("Fdist_max_", rollingstep, "past") :=
+                        frollapply(Fdist, n=rollingstep, 
+                                   FUN=max, 
+                                   align='right'), by = .(UID)
   ]
   
   return(Fdist_sites_rolling)
@@ -3510,7 +3510,7 @@ compile_hydrocon_country <- function(in_hydrostats_sub_comb,
   Fdist_cast <- rbind(in_Fdist_directed[[in_country]],
                       in_Fdist_undirected[[in_country]]) %>%
     dcast(date+UID~variable, value.var = 'fdist_value')
-
+  
   #Merge all statistics
   out_dt <- merge(hydrostats_isflowing_site[, cols_to_keep_site, with=F],
                   hydrostats_isflowing_drn[, cols_to_keep_drn, with=F],
@@ -3520,7 +3520,7 @@ compile_hydrocon_country <- function(in_hydrostats_sub_comb,
                       .(site, UID)], ., by='site') %>%
     merge(STcon_cast, by=c('date', 'UID'), all.x=T) %>%
     merge(Fdist_cast, by=c('date', 'UID'), all.x=T)
-    
+  
   # merge(STcon_cast, by=c('date', 'UID', 'nsim'), all.x=T) #with nsim
   
   return(out_dt)  
@@ -3603,8 +3603,8 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
   #Fill basin area NAs in environmental data for Genal basin in Spain
   #https://stackoverflow.com/questions/72940045/replace-na-in-a-table-with-values-in-column-with-another-table-by-conditions-in
   in_env_dt[is.na(basin_area_km2),
-                    basin_area_km2 :=  in_genal_upa[
-                      .SD, on='site', x.basin_area_km2]]
+            basin_area_km2 :=  in_genal_upa[
+              .SD, on='site', x.basin_area_km2]]
   
   #Compute state of flow in previous time step (could be inserted much before in the workflow later)
   in_env_dt[, state_of_flow_tm1 := lag(state_of_flow, n=1L), by=site]
@@ -3617,15 +3617,14 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
                  by=c('country', 'organism')) %>%
     .[!(site=='GEN04' & campaign=='1'),]
   #Remove GEN04_1 from all organisms, no local environmental data, sampled only for eDNA. Too unsure.
-
+  
   #Create "organism_class" column for labeling/coloring/merging
   spdiv[, organism_class := gsub('_[a-z]+', '', organism)]
   
   
   #List column names by originating dt
   group_cols = c("running_id", "site", "date", "campaign", "organism", 
-                 "organism_class", "country", "UID", "stream_type", 
-                 "state_of_flow", "state_of_flow_tm1")
+                 "organism_class", "country", "UID")
   exclude_cols = c("ncampaigns", "name", "isflowing", "reach_length",
                    "noflow_period", "noflow_period_dur", "last_noflowdate", "drn",
                    "if_ip_number_and_size_2_axes_+_depth_of_the_pools",
@@ -3638,9 +3637,9 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
                   c(group_cols, exclude_cols,
                     names(in_hydrocon_compiled), names(in_env_dt))),
     div_summarized = c("mean_richness",
-                     "JBDtotal", "JRepl", "JRichDif", "JRepl/BDtotal", "JRichDif/BDtotal",
-                     "RBDtotal", "RRepl", "RRichDif", "RRepl/BDtotal", "RRichDif/BDtotal",
-                     "Gamma", "Beta", "mAlpha"), 
+                       "JBDtotal", "JRepl", "JRichDif", "JRepl/BDtotal", "JRichDif/BDtotal",
+                       "RBDtotal", "RRepl", "RRichDif", "RRepl/BDtotal", "RRichDif/BDtotal",
+                       "Gamma", "Beta", "mAlpha"), 
     hydro_con = setdiff(names(in_hydrocon_compiled), 
                         c(group_cols, exclude_cols,
                           names(spdiv), names(in_env_dt))),
@@ -3655,7 +3654,21 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
     group_cols =  group_cols,
     exclude_cols = exclude_cols
   )
-
+  
+  #Delineate numeric environmental columns
+  dtcols <- c(dtcols, 
+              env_num = list(intersect(dtcols$env,
+                                       names(in_env_dt)[
+                                         sapply(in_env_dt, class) 
+                                         %in% c('numeric', 'integer')])
+              ),
+              env_summarized_num = list(intersect(dtcols$env_summarized,
+                                                  names(in_env_summarized$dt_nopools)[
+                                                    sapply(in_env_summarized$dt_nopools, class) 
+                                                    %in% c('numeric', 'integer')])
+              )
+  )
+  
   #Compute average metric between sediment and biofilm for eDNA
   avg_spdiv_edna <- spdiv[
     organism_class %in% c('dia', 'fun', 'bac'), 
@@ -3674,14 +3687,14 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
   #Merge diversity metrics with hydro_con
   spdiv_hydro_con <- merge(spdiv, in_hydrocon_compiled,
                            by=c('date', 'site'), all.x=T) 
-    
+  
   #Merge environmental variables
   setDT(in_env_dt)
   all_vars_merged <- merge(spdiv_hydro_con, 
                            in_env_dt[, c(dtcols$env, 'site', 'campaign'), with=F],
                            by=c('site', 'campaign'), all.x=T)
   
-
+  
   #------------- Create data.table summarized by site across campaigns ---------
   all_vars_summarized <- merge(
     spdiv[!duplicated(site), 
@@ -3714,8 +3727,8 @@ plot_edna_biof_vs_sedi <- function(in_allvars_merged) {
   
   #Compare richness by source of edna (biofilm vs sediment), organism and country
   rich_cast <- dcast(allvars_edna, 
-                    country+site+date+organism_class~edna_source, 
-                    value.var = 'richness')
+                     country+site+date+organism_class~edna_source, 
+                     value.var = 'richness')
   p_richness <- ggplot(rich_cast, aes(x=biof, y=sedi)) + 
     geom_point() + 
     geom_abline() + 
@@ -3724,8 +3737,8 @@ plot_edna_biof_vs_sedi <- function(in_allvars_merged) {
   
   #Compare gamma by source of edna (biofilm vs sediment), organism and country
   site_gamma_cast <- dcast(allvars_edna, 
-                    country+site+date+organism_class~edna_source, 
-                    value.var = 'Gamma')
+                           country+site+date+organism_class~edna_source, 
+                           value.var = 'Gamma')
   p_site_gamma <- ggplot(site_gamma_cast, aes(x=biof, y=sedi)) + 
     geom_point() + 
     geom_abline() + 
@@ -3762,7 +3775,7 @@ ordinate_local_env <- function(in_allvars_merged) {
   
   #Convert all columns to numeric (rather than integer)
   allvars_merged_copy$dt[, (env_cols_miv) := lapply(.SD, as.numeric), 
-                       .SDcols = env_cols_miv] 
+                         .SDcols = env_cols_miv] 
   
   #Fill NAs hierarchically. First by site, then by country, then overall
   miv_nopools_dt <- fill_nas_hierarchical(
@@ -3810,7 +3823,7 @@ ordinate_local_env <- function(in_allvars_merged) {
   
   #Convert all columns to numeric (rather than integer)
   allvars_merged_copy$dt[, (env_cols_edna) := lapply(.SD, as.numeric), 
-                       .SDcols = env_cols_edna]
+                         .SDcols = env_cols_edna]
   
   #Check distributions by country
   dt_edna_envmelt <- unique(allvars_merged_copy$dt[organism %in% edna_orglist,],
@@ -3846,20 +3859,20 @@ ordinate_local_env <- function(in_allvars_merged) {
   #Merge dts
   out_dt_miv <- merge(
     allvars_merged_copy$dt[organism == 'miv_nopools',
-                         .(site, date, country, organism)],
+                           .(site, date, country, organism)],
     out_list_miv$dt)
   
   out_dt_edna <- merge(
     allvars_merged_copy$dt[organism %in% edna_orglist,
-                         .(site, date, country, organism)],
+                           .(site, date, country, organism)],
     out_list_edna$dt)
   
-
+  
   out_dt <- rbind(out_dt_miv, out_dt_edna) %>%
     .[, organism_class := gsub('_[a-z]+', '', organism)] %>%
     .[, organism := NULL] %>%
     unique(by=c('country', 'site', 'date', 'organism_class')) 
-
+  
   return(list(
     miv_nopools = out_list_miv,
     edna = out_list_edna,
@@ -3948,7 +3961,7 @@ create_ssn_europe <- function(in_network_path,
   setDT(in_allvars_merged$dt)[country == 'Czech Republic', country := 'Czech']
   sites_lsn_attri <- merge(sites_lsn,
                            in_allvars_merged$dt, 
-                          by=c('country', 'site')) %>%
+                           by=c('country', 'site')) %>%
     merge(in_local_env_pca$dt_all,
           by=c('site', 'date', 'country', 'organism_class'))
   
@@ -4048,7 +4061,6 @@ create_ssn_europe <- function(in_network_path,
 
 compute_cor_matrix <- function(in_allvars_merged) {
   dt <- in_allvars_merged$dt
-  dt_summarized <- in_allvars_merged$dt_summarized
   cols_by_origin <- in_allvars_merged$cols
   
   #Pre-formatting
@@ -4059,7 +4071,8 @@ compute_cor_matrix <- function(in_allvars_merged) {
   # 1. Overall Correlation (Hydro + Env)
   cor_hydroenv <- compute_cor_matrix_inner(
     dt,
-    x_cols = c(cols_by_origin$hydro_con, cols_by_origin$env),
+    x_cols = c(cols_by_origin$hydro_con, 
+               cols_by_origin$env_num),
     exclude_diagonal = FALSE) 
   
   # 2. By Organism (Div x (Hydro + Env))
@@ -4067,14 +4080,16 @@ compute_cor_matrix <- function(in_allvars_merged) {
     dt,
     group_vars = "organism_class",
     x_cols = cols_by_origin$div,
-    y_cols = c(cols_by_origin$hydro_con, cols_by_origin$env),
+    y_cols = c(cols_by_origin$hydro_con, 
+               cols_by_origin$env_num),
     exclude_diagonal = FALSE) 
   
   # 3. By Country (Hydro + Env)
   cor_hydroenv_bydrn <- compute_cor_matrix_inner(
     dt,
     group_vars = "country",
-    x_cols = c(cols_by_origin$hydro_con, cols_by_origin$env),
+    x_cols = c(cols_by_origin$hydro_con, 
+               cols_by_origin$env_num),
     exclude_diagonal = FALSE)  
   
   # 4. By Organism and Country (Div x (Hydro + Env))
@@ -4082,52 +4097,59 @@ compute_cor_matrix <- function(in_allvars_merged) {
     dt,
     group_vars = c("organism", "country"),
     x_cols = cols_by_origin$div,
-    y_cols = c(cols_by_origin$hydro_con, cols_by_origin$env),
+    y_cols = c(cols_by_origin$hydro_con, 
+               cols_by_origin$env_num),
     exclude_diagonal = FALSE) 
-  
-  # --- Calculate Correlations for each site summarized ---
-  # 1. Overall Correlation (Hydro + Env)
-  cor_hydroenv_summarized <- compute_cor_matrix_inner(
-    dt_summarized,
-    x_cols = c(cols_by_origin$hydro_con_summarized, cols_by_origin$env_summarized),
-    exclude_diagonal = FALSE) 
-  
-  # # 2. By Organism (Div x (Hydro + Env))
-  cor_div_summarized <- compute_cor_matrix_inner(
-    dt_summarized,
-    group_vars = "organism",
-    x_cols = cols_by_origin$div_summarized,
-    y_cols = c(cols_by_origin$hydro_con_summarized, cols_by_origin$env_summarized),
-    exclude_diagonal = FALSE)
-   
-  # # 3. By Country (Hydro + Env)
-  cor_hydroenv_bydrn_summarized <- compute_cor_matrix_inner(
-    dt_summarized,
-    group_vars = "country",
-    x_cols = c(cols_by_origin$hydro_con_summarized, cols_by_origin$env_summarized),
-    exclude_diagonal = FALSE)
-
-  # 4. By Organism and Country (Div x (Hydro + Env))
-  cor_div_bydrn_summarized <- compute_cor_matrix_inner(
-    dt_summarized,
-    group_vars = c("organism", "country"),
-    x_cols = cols_by_origin$div_summarized,
-    y_cols = c(cols_by_origin$hydro_con_summarized, cols_by_origin$env_summarized),
-    exclude_diagonal = FALSE)
   
   return(list(hydroenv = cor_hydroenv,
               div = cor_div,
               hydroenv_bydrn = cor_hydroenv_bydrn,
               div_bydrn = cor_div_bydrn,
-              hydroenv_summarized = cor_hydroenv_summarized,
-              div_summarized = cor_div_summarized,
-              hydroenv_bydrn_summarized = cor_hydroenv_bydrn_summarized,
-              div_bydrn_summarized = cor_div_bydrn_summarized,
               
               cols_by_origin = cols_by_origin
   ))
 }
 
+#------ compute_cor_matrix_summarized ------------------------------------------
+# in_allvars_merged <- tar_read(allvars_merged)
+
+compute_cor_matrix_summarized <- function(in_allvars_merged) {
+  dt <- in_allvars_merged$dt_summarized
+  cols_by_origin <- in_allvars_merged$cols
+  
+  # --- Calculate Correlations for each site summarized ---
+  # 1. Overall Correlation (Hydro + Env)
+  cor_hydroenv <- compute_cor_matrix_inner(
+    dt,
+    x_cols = c(cols_by_origin$hydro_con_summarized, 
+               cols_by_origin$env_summarized_num),
+    exclude_diagonal = FALSE) 
+  
+  # # 2. By Organism (Div x (Hydro + Env))
+  cor_div <- compute_cor_matrix_inner(
+    dt,
+    group_vars = "organism",
+    x_cols = cols_by_origin$div_summarized,
+    y_cols = c(cols_by_origin$hydro_con_summarized, 
+               cols_by_o
+               rigin$env_summarized_num),
+    exclude_diagonal = FALSE)
+  
+  # # 3. By Country (Hydro + Env)
+  cor_hydroenv_bydrn <- compute_cor_matrix_inner(
+    dt,
+    group_vars = "country",
+    x_cols = c(cols_by_origin$hydro_con_summarized, 
+               cols_by_origin$env_summarized_num),
+    exclude_diagonal = FALSE)
+  
+  return(list(
+              hydroenv = cor_hydroenv,
+              div = cor_div,
+              hydroenv_bydrn = cor_hydroenv_bydrn,
+              cols_by_origin = cols_by_origin
+  ))
+}
 #------ plot_cor_heatmaps -------------------------------------------------------
 # in_cor_matrices <- tar_read(cor_matrices_list)
 # in_allvars_merged <- tar_read(allvars_merged)
@@ -4451,7 +4473,7 @@ plot_cor_hydrowindow <-  function(in_cor_dt, temporal_var_substr, response_var_l
 # out_dir = resdir
 
 plot_scatter_lm <-  function(in_allvars_merged, temporal_var_substr, response_var,
-                          colors_list, save_plot=T, plot_name_suffix="", out_dir) {
+                             colors_list, save_plot=T, plot_name_suffix="", out_dir) {
   
   dt <- in_allvars_merged$dt
   x_cols <- grep(paste0('^', temporal_var_substr), names(dt), value=T) %>%
@@ -4460,7 +4482,7 @@ plot_scatter_lm <-  function(in_allvars_merged, temporal_var_substr, response_va
   dt_melt <- melt(dt, 
                   id.vars=c(in_allvars_merged$cols$group_cols, response_var), 
                   measure.vars=x_cols)
-
+  
   p_lm <- ggplot(dt_melt, 
                  aes_string(x='value', y=response_var, color='country')) +
     geom_point(alpha=0.5) +
@@ -4469,7 +4491,7 @@ plot_scatter_lm <-  function(in_allvars_merged, temporal_var_substr, response_va
     scale_y_sqrt() +
     facet_grid(organism~variable, scales='free') +
     theme_bw()
-
+  
   if (save_plot) {
     out_path <- file.path(out_dir, paste0('plot_lm_', temporal_var_substr, '_',
                                           response_var, plot_name_suffix, '.png'))
@@ -4479,7 +4501,7 @@ plot_scatter_lm <-  function(in_allvars_merged, temporal_var_substr, response_va
   
   return(p_lm)
 }
-  
+
 
 #------ quick_ssn ------
 # in_ssn_eu <- tar_read(ssn_eu)
@@ -4519,7 +4541,7 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
   
   return(ssn_list)
 }
- 
+
 #------ model_ssn_hydrowindow --------------------------------------------------
 # hydrovar_list <- c('DurD', 'PDurD', 'FreD', 'PFreD',
 #                'uQ90', 'oQ10', 'maxPQ', 'PmeanQ',
@@ -4606,10 +4628,10 @@ select_ssn_covariance <- function(in_ssnmodels) {
              n = .N), by=.(organism, covtypes)]
   
   covtype_stats <- ssn_glance_bind[, .(delta_AICc_covtypemean,
-                      delta_AICc_covtypemedian,
-                      organism,
-                      covtypes,
-                      n)] %>%
+                                       delta_AICc_covtypemedian,
+                                       organism,
+                                       covtypes,
+                                       n)] %>%
     unique
   
   covtype_stats_plot <- ggplot(ssn_glance_bind, 
@@ -4631,7 +4653,7 @@ select_ssn_covariance <- function(in_ssnmodels) {
     dt = covtype_stats,
     dt_sub = covtype_selected,
     plot = covtype_stats_plot
-   
+    
   ))
 }
 
@@ -4646,7 +4668,7 @@ select_ssn_covariance <- function(in_ssnmodels) {
 format_ssn_hydrowindow <- function(in_ssnmodels, 
                                    in_organism, 
                                    in_covtype_selected) {
-
+  
   org_covtype <- in_covtype_selected$dt_sub[organism==in_organism,][['covtypes']]
   
   ssn_hydrowindow_perf_allvars <- lapply(
@@ -4658,7 +4680,7 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
                    mod=x[['ssn_list']]),
         by='covtypes'
       )
-  }) %>% 
+    }) %>% 
     do.call(rbind, .) %>%
     .[covtypes==org_covtype,]
   remove(in_ssnmodels)
@@ -4720,12 +4742,12 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
   
   #Plot predictor variable vs predictions
   x_preds_plot <- ggplot(mod_preds_melt, 
-         aes(x = value, y = .fitted, color = country)) +
+                         aes(x = value, y = .fitted, color = country)) +
     geom_point() +
     geom_smooth(method='lm') +
     facet_wrap(country~variable, scales='free') +
     theme_bw()
-
+  
   #Plot the "marginal" effect of each hydrological variable while
   #keeping surface area at global mean and global intercept
   plot_ssn2_marginal_effects <- function(
@@ -4844,20 +4866,20 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
   
   allvars_dt <- as.data.table(ssn_miv$obs) %>%
     setorderv(c('country', 'site', 'campaign')) 
-
+  
   hydro_candidates <- setdiff(
     in_allvars_merged$cols$hydro_con,
     c('doy', 'month', 'hy', 'reach_id', 'qsim', 'UID',
       'isflowing', 'reach_length', 'noflow_period',
       'noflow_period_dur', 'last_noflowdate', 'PrdD')
   )
-
+  
   #Scale data-----
   allvars_dt[
     , (hydro_candidates) := lapply(.SD,
                                    function(x) base::scale(x, center=T, scale=T)),
     .SDcols = hydro_candidates]
-
+  
   #Basic function to train an lm or lmer model-----
   basic_train_mod <- function(in_dt, mod_formula, mod_name, 
                               id_cols = c('site', 'date'), color_var='country') {
@@ -4868,28 +4890,28 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
                       data=in_dt)
     } else {
       out_mod <- lm(formula= as.formula(mod_formula),
-                      data=in_dt)
+                    data=in_dt)
     }
-
+    
     resp_col <- trimws(gsub('[~].*', '', mod_formula))
     
     predm_col <- paste0('mod_', mod_name, '_predm')
     predc_col <- paste0('mod_', mod_name, '_predc')
     resid_col <- paste0('mod_', mod_name, '_resid')
     dt_copy [, `:=`(predm = predict(out_mod, re.form = NA),
-                 predc = predict(out_mod, re.form = NULL),
-                 resid = resid(out_mod)
-                 )]
+                    predc = predict(out_mod, re.form = NULL),
+                    resid = resid(out_mod)
+    )]
     
     comp_p <- ggplot(dt_copy ,
-                    aes_string(x='predc', y=resp_col, color=color_var)) +
+                     aes_string(x='predc', y=resp_col, color=color_var)) +
       geom_abline() +
       geom_point() +
       geom_smooth(se=F, method='lm') +
       coord_fixed() +
       labs(x='Predicted', y='Observed') +
       theme_bw()
-      
+    
     print(summary(out_mod))
     print(comp_p)
     print(paste('AIC:', AIC(out_mod)))
@@ -4908,8 +4930,8 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
   }
   
   compute_resid_corr <- function(in_mod, in_group_vars = c("organism", "country"),
-                         in_x_cols) {
-
+                                 in_x_cols) {
+    
     resid_corr <- compute_cor_matrix_inner(
       in_mod$dt,
       group_vars = in_group_vars,
@@ -4927,7 +4949,7 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
       abs_geomean = resid_abscor_geomean
     ))
   }
-
+  
   #1.1. Model invsimpson diversity without space x all countries ------------------
   #Examine correlations with invsimpson
   topcors_overall_invsimpson <- in_cor_matrices$div[
@@ -4935,7 +4957,7 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
       variable2 %in% hydro_candidates & !is.na(correlation),] %>%
     .[, abs_cor := abs(correlation)] %>%
     setorder(-abs_cor)
-
+  
   topcors_bydrn_invsimpson <- in_cor_matrices$div_bydrn[
     variable1 == 'invsimpson' & organism == 'miv_nopools' &
       variable2 %in% hydro_candidates & !is.na(correlation),] %>%
@@ -4943,7 +4965,7 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
              var_label = paste(variable2, round(correlation, 2))
     ), by=country] %>%
     dcast(cor_order~country, value.var = 'var_label', fill=NA)
-
+  
   #Check n-1 temporal autocorrelation
   acf_invsimpson_dt <- allvars_dt[, list(
     ac1 = cor(invsimpson,
@@ -4951,43 +4973,43 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
               use='pairwise.complete.obs'),
     n = .N-1)
     , by=c('site', 'country')] %>% .[n > 2,]
-
+  
   acf_invsimpson_p <- ggplot(acf_invsimpson_dt,
                              aes(x=country, y=ac1,color=country)) +
     geom_hline(yintercept=0) +
     geom_boxplot(alpha=1/2) +
     geom_text(aes(label=as.numeric(gsub('^[A-Z]+', '', site))), 
               position = position_jitter(seed = 1, width=0.2, height=0)
-              ) +
+    ) +
     theme_classic()
-
+  
   # To test:
   # DurD3650past, FreD3650past, DurD365past, DurD180past, FreD365past, FreD180past,
   # PDurD180past, PFreD180past, relF90past, maxPQ_30past, oQ10_10past, maxPQ_365past,
   # oQ10_90past, relF1825past, PmeanQ10past, relF60past, relF7mean
-
+  
   invsimpson_miv_nopools_modlist <- list()
-
+  
   invsimpson_miv_nopools_modlist[['null']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country)',
     mod_name = 'null')
-
+  
   # ggplot(allvars_dt, aes(x=env_PC1, y=invsimpson)) +
   #   geom_point(aes(color=country)) +
   #   geom_smooth(color='black', method='lm') +
   #   geom_smooth(aes(color=country), se=F, method='lm')
-
+  
   invsimpson_miv_nopools_modlist[['env1_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1',
     mod_name = 'env1')
-
+  
   invsimpson_miv_nopools_modlist[['env2_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + env_PC2',
     mod_name = 'env2')
-
+  
   invsimpson_miv_nopools_modlist[['all1_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country) + env_PC1 + state_of_flow_tm1',
@@ -5052,7 +5074,7 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
     in_group_vars = c("organism", "country"),
     in_x_cols = c(hydro_candidates, 
                   in_cor_matrices$env_cols))$abs_geomean
-
+  
   ggplot(invsimpson_miv_nopools_modlist[['all6_mod']]$dt,
          aes(x=relF60past, y=resid, color=country)) +
     geom_point() +
@@ -5139,7 +5161,7 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country)  + meanQ1825past + meanQ1825past:country + relF60past + relF60past:country + DurD3650past',
     mod_name = 'all11')
-
+  
   invsimpson_miv_nopools_modlist[['all12_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country)  + meanQ1825past + meanQ1825past:country + relF60past + relF60past:country + stream_type + DurD1825past',
@@ -5154,7 +5176,7 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country)  + meanQ1825past + meanQ1825past:country + relF60past+ relF60past:country + stream_type +  PmeanQ60past',
     mod_name = 'all15')
- 
+  
   invsimpson_miv_nopools_modlist[['all16_mod']] <- basic_train_mod(
     in_dt=allvars_dt,
     mod_formula='invsimpson ~ (1|country)  + meanQ1825past + meanQ1825past:country + relF60past+ relF60past:country + stream_type +  PDurD365past',
@@ -5194,13 +5216,13 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
     partition_factor = ~ as.factor(campaign)
   ) %>%
     rbindlist(idcol = 'dist_type')
-
+  
   ggplot(tg_miv_invsimpson_null, aes(x=dist, y=gamma, color=dist_type)) +
     geom_point(aes(size=np)) +
     geom_smooth(span=1, method='lm', se=F) +
     scale_x_log10() +
     facet_wrap(~dist_type, scales='free')
-
+  
   tg_miv_invsimpson_mod14 <- Torgegram(
     formula = invsimpson ~ country  + meanQ1825past:country + relF60past:country + stream_type + FreD3650past,
     ssn.object = ssn_miv,
@@ -5210,13 +5232,13 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
     partition_factor = ~ as.factor(campaign)
   ) %>%
     rbindlist(idcol = 'dist_type')
-
+  
   ggplot(tg_miv_invsimpson_mod14, aes(x=dist, y=gamma, color=dist_type)) +
     geom_point(aes(size=np)) +
     geom_smooth(span=1, method='lm', se=F) +
     scale_x_log10() +
     facet_wrap(~dist_type, scales='free')
-
+  
   #Train SSN models -----------
   #-- Null model ----------------------------------------------------------------
   ssn_mod_null <- ssn_lm(
@@ -5249,19 +5271,19 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
   euc_type = ssn_covtypes$euc,
   SIMPLIFY = FALSE) %>%
     setNames(ssn_covtypes$label)
-
+  
   mod14_types_glance <- purrr::map(ssn_mod14, SSN2::glance,
-                                      .id=names(ssn_mod14)) %>%
+                                   .id=names(ssn_mod14)) %>%
     rbindlist(id='down_euc_types')%>%
     setorder(AIC)
-
-
+  
+  
   summary(ssn_mod14[['mariah_gaussian']])
   SSN2::varcomp(ssn_mod14[['mariah_gaussian']])
   SSN2::tidy(ssn_mod14[['mariah_gaussian']], conf.int = TRUE)
-
+  
   #preds <- predict(ssn_mod20[['linear_spherical']], ssn_miv$obs)
-
+  
   #-- Simpler model ------------------------------------------------------------
   ssn_modsimp <- mapply(function(down_type, euc_type) {
     print(paste(down_type, euc_type))
@@ -5279,17 +5301,17 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
   euc_type = ssn_covtypes$euc,
   SIMPLIFY = FALSE) %>%
     setNames(ssn_covtypes$label)
-
+  
   modsimp_types_glance <- purrr::map(ssn_modsimp, SSN2::glance,
-                                   .id=names(ssn_modsimp)) %>%
+                                     .id=names(ssn_modsimp)) %>%
     rbindlist(id='down_euc_types') %>%
     setorder(AIC)
-
+  
   summary(ssn_modsimp[['linear_gaussian']])
   SSN2::varcomp(ssn_modsimp[['linear_gaussian ']])
   SSN2::tidy(ssn_modsimp[['linear_gaussian']], conf.int = TRUE)
-
-
+  
+  
   #2.1. Model Tmj1 diversity without space x all countries ------------------
   #Examine correlations with invsimpson
   topcors_overall_Jtm1 <- in_cor_matrices$div[
@@ -5297,7 +5319,7 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
       variable2 %in% hydro_candidates & !is.na(correlation),] %>%
     .[, abs_cor := abs(correlation)] %>%
     setorder(-abs_cor)
-
+  
   topcors_bydrn_Jtm1 <- in_cor_matrices$div_bydrn[
     variable1 == 'invsimpson' & organism == 'miv_nopools' &
       variable2 %in% hydro_candidates & !is.na(correlation),] %>%
@@ -5305,12 +5327,12 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
              var_label = paste(variable2, round(correlation, 2))
     ), by=country] %>%
     dcast(cor_order~country, value.var = 'var_label', fill=NA)
-
+  
   invsimpson_miv_nopools_modlist <- list()
-
-
-
-
+  
+  
+  
+  
   #Check distributions of residuals
   if (length(in_mod$coefficients)>1) {
     nsp_diag <- gg_diagnose(in_mod)
@@ -5321,12 +5343,12 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
     lm = mae(in_mod$model$ddt_to_bdtopo_ddratio_ceind,
              in_mod$fitted.values)
   )
-
+  
   MAPE = list(
     lm = mape(in_mod$model$ddt_to_bdtopo_ddratio_ceind,
               in_mod$fitted.values)
   )
-
+  
   vars_to_try <- sample(hydro_candidates, 5)
   glmulti_result <- glmulti(invsimpson ~ .^2,
                             maxsize = 2,
@@ -5336,10 +5358,10 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
                                               with=F],
                             crit = "aic", level = 2, fitfunction = "glm",
                             method='h')
-
-
-
-
+  
+  
+  
+  
 }
 
 

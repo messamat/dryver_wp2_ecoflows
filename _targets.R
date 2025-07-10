@@ -698,10 +698,17 @@ analysis_targets <- list(
   )
   ,
 
-  #Create matrices of correlations between predictors and responses, and among predictors
+  #For sites x dates: Create matrices of correlations between predictors and responses, and among predictors
   tar_target(
     cor_matrices_list,
     compute_cor_matrix(allvars_merged)
+  )
+  ,
+  
+  #For data averaged by site: Create matrices of correlations between predictors and responses, and among predictors
+  tar_target(
+    cor_matrices_list_summarized,
+    compute_cor_matrix_summarized(allvars_merged)
   )
   ,
   
@@ -710,6 +717,7 @@ analysis_targets <- list(
     cor_matrices_list_ires, {
       allvars_merged_ires <- copy(allvars_merged)
       allvars_merged_ires$dt <- allvars_merged$dt[stream_type=='TR',]
+      
       return(compute_cor_matrix(allvars_merged_ires))
     }
   )
