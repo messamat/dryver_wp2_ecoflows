@@ -3759,11 +3759,10 @@ plot_edna_biof_vs_sedi <- function(in_allvars_merged) {
 #          loadings = TRUE, loadings.colour = 'blue',
 #          loadings.label = TRUE, loadings.label.size = 5) + theme_bw()
 
-#in_allvars_merged <- tar_read(allvars_merged)
+# in_allvars_dt <- tar_read(allvars_merged)$dt_summarized
+by_date=F
 
-ordinate_local_env <- function(in_allvars_merged) {
-  allvars_merged_copy <- copy(in_allvars_merged)
-  
+ordinate_local_env <- function(in_allvars_dt, by_date=T) {
   #1. Compute PCA for miv_nopools ----------------------------------------------
   env_cols_miv <- c('avg_velocity_macroinvertebrates', 'embeddedness',
                     'bedrock', 'particle_size', 'oxygen_sat', 'filamentous_algae',
@@ -3771,23 +3770,28 @@ ordinate_local_env <- function(in_allvars_merged) {
                     'moss_cover', 'wood_cover', 'riparian_cover_in_the_riparian_area',
                     'shade', 'hydromorphological_alteration', 'm2_biofilm',
                     'conductivity_micros_cm', 'ph', 'temperature_c')
-  #'oxygen_mg_l'
+  #'oxygen_mg_l' missing for entire country
+  
+  id_cols <- c('site', 'country')
+  if (by_date) {
+    id_cols <- c(id_cols, 'date')
+  }
   
   #Convert all columns to numeric (rather than integer)
-  allvars_merged_copy$dt[, (env_cols_miv) := lapply(.SD, as.numeric), 
+  in_allvars_dt[, (env_cols_miv) := lapply(.SD, as.numeric), 
                          .SDcols = env_cols_miv] 
   
   #Fill NAs hierarchically. First by site, then by country, then overall
   miv_nopools_dt <- fill_nas_hierarchical(
-    dt = allvars_merged_copy$dt[organism == 'miv_nopools'], 
+    dt = in_allvars_dt[organism == 'miv_nopools'], 
     cols_to_fill = env_cols_miv, 
     site_col = 'site', 
     country_col = 'country')
   
   #Check distributions by country
-  dt_miv_envmelt <- melt(allvars_merged_copy$dt[organism == 'miv',], 
-                         id.vars = c('country', 'site', 'campaign'),
-                         measure.vars = env_cols_miv)
+  # dt_miv_envmelt <- melt(in_allvars_dt[organism == 'miv',], 
+  #                        id.vars = c('country', 'site', 'campaign'),
+  #                        measure.vars = env_cols_miv)
   # ggplot(dt_miv_envmelt, #[variable=='conductivity_micros_cm',],
   #        aes(x=country, y=value, color=country)) +
   #   geom_jitter() + 
@@ -3798,9 +3802,10 @@ ordinate_local_env <- function(in_allvars_merged) {
   #   geom_density() + 
   #   facet_wrap(~variable, scales='free')
   
+
   out_list_miv <- trans_pca_wrapper(in_dt = miv_nopools_dt, 
                                     in_cols_to_ordinate = env_cols_miv, 
-                                    id_cols = c('site', 'date', 'country'), 
+                                    id_cols = id_cols, 
                                     group_cols = NULL, 
                                     num_pca_axes = 4)
   
@@ -3822,14 +3827,14 @@ ordinate_local_env <- function(in_allvars_merged) {
                      'oxygen_sat', 'ph','temperature_c')
   
   #Convert all columns to numeric (rather than integer)
-  allvars_merged_copy$dt[, (env_cols_edna) := lapply(.SD, as.numeric), 
+  in_allvars_dt[, (env_cols_edna) := lapply(.SD, as.numeric), 
                          .SDcols = env_cols_edna]
   
   #Check distributions by country
-  dt_edna_envmelt <- unique(allvars_merged_copy$dt[organism %in% edna_orglist,],
-                            by=c('site', 'date')) %>%
-    melt(id.vars = c('country', 'site', 'campaign', 'organism'),
-         measure.vars = env_cols_edna)
+  # dt_edna_envmelt <- unique(in_allvars_dt[organism %in% edna_orglist,],
+  #                           by=c('site', 'date')) %>%
+  #   melt(id.vars = c('country', 'site', 'campaign', 'organism'),
+  #        measure.vars = env_cols_edna)
   # ggplot(dt_edna_envmelt, #[variable=='conductivity_micros_cm',],
   #        aes(x=country, y=value, color=country)) +
   #   geom_jitter() + 
@@ -3843,35 +3848,35 @@ ordinate_local_env <- function(in_allvars_merged) {
   #Fill NAs hierarchically. First by site, then by country, then overall
   #this gives the average conditions when there is flow to dry samples. 
   #will need to think about how to use this
-  edna_dt <- unique(allvars_merged_copy$dt[organism %in% edna_orglist,],
-                    by=c('site', 'date')) %>%
-    .[, c('country', 'site', 'date', env_cols_edna), with=F] %>%
+  edna_dt <- unique(in_allvars_dt[organism %in% edna_orglist,],
+                    by=setdiff(id_cols, 'country')) %>%
+    .[, c(id_cols, env_cols_edna), with=F] %>%
     fill_nas_hierarchical(cols_to_fill = env_cols_edna, 
                           site_col = 'site', 
                           country_col = 'country') 
   
   out_list_edna <- trans_pca_wrapper(in_dt = edna_dt, 
                                      in_cols_to_ordinate = env_cols_edna, 
-                                     id_cols = c('site', 'date', 'country'), 
+                                     id_cols = id_cols, 
                                      group_cols = NULL, 
                                      num_pca_axes = 4)
   
   #Merge dts
   out_dt_miv <- merge(
-    allvars_merged_copy$dt[organism == 'miv_nopools',
-                           .(site, date, country, organism)],
-    out_list_miv$dt)
+    in_allvars_dt[organism == 'miv_nopools', c(id_cols, 'organism'), with=F],
+    out_list_miv$dt,
+    by=id_cols)
   
   out_dt_edna <- merge(
-    allvars_merged_copy$dt[organism %in% edna_orglist,
-                           .(site, date, country, organism)],
-    out_list_edna$dt)
+    in_allvars_dt[organism %in% edna_orglist, c(id_cols, 'organism'), with=F],
+    out_list_edna$dt,
+    by=id_cols)
   
   
   out_dt <- rbind(out_dt_miv, out_dt_edna) %>%
     .[, organism_class := gsub('_[a-z]+', '', organism)] %>%
     .[, organism := NULL] %>%
-    unique(by=c('country', 'site', 'date', 'organism_class')) 
+    unique(by=c(id_cols, 'organism_class')) 
   
   return(list(
     miv_nopools = out_list_miv,

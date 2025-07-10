@@ -783,7 +783,8 @@ analysis_targets <- list(
   #Ordinate local environmental variables to use axes in regression models
   tar_target(
     local_env_pca,
-    ordinate_local_env(in_allvars_merged = allvars_merged)
+    ordinate_local_env(in_allvars_dt = allvars_merged$dt,
+                       by_date=T)
   ),
   
   #Create Spatial Stream Network (SSN) objects
@@ -950,7 +951,8 @@ analysis_targets <- list(
   #Ordinate local environmental variables to use axes in regression models
   tar_target(
     local_env_pca_summarized,
-    ordinate_local_env(in_allvars_merged = allvars_merged)
+    ordinate_local_env(in_allvars_dt = allvars_merged$dt_summarized,
+                       by_date=F)
   )
   
   
