@@ -746,37 +746,6 @@ analysis_targets <- list(
   )
   ,
   
-  #Plot spearman's correlation between hydro metrics by time window 
-  #and site-specific richness and t-minus1 betadiv
-  # tar_target(
-  #   corplots_div_hydrowindow, {
-  #     hydrovar_list <- c('DurD', 'PDurD', 'FreD', 'PFreD', 
-  #                        'uQ90', 'oQ10', 'maxPQ', 'PmeanQ',
-  #                        'STcon.*_directed', 'STcon.*_undirected',
-  #                        'Fdist.*_directed', 'Fdist.*_undirected')
-  #     lapply(hydrovar_list, function(in_var_substr) {
-  #       plot_cor_hydrowindow(in_cor_dt = cor_matrices_list$div_bydrn, 
-  #                            temporal_var_substr = in_var_substr, 
-  #                            response_var_list = c('richness', 'invsimpson','Jtm1'),
-  #                            colors_list = drn_dt$color,
-  #                            save_plot=T,
-  #                            out_dir = resdir)
-  #     }) %>% setNames(hydrovar_list)
-  #     
-  #     lapply(hydrovar_list, function(in_var_substr) {
-  #       plot_cor_hydrowindow(in_cor_dt = cor_matrices_list_ires$div_bydrn, 
-  #                            temporal_var_substr = in_var_substr, 
-  #                            response_var_list = c('richness','invsimpson','Jtm1'),
-  #                            colors_list = drn_dt$color,
-  #                            save_plot=T,
-  #                            plot_name_suffix = '_IRES',
-  #                            out_dir = resdir)
-  #     }) %>% setNames(paste0(hydrovar_list, '_IRES'))
-  #   }
-  # )
-  # ,
-  # 
-  
   #All organisms: max 12
   tar_target(
     organism_list,
@@ -1104,6 +1073,37 @@ list(preformatting_targets, mapped_hydrotargets,
 
 
 ######################## UNUSED TARGETS ########################################
+#Plot spearman's correlation between hydro metrics by time window 
+#and site-specific richness and t-minus1 betadiv
+# tar_target(
+#   corplots_div_hydrowindow, {
+#     hydrovar_list <- c('DurD', 'PDurD', 'FreD', 'PFreD', 
+#                        'uQ90', 'oQ10', 'maxPQ', 'PmeanQ',
+#                        'STcon.*_directed', 'STcon.*_undirected',
+#                        'Fdist.*_directed', 'Fdist.*_undirected')
+#     lapply(hydrovar_list, function(in_var_substr) {
+#       plot_cor_hydrowindow(in_cor_dt = cor_matrices_list$div_bydrn, 
+#                            temporal_var_substr = in_var_substr, 
+#                            response_var_list = c('richness', 'invsimpson','Jtm1'),
+#                            colors_list = drn_dt$color,
+#                            save_plot=T,
+#                            out_dir = resdir)
+#     }) %>% setNames(hydrovar_list)
+#     
+#     lapply(hydrovar_list, function(in_var_substr) {
+#       plot_cor_hydrowindow(in_cor_dt = cor_matrices_list_ires$div_bydrn, 
+#                            temporal_var_substr = in_var_substr, 
+#                            response_var_list = c('richness','invsimpson','Jtm1'),
+#                            colors_list = drn_dt$color,
+#                            save_plot=T,
+#                            plot_name_suffix = '_IRES',
+#                            out_dir = resdir)
+#     }) %>% setNames(paste0(hydrovar_list, '_IRES'))
+#   }
+# )
+# ,
+# 
+#
 # tar_target(
 #   STcon_rolling_ref_list,
 #   {

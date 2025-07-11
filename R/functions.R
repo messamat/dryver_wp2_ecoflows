@@ -2644,33 +2644,6 @@ subset_hydrostats <- function(hydrostats, in_country, in_bio_dt) {
 }
 
 
-#------ summarize_hydrostats ------------------------------------------------------
-#in_hydrocon_compiled <- tar_read(hydrocon_compiled)
-
-#Compute summary statistics over the period of sampling for relevant hydrological
-#and connectivity statistics
-summarize_sampling_hydrocon <- function(in_hydrocon_compiled) {
-  hydrocon_summmarized <- in_hydrocon_compiled[, list( #`:=`
-    DurD_samp = sum(isflowing==0), #Total number of no-flow days 
-    FreD_samp = length(.SD[!is.na(noflow_period), unique(noflow_period)]), #Total number of no-flow periods 
-    DurD_max_samp = nafill(as.integer(max(noflow_period_dur, na.rm=T)), fill=0), #Maximum duration of no-flow period
-    DurD_avg_samp = nafill(.SD[!duplicated(noflow_period), mean(noflow_period_dur, na.rm=T)], fill=0), #AVerage duration of no-flow period (same as DurD/FreD)
-    RelF_avg_samp = mean(relF),
-    RelF_min_samp = min(relF),
-    qsim_avg_samp = mean(qsim),
-    Pqsim_avg_samp = mean(Pqsim),
-    PmeanQ10past_max_samp = max(PmeanQ10past),
-    STcon_m10_directed_avg_samp = mean(STcon_m10_directed, na.rm=T),
-    STcon_m10_undirected_avg_samp = mean(STcon_m10_undirected, na.rm=T),
-    Fdist_mean_10past_directed_avg_samp = mean(Fdist_mean_10past_directed),
-    Fdist_mean_10past_undirected_avg_samp = mean(Fdist_mean_10past_undirected)
-    #PDurD_samp =
-    #PDurdmax_samp = 
-  ), by=.(site, UID)]
-  
-  return(hydrocon_summmarized)
-}
-
 #------ format_sites_dt ----------------------------------------------------------
 # in_country <- 'Spain'
 # in_path <- tar_read(hydromod_paths_dt)[country == in_country, sites_reachids]
@@ -3526,6 +3499,37 @@ compile_hydrocon_country <- function(in_hydrostats_sub_comb,
   return(out_dt)  
 }
 
+#------ summarize_hydrostats ------------------------------------------------------
+# in_hydrocon_compiled <- tar_read(hydrocon_compiled)
+
+#Compute summary statistics over the period of sampling for relevant hydrological
+#and connectivity statistics
+summarize_sampling_hydrocon <- function(in_hydrocon_compiled) {
+  hydrocon_summmarized <- in_hydrocon_compiled[, list( #`:=`
+    DurD_samp = sum(isflowing==0)/.N, #Total number of no-flow days 
+    DurD3650past = .SD[.N, DurD3650past]/3650,
+    PDurD365past = .SD[.N, PDurD365past],
+    FreD_samp = length(.SD[!is.na(noflow_period), unique(noflow_period)])*.N/365, #Total number of no-flow periods 
+    FreD3650past = .SD[.N, FreD3650past]/10,
+    PFreD365past = .SD[.N, PFreD365past],
+    DurD_max_samp = nafill(as.integer(max(noflow_period_dur, na.rm=T)), fill=0), #Maximum duration of no-flow period
+    DurD_avg_samp = nafill(.SD[!duplicated(noflow_period), mean(noflow_period_dur, na.rm=T)], fill=0), #AVerage duration of no-flow period (same as DurD/FreD)
+    RelF_avg_samp = mean(relF),
+    RelF_min_samp = min(relF),
+    relF3650past = .SD[.N, relF3650past],
+    qsim_avg_samp = mean(qsim),
+    Pqsim_avg_samp = mean(Pqsim),
+    PmeanQ10past_max_samp = max(PmeanQ10past),
+    STcon_m10_directed_avg_samp = mean(STcon_m10_directed, na.rm=T),
+    STcon_m10_undirected_avg_samp = mean(STcon_m10_undirected, na.rm=T),
+    Fdist_mean_10past_directed_avg_samp = mean(Fdist_mean_10past_directed),
+    Fdist_mean_10past_undirected_avg_samp = mean(Fdist_mean_10past_undirected)
+    #PDurD_samp =
+    #PDurdmax_samp = 
+  ), by=.(site, UID)]
+  
+  return(hydrocon_summmarized)
+}
 #------ summarize_env ---------------------------------------------------------
 # in_env_dt <- tar_read(env_dt)
 
@@ -3607,6 +3611,10 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
   in_env_dt[is.na(basin_area_km2),
             basin_area_km2 :=  in_genal_upa[
               .SD, on='site', x.basin_area_km2]]
+  
+  in_env_summarized$dt_nopools[is.na(basin_area_km2),
+                               basin_area_km2 :=  in_genal_upa[
+                                 .SD, on='site', x.basin_area_km2]]
   
   #Compute state of flow in previous time step (could be inserted much before in the workflow later)
   in_env_dt[, state_of_flow_tm1 := lag(state_of_flow, n=1L), by=site]
@@ -4785,7 +4793,9 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
 # tar_load(ssn_covtypes)
 
 model_ssn_hydrowindow <- function(in_ssn, organism, formula_root, 
-                                  hydro_var, response_var, ssn_covtypes) {
+                                  hydro_var, response_var, ssn_covtypes,
+                                  partition_formula = as.formula("~ as.factor(campaign)"),
+                                  random_formula = as.formula("~ country")) {
   
   # hydro_var <- grep(paste0('^', hydro_var_str), 
   #                   names(in_ssn[[organism]]$ssn$obs), 
@@ -4798,6 +4808,8 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
   ssn_list <- quick_ssn(in_ssn = in_ssn[[organism]]$ssn, 
                         in_formula = as.formula(full_formula),
                         ssn_covtypes = ssn_covtypes, #ssn_covtypes[sample(144, 10)],
+                        partition_formula = partition_formula,
+                        random_formula = random_formula,
                         estmethod = "ml")
   
   ssn_glance <- purrr::map(ssn_list, SSN2::glance,
@@ -5599,8 +5611,9 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
 
 #------ model_miv_yr -----------------------------------------------------------
 # in_allvars_merged <- tar_read(allvars_merged)
-# in_ssn_eu <- tar_read(ssn_eu_summarized)
+# in_ssn_eu_summarized <- tar_read(ssn_eu_summarized)
 # in_cor_matrices <- tar_read(cor_matrices_list_summarized)
+# tar_load(ssn_covtypes)
 
 model_miv <- function(in_ssn_eu_summarized,
                       in_allvars_merged,
@@ -5613,8 +5626,79 @@ model_miv <- function(in_ssn_eu_summarized,
   allvars_dt <- as.data.table(ssn_miv$obs) %>%
     setorderv(c('country', 'site')) 
   
-  hydrocon_candidates <- in_allvars_merged$cols$hydro_con_summarized
-    
+  hydro_candidates <- in_allvars_merged$cols$hydro_con_summarized
+  
+  #Scale data-----
+  allvars_dt[
+    , (hydro_candidates) := lapply(.SD,
+                                   function(x) base::scale(x, center=T, scale=T)),
+    .SDcols = hydro_candidates]
+  
+  #Plots-------
+  ggplot(ssn_miv$obs, aes(x=country, y=mean_richness)) +
+    geom_boxplot()
+  
+  ggplot(ssn_miv$obs, aes(x=country, y=mean_richness, fill=stream_type)) +
+    geom_boxplot()
+  
+  ggplot(ssn_miv$obs, aes(x=basin_area_km2, y=mean_richness, color=stream_type)) +
+    geom_point() +
+    geom_smooth(method='lm') +
+    scale_x_log10() +
+    facet_wrap(~country)
+  
+  ggplot(ssn_miv$obs, aes(x=DurD_samp, y=mean_richness)) +
+    geom_point(aes(color=country)) +
+    geom_smooth(aes(color=country), method='lm') +
+    geom_smooth(method='lm') 
+  
+  ggplot(ssn_miv$obs, aes(x=DurD3650past, y=mean_richness)) +
+    geom_point(aes(color=country)) +
+    geom_smooth(aes(color=country), method='lm') +
+    geom_smooth(method='lm') 
+  
+  #Settle on a basic covariance structure to start  with -----
+  ssn_ini <- model_ssn_hydrowindow(
+    in_ssn = in_ssn_eu_summarized,
+    organism = c('miv_nopools'),
+    formula_root = '~ sqrt(basin_area_km2)',
+    hydro_var = 'DurD3650past',
+    response_var = 'mean_richness',
+    ssn_covtypes = ssn_covtypes,
+    partition_formula = as.formula('~ country'),
+    random_formula = NULL
+  )
+  
+  #Then test multiple models -----
+  #Examine correlations with mean_richness
+  topcors_overall <- in_cor_matrices$div[
+    variable1 == 'mean_richness' & organism == 'miv_nopools' &
+      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+    .[, abs_cor := abs(correlation)] %>%
+    setorder(-abs_cor)
+  
+  topcors_bydrn <- in_cor_matrices$div_bydrn[
+    variable1 == 'mean_richness' & organism == 'miv_nopools' &
+      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+             var_label = paste(variable2, round(correlation, 2))
+    ), by=country] %>%
+    dcast(cor_order~country, value.var = 'var_label', fill=NA)
+  
+  
+  basic_lm <- lm(
+    mean_richness ~ DurD3650past + DurD3650past:country + sqrt(basin_area_km2),
+    data=ssn_miv$obs)
+  
+  summary(basic_lm)
+  plot(basic_lm)
+  
+  
+
+
+
+
+
 
 }
   
