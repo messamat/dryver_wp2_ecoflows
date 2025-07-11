@@ -3867,11 +3867,21 @@ compute_cor_matrix_summarized <- function(in_allvars_merged) {
                cols_by_origin$env_summarized_num),
     exclude_diagonal = FALSE)
   
+  # 4. By Organism and Country (Div x (Hydro + Env))
+  cor_div_bydrn <- compute_cor_matrix_inner(
+    dt,
+    group_vars = c("organism", "country"),
+    x_cols = cols_by_origin$div_summarized,
+    y_cols = c(cols_by_origin$hydro_con_summarized, 
+               cols_by_origin$env_summarized_num),
+    exclude_diagonal = FALSE) 
+  
   return(list(
     hydro = cor_hydro,
     hydroenv = cor_hydroenv,
     div = cor_div,
     hydroenv_bydrn = cor_hydroenv_bydrn,
+    div_bydrn = cor_div_bydrn,
     cols_by_origin = cols_by_origin
   ))
 }
@@ -5653,6 +5663,7 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
 # in_ssn_eu_summarized <- tar_read(ssn_eu_summarized)
 # in_cor_matrices <- tar_read(cor_matrices_list_summarized)
 # tar_load(ssn_covtypes)
+# tar_load(cor_heatmaps_summarized)
 
 model_miv <- function(in_ssn_eu_summarized,
                       in_allvars_merged,
@@ -5696,6 +5707,15 @@ model_miv <- function(in_ssn_eu_summarized,
     geom_smooth(aes(color=country), method='lm') +
     geom_smooth(method='lm') 
   
+  melt(ssn_miv$obs, id.vars=c('site', 'country', 'mean_richness'), 
+       measure.vars=hydro_candidates) %>%
+    ggplot(aes(x=value, y=mean_richness)) +
+    geom_point(aes(color=country)) +
+    geom_smooth(aes(color=country), method='lm', se=F) +
+    geom_smooth(method='lm', se=F, color='black') +
+    facet_wrap(~variable, scales='free_x') +
+    theme_bw()
+  
   #Settle on a basic covariance structure to start  with -----
   #Check correlation
   topcors_overall <- in_cor_matrices$div[
@@ -5704,6 +5724,19 @@ model_miv <- function(in_ssn_eu_summarized,
     & !is.na(correlation),] %>%
     .[, abs_cor := abs(correlation)] %>%
     setorder(-abs_cor)
+  
+  topcors_bydrn <- in_cor_matrices$div_bydrn[
+    variable1 == 'mean_richness' & organism == 'miv_nopools' &
+      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+             var_label = paste(variable2, round(correlation, 2))
+    ), by=country] %>%
+    dcast(cor_order~country, value.var = 'var_label', fill=NA)
+  
+  topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
+    variable1 == 'mean_richness' & organism == 'miv_nopools' &
+      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+    .[, mean(correlation), by=variable2]
   
   #Test all possible covariance structures
   ssn_mod_ini <- model_ssn_hydrowindow(
@@ -5767,19 +5800,50 @@ model_miv <- function(in_ssn_eu_summarized,
   summary(miv_rich_modlist [['mod5']])
   SSN2::varcomp(miv_rich_modlist [['mod5']])
   
-  miv_rich_modlist [['mod6']] <- quick_miv_ssn(mean_richness ~ DurD3650past*sqrt(basin_area_km2) + country:sqrt(basin_area_km2))
-  summary(miv_rich_modlist [['mod6']])
-  SSN2::varcomp(miv_rich_modlist [['mod6']])
+  miv_rich_modlist[['mod6']] <- quick_miv_ssn(mean_richness ~ DurD3650past + country:DurD3650past + sqrt(basin_area_km2))
   
-  miv_rich_modlist [['mod7']] <- quick_miv_ssn(mean_richness ~ DurD3650past*sqrt(basin_area_km2))
-  summary(miv_rich_modlist [['mod7']])
-  SSN2::varcomp(miv_rich_modlist [['mod7']])
+  miv_rich_modlist[['mod7']] <- quick_miv_ssn(mean_richness ~ FreD3650past + country:FreD3650past + sqrt(basin_area_km2))
   
-  miv_rich_modlist [['mod6']] <- quick_miv_ssn(mean_richness ~ DurD3650past*sqrt(basin_area_km2) + country:DurD3650past)
-  summary(miv_rich_modlist [['mod6']])
-  SSN2::varcomp(miv_rich_modlist [['mod6']])
+  miv_rich_modlist[['mod8']] <- quick_miv_ssn(mean_richness ~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2))
+  summary(miv_rich_modlist[['mod8']])
+  SSN2::varcomp(miv_rich_modlist [['mod8']])
   
-  glance(miv_rich_modlist)
+  miv_rich_modlist[['mod9']] <- quick_miv_ssn(mean_richness ~ DurD_avg_samp + country:DurD_avg_samp + sqrt(basin_area_km2))
+  
+  miv_rich_modlist[['mod10']] <- quick_miv_ssn(mean_richness ~ FreD_samp + country:FreD_samp + sqrt(basin_area_km2))
+  
+  miv_rich_modlist[['mod11']] <- quick_miv_ssn(mean_richness ~ PDurD365past + country:PDurD365past + sqrt(basin_area_km2))
+  
+  miv_rich_modlist[['mod12']] <- quick_miv_ssn(mean_richness ~ Fdist_mean_10past_undirected_avg_samp + country:Fdist_mean_10past_undirected_avg_samp + sqrt(basin_area_km2))
+  
+  miv_rich_modlist[['mod13']] <- quick_miv_ssn(mean_richness ~ PFreD365past + country:PFreD365past + sqrt(basin_area_km2))
+  
+  miv_rich_modlist[['mod14']] <- quick_miv_ssn(mean_richness ~ STcon_m10_undirected_avg_samp + country:STcon_m10_undirected_avg_samp + sqrt(basin_area_km2))
+  
+  miv_rich_modlist[['mod15']] <- quick_miv_ssn(mean_richness ~ qsim_avg_samp + country:qsim_avg_samp + sqrt(basin_area_km2))
+
+  miv_rich_modlist[['mod16']] <- quick_miv_ssn(mean_richness ~ DurD3650past + DurD_samp + country:DurD_samp + sqrt(basin_area_km2))
+  
+  miv_rich_modlist[['mod17']] <- quick_miv_ssn(mean_richness ~ DurD3650past + country:DurD3650past + DurD_samp + country:DurD_samp + sqrt(basin_area_km2))
+  
+  miv_rich_modlist[['mod18']] <- quick_miv_ssn(mean_richness ~ FreD3650past + country:FreD3650past + DurD_samp + country:DurD_samp + sqrt(basin_area_km2))
+  
+  miv_rich_modlist[['mod19']] <- quick_miv_ssn(mean_richness ~ DurD3650past + country:DurD3650past + FreD_samp + country:FreD_samp + sqrt(basin_area_km2))
+  
+  miv_rich_modlist[['mod20']] <- quick_miv_ssn(mean_richness ~ DurD3650past + country:DurD3650past + PFreD365past + country:PFreD365past + sqrt(basin_area_km2))
+  
+  miv_rich_modlist[['mod21']] <- quick_miv_ssn(mean_richness ~ Fdist_mean_10past_undirected_avg_samp + DurD_samp + country:DurD_samp + sqrt(basin_area_km2))
+  
+  miv_rich_modlist[['mod22']] <- quick_miv_ssn(mean_richness ~ STcon_m10_undirected_avg_samp + DurD_samp + country:DurD_samp + sqrt(basin_area_km2))
+  
+  mod_perf_tab <- lapply(miv_rich_modlist, function(x) {
+    cbind(Reduce(paste, deparse(x$formula)), 
+          glance(x), 
+          ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
+          loocv(x))
+    }) %>% rbindlist
+  
+  
 }
   
 

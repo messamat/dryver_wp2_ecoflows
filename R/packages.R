@@ -2,6 +2,7 @@ pkg_vec <- list(
   'ade4',
   'adespatial',
   'assertthat',
+  'car',
   'crew',
   'dbscan',
   'dplyr',
