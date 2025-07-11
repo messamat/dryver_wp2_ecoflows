@@ -4160,6 +4160,17 @@ ordinate_local_env <- function(in_allvars_dt) {
 # out_ssn_name = 'all_drns'
 # overwrite=T
 
+
+# in_network_path = tar_read(network_ssnready_shp_list)
+# in_sites_path = tar_read(site_snapped_gpkg_list)
+# in_allvars_dt = tar_read(allvars_merged)$dt_summarized
+# in_local_env_pca = tar_read(local_env_pca_summarized)
+# in_barriers_path = tar_read(barrier_snapped_gpkg_list)
+# in_hydromod = tar_read(hydromod_comb)
+# out_dir = file.path(resdir, 'ssn')
+# out_ssn_name = 'ssn_eu_summarized'
+# overwrite = T
+
 create_ssn_europe <- function(in_network_path,
                               in_sites_path,
                               in_allvars_dt,
@@ -4235,7 +4246,7 @@ create_ssn_europe <- function(in_network_path,
     file_name = "sites",
     snap_tolerance = 5,
     save_local = TRUE,
-    overwrite = TRUE
+    overwrite = overwrite
   )
   
   setDT(in_allvars_dt)[country == 'Czech Republic', country := 'Czech']
@@ -4263,7 +4274,7 @@ create_ssn_europe <- function(in_network_path,
       file_name = "barriers",
       snap_tolerance = 5,
       save_local = TRUE,
-      overwrite = TRUE
+      overwrite = overwrite
     )
     
     sites_list$barriers <- barriers_lsn
@@ -4324,7 +4335,7 @@ create_ssn_europe <- function(in_network_path,
       import = TRUE,
       check = TRUE,
       afv_col = "afv_qsqrt",
-      overwrite = TRUE
+      overwrite = overwrite
     )
     
     return(list(
@@ -4348,9 +4359,14 @@ create_ssn_europe <- function(in_network_path,
 # in_obs <- in_ssn$obs[in_ssn$obs$country==in_country,]
 
 map_ssn_sites_util <- function(in_ssn, in_edges, in_obs,
-                               color_col,
+                               color_col, color_lims=NULL,
                                linewidth_col='mean_qsim'
 ) {
+  
+  if (is.null(color_lims)) {
+    color_lims <- range(in_obs[[color_col]])
+  }
+  
   out_map <- ggplot() +
     geom_sf(data = in_edges,
             aes(linewidth = get(linewidth_col)),
@@ -4368,7 +4384,7 @@ map_ssn_sites_util <- function(in_ssn, in_edges, in_obs,
                     limits = range(in_ssn$edges[[linewidth_col]]),
                     range = c(0.1, 2.5)) +
     scale_color_viridis_b(name = str_to_sentence(gsub('_', ' ', color_col)),
-                          limits=range(in_ssn$obs[[color_col]]),
+                          limits = color_lims,
                           n.breaks=5) +
     ggspatial::annotation_scale(location = "br", style='ticks') +
     theme_classic() +
@@ -4409,31 +4425,48 @@ pad_ssn_map <- function(in_edges, in_obs) {
 # facet_col <- 'country'
 # page_title <- 'Macroinvertebrates - Mean richness'
 
+# in_organism = 'miv_nopools'
+# in_color_col <- 'mean_richness'
+# in_ssn = in_ssn_summarized[[in_organism]]$ssn 
+# color_col = as.character(in_color_col) 
+# facet_col = 'country'
+# linewidth_col = 'mean_qsim'
+# page_title = paste(in_organism, in_color_col, sep=' - ')
+                   
+                   
 facet_ssn_maps <- function(in_ssn, 
-                          color_col, 
-                          facet_col,
-                          linewidth_col = 'mean_qsim',
-                          page_title=NULL) {
+                           color_col, 
+                           facet_col,
+                           linewidth_col = 'mean_qsim',
+                           page_title=NULL) {
   
   assert_that((facet_col %in% names(in_ssn$edges)) &
                 (facet_col %in% names(in_ssn$obs)),
               msg = paste0(facet_col, ' not in in_ssn edges or obs'))
   
+  #Define the different facet values to iterate over
   facet_vals <- unique(in_ssn$edges[[facet_col]])
   
+  #Define global limits for the color scale
+  color_lims <- range(in_ssn$obs[[color_col]])
+  
   map_list <- lapply(facet_vals, function(facet_i) {
-    
+    #Subset edges and observations for given facet
     edges_i <- in_ssn$edges[in_ssn$edges[[facet_col]] == facet_i, ]
     obs_i   <- in_ssn$obs[in_ssn$obs[[facet_col]] == facet_i, ]
     
+    #Define cartographic extent to make sure the map is square to 
+    #allow uniform faceting (despite uneven cartographic scale among facets)
     map_lims <- pad_ssn_map(in_edges = edges_i, 
                             in_obs = obs_i)
     
+    #Map individual facet
     map_ssn_sites_util(
       in_ssn = in_ssn,
       in_edges = edges_i,
       in_obs = obs_i,
       color_col = color_col,
+      color_lims = color_lims,
       linewidth_col = linewidth_col
       ) +
       ggtitle(facet_i) +
@@ -4449,10 +4482,10 @@ facet_ssn_maps <- function(in_ssn,
   return(map_patchwork)
 }
 
-
+# 
 # in_ssn_summarized <- tar_read(ssn_eu_summarized)
 # in_allvars_merged <- tar_read(allvars_merged)
-# selected_organism_list <- tar_read(organism_list)
+# selected_organism_list <- tar_read(organism_list)[1]
 # verbose = T
 
 map_ssn_summarized <- function(in_ssn_summarized,
@@ -4463,7 +4496,8 @@ map_ssn_summarized <- function(in_ssn_summarized,
   #Plot every diversity variable for each organism
   div_map_params <- expand.grid(intersect(names(in_ssn_summarized), 
                                           selected_organism_list),
-                                in_allvars_merged$cols$div_summarized) %>%
+                                in_allvars_merged$cols$div_summarized,
+                                stringsAsFactors = FALSE) %>%
     setDT %>%
     setnames(c('organism', 'divcol'))
   
@@ -4472,7 +4506,7 @@ map_ssn_summarized <- function(in_ssn_summarized,
       if (verbose) {print(paste('Mapping', in_organism, in_color_col))}
       
       facet_ssn_maps(in_ssn = in_ssn_summarized[[in_organism]]$ssn, 
-                     color_col = as.character(in_color_col), 
+                     color_col = in_color_col, 
                      facet_col = 'country',
                      linewidth_col = 'mean_qsim',
                      page_title = paste(in_organism, in_color_col, sep=' - ')
@@ -5564,12 +5598,25 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
 
 
 #------ model_miv_yr -----------------------------------------------------------
-# model_miv <- function(in_ssn_eu_summarized, 
-#                       in_allvars_merged, 
-#                       in_cor_matrices, ssn_covtypes) {
-#   
-#   
-# }
+# in_allvars_merged <- tar_read(allvars_merged)
+# in_ssn_eu <- tar_read(ssn_eu_summarized)
+# in_cor_matrices <- tar_read(cor_matrices_list_summarized)
+
+model_miv <- function(in_ssn_eu_summarized,
+                      in_allvars_merged,
+                      in_cor_matrices, ssn_covtypes) {
+  
+  #Subset SSN and create distance matrices-----
+  ssn_miv <- in_ssn_eu_summarized$miv_nopools$ssn
+  SSN2::ssn_create_distmat(ssn_miv)
+  
+  allvars_dt <- as.data.table(ssn_miv$obs) %>%
+    setorderv(c('country', 'site')) 
+  
+  hydrocon_candidates <- in_allvars_merged$cols$hydro_con_summarized
+    
+
+}
   
 
 ################################################################################

@@ -965,7 +965,7 @@ analysis_targets <- list(
                       in_barriers_path = barrier_snapped_gpkg_list,
                       in_hydromod = hydromod_comb,
                       out_dir = file.path(resdir, 'ssn'),
-                      out_ssn_name = 'ssn_eu',
+                      out_ssn_name = 'ssn_eu_summarized',
                       overwrite = T)
   )
   ,
