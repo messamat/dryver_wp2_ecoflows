@@ -3781,6 +3781,11 @@ compute_cor_matrix <- function(in_allvars_merged) {
   dt[, PrdD := as.numeric(PrdD)]
   
   # --- Calculate Correlations for each site and date ---
+  cor_hydro <- compute_cor_matrix_inner(
+    dt,
+    x_cols = c(cols_by_origin$hydro_con),
+    exclude_diagonal = FALSE) 
+  
   # 1. Overall Correlation (Hydro + Env)
   cor_hydroenv <- compute_cor_matrix_inner(
     dt,
@@ -3814,7 +3819,8 @@ compute_cor_matrix <- function(in_allvars_merged) {
                cols_by_origin$env_num),
     exclude_diagonal = FALSE) 
   
-  return(list(hydroenv = cor_hydroenv,
+  return(list(hydro = cor_hydro,
+              hydroenv = cor_hydroenv,
               div = cor_div,
               hydroenv_bydrn = cor_hydroenv_bydrn,
               div_bydrn = cor_div_bydrn,
@@ -3831,6 +3837,12 @@ compute_cor_matrix_summarized <- function(in_allvars_merged) {
   cols_by_origin <- in_allvars_merged$cols
   
   # --- Calculate Correlations for each site summarized ---
+  # 1. Overall Correlation (Hydro)
+  cor_hydro <- compute_cor_matrix_inner(
+    dt,
+    x_cols = c(cols_by_origin$hydro_con_summarized),
+    exclude_diagonal = FALSE) 
+  
   # 1. Overall Correlation (Hydro + Env)
   cor_hydroenv <- compute_cor_matrix_inner(
     dt,
@@ -3856,6 +3868,7 @@ compute_cor_matrix_summarized <- function(in_allvars_merged) {
     exclude_diagonal = FALSE)
   
   return(list(
+    hydro = cor_hydro,
     hydroenv = cor_hydroenv,
     div = cor_div,
     hydroenv_bydrn = cor_hydroenv_bydrn,
@@ -3864,7 +3877,6 @@ compute_cor_matrix_summarized <- function(in_allvars_merged) {
 }
 #------ plot_cor_heatmaps -------------------------------------------------------
 # in_cor_matrices <- tar_read(cor_matrices_list)
-# in_allvars_merged <- tar_read(allvars_merged)
 # p_threshold <- 0.05
 
 create_correlation_heatmap <- function(cor_matrix, p_matrix, title,
@@ -3900,11 +3912,36 @@ plot_cor_heatmaps <- function(in_cor_matrices,
     )
   country_list <- unique(in_cor_matrices$hydroenv_bydrn$country)
   
+  # # --- 1. Hydro Correlation ---
+  # Extract the correlation and p-value matrices for hydro
+  cor_matrix_hydro <- dcast(in_cor_matrices$hydro, 
+                               variable1 ~ variable2, 
+                               value.var = "correlation")
+  rnames <- cor_matrix_hydro$variable1
+  cor_matrix_hydro <- as.matrix(cor_matrix_hydro[, -1])
+  rownames(cor_matrix_hydro) <- rnames
+  cor_matrix_hydro[is.na(cor_matrix_hydro)] <- 0
+  
+  p_matrix_hydro <- dcast(in_cor_matrices$hydro, 
+                             variable1 ~ variable2, 
+                             value.var = "p_value")
+  p_matrix_hydro <- as.matrix(p_matrix_hydro[, -1])
+  rownames(p_matrix_hydro) <- rnames
+  p_matrix_hydro[is.na(p_matrix_hydro)] <- 1L
+  
+  # Create and print the heatmap
+  hydro_heatmap <- create_correlation_heatmap(
+    cor_matrix = cor_matrix_hydro, 
+    p_matrix = p_matrix_hydro,
+    title = "Hydro Correlations",
+    p_threshold = p_threshold,
+    is_square = TRUE)
+  
   # # --- 1. Hydroenv Correlation ---
   # hydroenv_sub <- in_cor_matrices$hydroenv[p_value <= p_threshold & 
   #                                            correlation >= cor_threshold,]
   # 
-  # Extract the correlation and p-value matrices
+  # Extract the correlation and p-value matrices for hydro env
   cor_matrix_hydroenv <- dcast(in_cor_matrices$hydroenv, 
                                variable1 ~ variable2, 
                                value.var = "correlation")
@@ -4019,6 +4056,7 @@ plot_cor_heatmaps <- function(in_cor_matrices,
   
   
   return(list(
+    hydro = hydro_heatmap,
     hydroenv = hydroenv_heatmap,
     div = div_heatmaps,
     hydroenv_country = hydroenv_country_heatmaps,
@@ -4747,10 +4785,10 @@ plot_scatter_lm <-  function(in_allvars_merged, temporal_var_substr, response_va
 # in_ssn <- in_ssn_eu$miv_nopools$ssn
 # tar_load(ssn_covtypes)
 
-quick_ssn <- function(in_ssn, in_formula, ssn_covtypes, 
-                      estmethod = "ml", 
+quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,  
                       partition_formula = as.formula("~ as.factor(campaign)"),
-                      random_formula = as.formula("~ country")) {
+                      random_formula = as.formula("~ country"),
+                      estmethod = "ml") {
   SSN2::ssn_create_distmat(in_ssn)
   
   #summary(lm(formula = as.formula(in_formula), data=in_ssn$obs))
@@ -4795,7 +4833,8 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
 model_ssn_hydrowindow <- function(in_ssn, organism, formula_root, 
                                   hydro_var, response_var, ssn_covtypes,
                                   partition_formula = as.formula("~ as.factor(campaign)"),
-                                  random_formula = as.formula("~ country")) {
+                                  random_formula = as.formula("~ country"),
+                                  estmethod = "ml") {
   
   # hydro_var <- grep(paste0('^', hydro_var_str), 
   #                   names(in_ssn[[organism]]$ssn$obs), 
@@ -4810,7 +4849,7 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
                         ssn_covtypes = ssn_covtypes, #ssn_covtypes[sample(144, 10)],
                         partition_formula = partition_formula,
                         random_formula = random_formula,
-                        estmethod = "ml")
+                        estmethod = estmethod)
   
   ssn_glance <- purrr::map(ssn_list, SSN2::glance,
                            .id=names(ssn_list)) %>%
@@ -5658,7 +5697,16 @@ model_miv <- function(in_ssn_eu_summarized,
     geom_smooth(method='lm') 
   
   #Settle on a basic covariance structure to start  with -----
-  ssn_ini <- model_ssn_hydrowindow(
+  #Check correlation
+  topcors_overall <- in_cor_matrices$div[
+    variable1 == 'mean_richness' & organism == 'miv_nopools' 
+    # & variable2 %in% hydro_candidates 
+    & !is.na(correlation),] %>%
+    .[, abs_cor := abs(correlation)] %>%
+    setorder(-abs_cor)
+  
+  #Test all possible covariance structures
+  ssn_mod_ini <- model_ssn_hydrowindow(
     in_ssn = in_ssn_eu_summarized,
     organism = c('miv_nopools'),
     formula_root = '~ sqrt(basin_area_km2)',
@@ -5666,40 +5714,72 @@ model_miv <- function(in_ssn_eu_summarized,
     response_var = 'mean_richness',
     ssn_covtypes = ssn_covtypes,
     partition_formula = as.formula('~ country'),
-    random_formula = NULL
+    random_formula = NULL,
+    estmethod='reml'
   )
   
+  selected_ssn_cov <- ssn_mod_ini$ssn_glance
+  loocv(ssn_mod_ini$ssn_list$none_none_none)
+  loocv(ssn_mod_ini$ssn_list$none_none_exponential)
+  loocv(ssn_mod_ini$ssn_list$none_none_spherical)
+  
+
+  #Set basic model structure
+  quick_miv_ssn <- function(in_formula, in_random=NULL) {
+    ssn_lm(
+      formula = in_formula,
+      ssn.object = ssn_miv,
+      taildown_type = 'none',
+      tailup_type = 'none',
+      euclid_type = 'spherical',
+      additive = "afv_qsqrt",
+      partition_factor = ~ country,
+      random = in_random
+    )
+  }
+  
   #Then test multiple models -----
-  #Examine correlations with mean_richness
-  topcors_overall <- in_cor_matrices$div[
-    variable1 == 'mean_richness' & organism == 'miv_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor)
+  miv_rich_modlist <- list()
   
-  topcors_bydrn <- in_cor_matrices$div_bydrn[
-    variable1 == 'mean_richness' & organism == 'miv_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
-             var_label = paste(variable2, round(correlation, 2))
-    ), by=country] %>%
-    dcast(cor_order~country, value.var = 'var_label', fill=NA)
+  #Null model
+  miv_rich_modlist [['null']] <- quick_miv_ssn(mean_richness ~ 1)
+  summary(miv_rich_modlist [['null']])
+  SSN2::varcomp(miv_rich_modlist [['null']])
   
+  #Initial model
+  miv_rich_modlist [['mod1']] <- quick_miv_ssn(mean_richness ~ sqrt(basin_area_km2))
+  summary(miv_rich_modlist [['mod1']])
+  SSN2::varcomp(miv_rich_modlist [['mod1']])
+
+  miv_rich_modlist [['mod2']] <- quick_miv_ssn(mean_richness ~ country*sqrt(basin_area_km2))
+  summary(miv_rich_modlist [['mod2']])
+  SSN2::varcomp(miv_rich_modlist [['mod2']])
+
+  miv_rich_modlist [['mod3']] <- quick_miv_ssn(mean_richness ~ basin_area_km2 + country:sqrt(basin_area_km2))
+  summary(miv_rich_modlist [['mod3']])
+  SSN2::varcomp(miv_rich_modlist [['mod3']])
   
-  basic_lm <- lm(
-    mean_richness ~ DurD3650past + DurD3650past:country + sqrt(basin_area_km2),
-    data=ssn_miv$obs)
+  miv_rich_modlist [['mod4']] <- quick_miv_ssn(mean_richness ~ DurD3650past + sqrt(basin_area_km2) + country:sqrt(basin_area_km2))
+  summary(miv_rich_modlist [['mod4']])
+  SSN2::varcomp(miv_rich_modlist [['mod4']])
+
+  miv_rich_modlist [['mod5']] <- quick_miv_ssn(mean_richness ~ DurD3650past + country:DurD3650past + sqrt(basin_area_km2))
+  summary(miv_rich_modlist [['mod5']])
+  SSN2::varcomp(miv_rich_modlist [['mod5']])
   
-  summary(basic_lm)
-  plot(basic_lm)
+  miv_rich_modlist [['mod6']] <- quick_miv_ssn(mean_richness ~ DurD3650past*sqrt(basin_area_km2) + country:sqrt(basin_area_km2))
+  summary(miv_rich_modlist [['mod6']])
+  SSN2::varcomp(miv_rich_modlist [['mod6']])
   
+  miv_rich_modlist [['mod7']] <- quick_miv_ssn(mean_richness ~ DurD3650past*sqrt(basin_area_km2))
+  summary(miv_rich_modlist [['mod7']])
+  SSN2::varcomp(miv_rich_modlist [['mod7']])
   
-
-
-
-
-
-
+  miv_rich_modlist [['mod6']] <- quick_miv_ssn(mean_richness ~ DurD3650past*sqrt(basin_area_km2) + country:DurD3650past)
+  summary(miv_rich_modlist [['mod6']])
+  SSN2::varcomp(miv_rich_modlist [['mod6']])
+  
+  glance(miv_rich_modlist)
 }
   
 
