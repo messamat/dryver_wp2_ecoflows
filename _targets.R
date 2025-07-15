@@ -19,6 +19,8 @@ source("R/SpaTemp_function_Mathis_edit.R")
 source("bin/03_diversity_metrics.R") #From 
 
 hydromod_present_dir <- file.path('data', 'wp1', 'Results_present_period_final')
+wp1_data_gouv_dir <- file.path('data', 'wp1', 'data_gouv') #Official WP1 data published later, with fuller attributes (upstream drainage area)
+
 bio_dir <- file.path('data', 'wp2', '01_WP2 final data')
 #datdir <- file.path('data', 'data_annika')
 resdir <- 'results'
@@ -145,6 +147,17 @@ preformatting_targets <- list(
   
   ##############################################################################
   ### READ DATA ################################################################
+  #Read new reach data
+  tar_target(
+    reaches_attri,
+    lapply(drn_dt$catchment, function(in_catchment) {
+      file.path(wp1_data_gouv_dir, 'gis_data',
+                paste0('reaches_', in_catchment, '.csv')) %>%
+        fread
+    }) %>% setNames(drn_dt$country)
+  )
+  ,
+  
   
   #Read reach data
   tar_target(
@@ -163,6 +176,8 @@ preformatting_targets <- list(
     #Reach that flows to 9999 is outlet in Czech, Finland, France, and Hungary
     #Reach that flows to 0 is outlet in Spain and Croatia
   ),
+  
+  
   
   #Read local environmental data
   tar_target(
@@ -305,6 +320,7 @@ preformatting_targets <- list(
         rivnet_path = network_nocomplexconf_gpkg_list[[in_country]], 
         strahler_dt = network_strahler[[in_country]], 
         in_reaches_hydromod_dt = reaches_dt[country==in_country,], 
+        in_reaches_attri_dt = reaches_attri[[in_country]],
         outdir = file.path(resdir, 'gis'),
         country = in_country
       )
@@ -318,10 +334,11 @@ preformatting_targets <- list(
     network_ssnready_shp_list,
     lapply(network_ssnready_gpkg_list, function(path) {
       old_cols <- c('UID', 'strahler', 'length_uid', 'cat_cor', 'from', 'to',
-                    'to_reach_shpcor', 'to_reach_hydromod', 
+                    'to_reach_shpcor', 'to_reach_hydromod', 'upstream_area',
                     'hydromod_shpcor_match', 'geom')
       new_cols <- c('UID', 'strahler', 'length_m', 'cat', 'from', 'to',
-                    'to_cat_shp', 'to_cat_mod', 'mod_match', 'geom')
+                    'to_cat_shp', 'to_cat_mod', 'upstream_area',
+                    'mod_match', 'geom')
       lyr <- st_read(path)[,old_cols]
       names(lyr) <- new_cols
       lyr$UID <- seq_along(lyr$UID)
@@ -869,7 +886,7 @@ analysis_targets <- list(
   #   }
   # )
   # ,
-  # 
+  #
   # #Run SSN for each chosen variable and time window
   # tar_target(
   #   ssn_richness_hydrowindow,
@@ -944,6 +961,15 @@ analysis_targets <- list(
     map_ssn_summarized(in_ssn_summarized = ssn_eu_summarized,
                       in_allvars_merged = allvars_merged,
                       selected_organism_list = organism_list)
+  )
+  ,
+  
+  tar_target(
+    ssn_mods_miv_yr,
+    model_miv_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                 in_allvars_merged = allvars_merged,
+                 in_cor_matrices = cor_matrices_list_summarized, 
+                 ssn_covtypes = ssn_covtypes)
   )
 )
 
