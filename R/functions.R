@@ -3548,7 +3548,7 @@ summarize_sampling_hydrocon <- function(in_hydrocon_compiled) {
   return(hydrocon_summmarized)
 }
 
-#------ compute_network_hydrostats -------------------------------------------
+#------ summarize_network_hydrostats -------------------------------------------
 # in_country = 'Croatia'
 # in_hydromod = tar_read(hydromod_comb_hist)
 # in_all_date_range = c(as.Date('1960-10-01', '%Y-%m-%d'),
@@ -3593,9 +3593,6 @@ summarize_network_hydrostats <- function(
   
   return(hydrostats_net)
 }
-
-
-
 
 #------ summarize_env ---------------------------------------------------------
 # in_env_dt <- tar_read(env_dt)
@@ -3656,6 +3653,78 @@ summarize_env <- function(in_env_dt) {
   ))
 }
 
+
+#------ summarize_drn_hydroproj_stats ------------------------------------------------
+# ** 4 simulated variables:
+#   * Discharge [m3/s]: Spatially distributed discharges at the reach level simulated at daily time step (outputs of the hydrological model JAMS-J2000)
+# * Baseflow (groundwater contribution to the discharge) [m3/s]: Spatially distributed baseflows at the reach level simulated at daily time step (outputs of the hydrological model JAMS-J2000)
+# * State of flow (binary variable: 0=dry, 1=flowing): Spatially distributed state of flow at the reach level simulated at daily time step (outputs of the flow intermittence random forest model)
+# * Other hydroclimatic variables (temperature [°C], precipitation [mm], rainfall [mm], snowfall [mm], potential evapotranspiration [mm], actual evapotranspiration [mm], vegetation interception [mm], snow water equivalent [mm], saturation of the soil layer [0-1], saturation of the grounwater layer [0-1]): Spatially aggregated variables at the catchment scale simulated at daily time step (outputs of the hydrological model JAMS-J2000)
+# 
+# ** Characteristics of the projection simulations:
+#   * 3 SSP scenarios: SSP1-2.6, SSP3-7.0, SSP5-8.5
+# * Global Climate Models: gfdl-esm4, ipsl-cm6a-lr, mpi-esm1-2-hr, mri-esm2-0, ukesm1-0-ll
+# * The analogue downscaling method produced 20-members ensembles for each combination of GCMs and SSP scenarios for the 6 studied catchments. As the uncertainty related to the downscaling method is rather negligeable, only the 10th member at the center of the distribution is given in this dataset (see Mimeau et al. 2024).
+# * Reference period: 1985-2014 (data for the reference period are only given for SSP3-7.0)
+# * Projection period: 2015-2100
+# * JAMS-J2000 spatially distributed hydrological model: j2k_Guadiaro
+# * Flow intermittence model: random_forest_Genal_2023-01-18_option0_15.RData
+# 
+# ** Name of the ncdf files:
+#   {1}_{2}_{3}_{4}_{5}_{6}_{7}.nc
+# 
+# {1}: name of the DRN
+# {2}: variable
+# {3}: rprojection (in distinction with the reconstruction simulations)
+# {4}: GCM
+# {5}: SSP
+# {6}: period of the dataset (reference period 1985-2014 or projection period 2015-2100)
+# {7}: spatial aggregation (distributed or aggregated)
+
+# hydroproj_path <- file.path(
+#   wp1_data_gouv_dir,
+#   "projections",
+#   "Albarine_flowstate_projection_gfdl-esm4_ssp585_2015-2100_spatially-distributed.nc")
+# varname = 'flowstate'
+
+summarize_drn_hydroproj_stats <- function(hydroproj_path) {
+  #Decompose name
+  metadata_dt <- str_split(basename(hydroproj_path), '_')[[1]] %>%
+    setNames(c('catchment', 'varname', 'time_period', 'gcm', 
+               'scenario', 'date_range', 'file_end')) %>%
+    as.list %>%
+    data.frame %>%
+    setDT %>%
+    .[, path := hydropoj_path]
+  metadata_dt[varname=='flowstate', varname:='isflowing']
+  
+  nc <- nc_open(hydroproj_path) # open netcdf file
+  reachID <- ncvar_get(nc, "reachID") # get list of reaches IDs
+  dates <- ncvar_get(nc, "date") # get dates of simulation period
+  dates <- as.Date(dates, origin="1950-01-01") # convert dates into R date format
+  
+  hydro_dt <- get_nc_var_present(nc = nc, varname = varname, # 0=dry, 1=flowing
+                                 reachID = reachID, dates = dates,
+                                 selected_sims = NULL) 
+  setnames(hydro_dt$data_all, 'flowstate', 'isflowing', skip_absent = TRUE)
+  
+  # qsim_samp_dt <- qsim_country$data_all[
+  #   (date >= min(in_samp_date_range)) &
+  #     (date <= max(in_samp_date_range)),  
+  #   list(qsim_avg_samp = mean(qsim, na.rm=T)), 
+  #   by=reach_id] 
+  
+  if (metadata_dt$varname == 'isflowing') {
+    stats_dt <- hydro_dt$data_all[(date > as.Date('2021-12-31')) &
+                                    (date < as.Date('2041-12-31')), 
+                                  list(DurD_yr = sum(isflowing==0)/.N), 
+                                  by=.(reach_id, format(date, '%Y'))] %>%
+      setnames('format', 'year')
+  }
+  
+  return(cbind(stats_dt, metadata_dt[, .(catchment, gcm, scenario)])
+    )
+}
 
 #------ merge_allvars_sites ----------------------------------------------------
 # in_country <- 'Spain'

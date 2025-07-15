@@ -486,6 +486,19 @@ analysis_targets <- list(
       }) %>% rbindlist
   )
   ,
+  
+  
+  tar_target(
+    hydrostats_net_proj,
+    lapply(list.files(file.path(wp1_data_gouv_dir, 'projections'), 
+                      pattern='flowstate.*2015[-]2100',
+                      full.names = TRUE),
+           function(in_path) {
+             print(in_path)
+             summarize_drn_hydroproj_stats(hydroproj_path=in_path)
+           }) %>% rbindlist
+  )
+  ,
 
   #Prepare data for STcon
   tar_target(
