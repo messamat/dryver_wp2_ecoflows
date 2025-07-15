@@ -432,7 +432,7 @@ mapped_hydrotargets <- tarchetypes::tar_map(
   values = hydro_combi,
   #Read hydrological modeling data for flow intermittence and discharge
   tar_target(
-    hydromod_dt,
+    hydromod_hist_dt,
     get_drn_hydromod(hydromod_path = hydromod_paths_dt[country==in_country,
                                                        sel_sim_path],
                      varname = in_varname)
@@ -441,19 +441,19 @@ mapped_hydrotargets <- tarchetypes::tar_map(
   
   #Compute hydrological statistics for a given DRN for all dates
   tar_target(
-    hydrostats_sites,
+    hydrostats_sites_hist,
     compute_hydrostats_drn(
       in_network_path = network_ssnready_shp_list[[in_country]],
       in_sites_dt = sites_dt[country == in_country,],
       varname = in_varname,
-      in_hydromod_drn = hydromod_dt,
+      in_hydromod_drn = hydromod_hist_dt,
       in_network_idcol = 'cat')
   ),
   
   #Subset statistics to keep only those for sampling site-dates combinations
   tar_target(
     hydrostats_sites_tsub,
-    subset_hydrostats(hydrostats_sites, 
+    subset_hydrostats(hydrostats_sites_hist, 
                       in_country = in_country, 
                       in_bio_dt = bio_dt)
   )
@@ -461,8 +461,8 @@ mapped_hydrotargets <- tarchetypes::tar_map(
 
 combined_hydrotargets <- list(
   tar_combine(
-    hydromod_comb,
-    mapped_hydrotargets[['hydromod_dt']],
+    hydromod_comb_hist,
+    mapped_hydrotargets[['hydromod_hist_dt']],
     command = list(!!!.x)
   ),
   tar_combine(
@@ -473,14 +473,28 @@ combined_hydrotargets <- list(
 )
 
 analysis_targets <- list(
+  #Compute summary hydrostats for each reach in network 
+  tar_target(
+    hydrostats_net_hist,
+    lapply(names(network_ssnready_shp_list), function(in_country) {
+      summarize_network_hydrostats(
+        in_country = in_country,
+        in_hydromod = hydromod_comb_hist,
+        in_all_date_range = c(as.Date('1960-10-01', '%Y-%m-%d'),
+                              as.Date('2021-10-01', '%Y-%m-%d')),
+        in_samp_date_range = hydrocon_compiled[, range(date)])
+      }) %>% rbindlist
+  )
+  ,
+
   #Prepare data for STcon
   tar_target(
     preformatted_data_STcon,
     lapply(names(network_ssnready_shp_list), function(in_country) {
       #print(in_country)
       prepare_data_for_STcon(
-        in_hydromod_drn = hydromod_comb[[paste0(
-          "hydromod_dt_", in_country, '_isflowing')]], 
+        in_hydromod_drn = hydromod_comb_hist[[paste0(
+          "hydromod_hist_dt_", in_country, '_isflowing')]], 
         in_net_shp_path = network_ssnready_shp_list[[in_country]]
       )
     }) %>% setNames(names(network_ssnready_shp_list))
@@ -633,13 +647,13 @@ analysis_targets <- list(
   tar_target(
     hydrocon_sites_compiled,
     lapply(drn_dt$country, function(in_country) {
-      compile_hydrocon_country(hydrostats_sites_tsub_comb,
-                               STcon_directed_formatted,
-                               STcon_undirected_formatted,
-                               Fdist_directed,
-                               Fdist_undirected,
-                               site_snapped_gpkg_list, 
-                               in_country)
+      compile_hydrocon_sites_country(hydrostats_sites_tsub_comb,
+                                     STcon_directed_formatted,
+                                     STcon_undirected_formatted,
+                                     Fdist_directed,
+                                     Fdist_undirected,
+                                     site_snapped_gpkg_list, 
+                                     in_country)
     }) %>% rbindlist 
   )
   ,
@@ -800,7 +814,7 @@ analysis_targets <- list(
   #                     in_allvars_dt = allvars_merged$dt,
   #                     in_local_env_pca = local_env_pca,
   #                     in_barriers_path = barrier_snapped_gpkg_list,
-  #                     in_hydromod = hydromod_comb,
+  #                     in_hydrostats_net_hist = hydrostats_net_hist,
   #                     out_dir = file.path(resdir, 'ssn'),
   #                     out_ssn_name = 'ssn_eu',
   #                     overwrite = T)
@@ -949,7 +963,7 @@ analysis_targets <- list(
                       in_allvars_dt = allvars_merged$dt_summarized,
                       in_local_env_pca = local_env_pca_summarized,
                       in_barriers_path = barrier_snapped_gpkg_list,
-                      in_hydromod = hydromod_comb,
+                      in_hydrostats_net_hist = hydrostats_net_hist,
                       out_dir = file.path(resdir, 'ssn'),
                       out_ssn_name = 'ssn_eu_summarized',
                       overwrite = T)
@@ -974,7 +988,6 @@ analysis_targets <- list(
 )
 
 
-#Create table of performance metrics for different covariance structures for each organism
 #Run for other diversity indices
   
   # combined_ssntargets <- list(

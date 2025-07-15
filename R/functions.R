@@ -3001,7 +3001,7 @@ snap_barrier_sites <- function(in_sites_path,
 
 #------ prepare_data_for_STcon ---------------------------------------------------
 # in_country <- in_drn <- 'Croatia'
-# in_hydromod_drn <- tar_read(hydromod_comb)[[paste0(
+# in_hydromod_drn <- tar_read(hydromod_comb_hist)[[paste0(
 #   "hydromod_dt_", in_country, '_isflowing')]]
 # in_net_shp_path <- tar_read(network_ssnready_shp_list)[[in_drn]]
 
@@ -3441,7 +3441,7 @@ compute_Fdist_rolling <- function(in_Fdist_dt, in_sites_dt) {
 }
 
 
-#------ compile_hydrocon_country -----------------------------------------------
+#------ compile_hydrocon_sites_country -----------------------------------------------
 # in_hydrostats_sub_comb <- tar_read(hydrostats_sub_comb)
 # in_STcon_directed <- tar_read(STcon_directed_formatted)
 # in_STcon_undirected <- tar_read(STcon_undirected_formatted)
@@ -3450,13 +3450,13 @@ compute_Fdist_rolling <- function(in_Fdist_dt, in_sites_dt) {
 # in_site_snapped_gpkg_list <- tar_read(site_snapped_gpkg_list)
 # in_country <- 'Spain'
 
-compile_hydrocon_country <- function(in_hydrostats_sub_comb, 
-                                     in_STcon_directed,
-                                     in_STcon_undirected, 
-                                     in_Fdist_directed,
-                                     in_Fdist_undirected,
-                                     in_site_snapped_gpkg_list,
-                                     in_country) {
+compile_hydrocon_sites_country <- function(in_hydrostats_sub_comb, 
+                                           in_STcon_directed,
+                                           in_STcon_undirected, 
+                                           in_Fdist_directed,
+                                           in_Fdist_undirected,
+                                           in_site_snapped_gpkg_list,
+                                           in_country) {
   
   in_sites_dt <- as.data.table(vect(in_site_snapped_gpkg_list[[in_country]]))
   
@@ -3516,7 +3516,7 @@ compile_hydrocon_country <- function(in_hydrostats_sub_comb,
   return(out_dt)  
 }
 
-#------ summarize_hydrostats ------------------------------------------------------
+#------ summarize_sampling_hydrocon --------------------------------------------
 # in_hydrocon_compiled <- tar_read(hydrocon_compiled)
 
 #Compute summary statistics over the period of sampling for relevant hydrological
@@ -3547,6 +3547,56 @@ summarize_sampling_hydrocon <- function(in_hydrocon_compiled) {
   
   return(hydrocon_summmarized)
 }
+
+#------ compute_network_hydrostats -------------------------------------------
+# in_country = 'Croatia'
+# in_hydromod = tar_read(hydromod_comb_hist)
+# in_all_date_range = c(as.Date('1960-10-01', '%Y-%m-%d'),
+#                       as.Date('2021-10-01', '%Y-%m-%d'))
+# in_samp_date_range = tar_read(hydrocon_compiled)[, range(date)]
+
+summarize_network_hydrostats <- function(
+    in_hydromod,
+    in_all_date_range,
+    in_samp_date_range,
+    in_country) {
+  
+  qsim_country <- in_hydromod[[
+    paste0('hydromod_dt_', in_country, '_qsim')]]
+  isflowing_country <- in_hydromod[[
+    paste0('hydromod_dt_', in_country, '_isflowing')]]
+  
+  #Link q data - keep only full hydrological years, 
+  #Exclude 2022 because includes period after sampling
+  qsim_all_dt <- qsim_country$data_all[
+    (date >= min(in_all_date_range)) &
+      (date < max(in_all_date_range)),  
+    list(qsim_avg = mean(qsim, na.rm=T)), 
+    by=reach_id] 
+  
+  qsim_samp_dt <- qsim_country$data_all[
+    (date >= min(in_samp_date_range)) &
+      (date <= max(in_samp_date_range)),  
+    list(qsim_avg_samp = mean(qsim, na.rm=T)), 
+    by=reach_id] 
+  
+  isflowing_samp_dt <- isflowing_country$data_all[
+      (date >= min(in_samp_date_range)) &
+        (date <= max(in_samp_date_range)),  
+      list(DurD_samp = sum(isflowing==0)/.N), 
+      by=reach_id] 
+  
+  hydrostats_net <- mergeDTlist(
+    list(qsim_all_dt, qsim_samp_dt, isflowing_samp_dt),
+    by='reach_id', set_suffix=F) %>%
+    .[, country := in_country]
+  
+  return(hydrostats_net)
+}
+
+
+
+
 #------ summarize_env ---------------------------------------------------------
 # in_env_dt <- tar_read(env_dt)
 
@@ -4226,7 +4276,7 @@ ordinate_local_env <- function(in_allvars_dt) {
 
 #------ create_ssn_preds -------------------------------------------------------
 # in_network_path = tar_read(network_ssnready_shp_list)
-# in_hydromod = tar_read(hydromod_comb)
+# in_hydromod = tar_read(hydromod_comb_hist)
 
 
 
@@ -4236,7 +4286,7 @@ ordinate_local_env <- function(in_allvars_dt) {
 # in_barriers_path = tar_read(barrier_snapped_gpkg_list)
 # in_allvars_merged = tar_read(allvars_merged)$dt
 # in_local_env_pca = tar_read(local_env_pca)
-# in_hydromod = tar_read(hydromod_comb)
+# in_hydromod = tar_read(hydromod_comb_hist)
 # out_dir = 'results/ssn'
 # out_ssn_name = 'all_drns'
 # overwrite=T
@@ -4247,7 +4297,7 @@ ordinate_local_env <- function(in_allvars_dt) {
 # in_allvars_dt = tar_read(allvars_merged)$dt_summarized
 # in_local_env_pca = tar_read(local_env_pca_summarized)
 # in_barriers_path = tar_read(barrier_snapped_gpkg_list)
-# in_hydromod = tar_read(hydromod_comb)
+# in_hydromod = tar_read(hydromod_comb_hist)
 # out_dir = file.path(resdir, 'ssn')
 # out_ssn_name = 'ssn_eu_summarized'
 # overwrite = T
@@ -4259,7 +4309,7 @@ create_ssn_europe <- function(in_network_path,
                               in_allvars_dt,
                               in_local_env_pca,
                               in_barriers_path,
-                              in_hydromod,
+                              in_hydrostats_net_hist,
                               out_dir,
                               out_ssn_name,
                               overwrite = T) {
@@ -4288,19 +4338,7 @@ create_ssn_europe <- function(in_network_path,
       st_set_geometry('geometry') %>%
       st_transform(3035)
     
-    hydromod_country <- in_hydromod[[
-      paste0('hydromod_dt_', in_country, '_qsim')]]
-    
-    #Link q data - keep only full hydrological years, 
-    #Exclude 2022 because includes period after sampling
-    hydromod_prep <- hydromod_country$data_all[
-      (date >= as.Date('1960-10-01', '%Y-%m-%d')) &
-        (date < as.Date('2021-10-01', '%Y-%m-%d')),  
-      list(mean_qsim = mean(qsim, na.rm=T)), 
-      by=reach_id] %>%
-      .[, country := in_country]
-    
-    net_hydro <- merge(net_proj, hydromod_prep,
+    net_hydro <- merge(net_proj, in_hydrostats_net_hist,
                        by.x = 'cat', by.y = 'reach_id')
     
     return(net_hydro)
@@ -4385,12 +4423,12 @@ create_ssn_europe <- function(in_network_path,
   )
   
   #Compute segment Proportional Influence (PI) and Additive Function Values (AFVs)
-  if (min(net_eu$mean_qsim) > 0) {
-    edges_lsn$mean_qsim_sqrt <- sqrt(edges_lsn$mean_qsim)
+  if (min(net_eu$qsim_avg) > 0) {
+    edges_lsn$qsim_avg_sqrt <- sqrt(edges_lsn$qsim_avg)
     
     edges_lsn <- afv_edges(
       edges = edges_lsn,
-      infl_col = "mean_qsim_sqrt",
+      infl_col = "qsim_avg_sqrt",
       segpi_col = "pi_qsqrt",
       afv_col = "afv_qsqrt",
       lsn_path = lsn_path
@@ -4442,13 +4480,13 @@ create_ssn_europe <- function(in_network_path,
 
 # in_country='Hungary'
 # color_col='Beta'
-# linewidth_col='mean_qsim'
+# linewidth_col='qsim_avg'
 # in_edges <- in_ssn$edges[in_ssn$edges$country==in_country,]
 # in_obs <- in_ssn$obs[in_ssn$obs$country==in_country,]
 
 map_ssn_sites_util <- function(in_ssn, in_edges, in_obs,
                                color_col, color_lims=NULL,
-                               linewidth_col='mean_qsim'
+                               linewidth_col='qsim_avg'
 ) {
   
   if (is.null(color_lims)) {
@@ -4509,7 +4547,7 @@ pad_ssn_map <- function(in_edges, in_obs) {
 }
 
 # color_col='mean_richness'
-# linewidth_col='mean_qsim'
+# linewidth_col='qsim_avg'
 # facet_col <- 'country'
 # page_title <- 'Macroinvertebrates - Mean richness'
 
@@ -4518,14 +4556,14 @@ pad_ssn_map <- function(in_edges, in_obs) {
 # in_ssn = in_ssn_summarized[[in_organism]]$ssn 
 # color_col = as.character(in_color_col) 
 # facet_col = 'country'
-# linewidth_col = 'mean_qsim'
+# linewidth_col = 'qsim_avg'
 # page_title = paste(in_organism, in_color_col, sep=' - ')
                    
                    
 facet_ssn_maps <- function(in_ssn, 
                            color_col, 
                            facet_col,
-                           linewidth_col = 'mean_qsim',
+                           linewidth_col = 'qsim_avg',
                            page_title=NULL) {
   
   assert_that((facet_col %in% names(in_ssn$edges)) &
@@ -4596,7 +4634,7 @@ map_ssn_summarized <- function(in_ssn_summarized,
       facet_ssn_maps(in_ssn = in_ssn_summarized[[in_organism]]$ssn, 
                      color_col = in_color_col, 
                      facet_col = 'country',
-                     linewidth_col = 'mean_qsim',
+                     linewidth_col = 'qsim_avg',
                      page_title = paste(in_organism, in_color_col, sep=' - ')
       )
     }
@@ -4615,7 +4653,7 @@ map_ssn_summarized <- function(in_ssn_summarized,
     facet_ssn_maps(in_ssn = in_ssn_summarized[[1]]$ssn, 
                    color_col = as.character(in_color_col), 
                    facet_col = 'country',
-                   linewidth_col = 'mean_qsim',
+                   linewidth_col = 'qsim_avg',
                    page_title = in_color_col
     )
   }) %>% setNames(physvars)
