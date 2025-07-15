@@ -439,9 +439,9 @@ mapped_hydrotargets <- tarchetypes::tar_map(
     #selected_sims = 1:20)
   ),
   
-  #Compute hydrological statistics for entire river network for all dates
+  #Compute hydrological statistics for a given DRN for all dates
   tar_target(
-    hydrostats,
+    hydrostats_sites,
     compute_hydrostats_drn(
       in_network_path = network_ssnready_shp_list[[in_country]],
       in_sites_dt = sites_dt[country == in_country,],
@@ -450,10 +450,10 @@ mapped_hydrotargets <- tarchetypes::tar_map(
       in_network_idcol = 'cat')
   ),
   
-  #Subset statistics to keep only those for sampling site and dates
+  #Subset statistics to keep only those for sampling site-dates combinations
   tar_target(
-    hydrostats_sub,
-    subset_hydrostats(hydrostats, 
+    hydrostats_sites_tsub,
+    subset_hydrostats(hydrostats_sites, 
                       in_country = in_country, 
                       in_bio_dt = bio_dt)
   )
@@ -466,8 +466,8 @@ combined_hydrotargets <- list(
     command = list(!!!.x)
   ),
   tar_combine(
-    hydrostats_sub_comb,
-    mapped_hydrotargets[['hydrostats_sub']],
+    hydrostats_sites_tsub_comb,
+    mapped_hydrotargets[['hydrostats_sites_tsub']],
     command = list(!!!.x)
   )
 )
@@ -631,9 +631,9 @@ analysis_targets <- list(
   
   #Compile hydrostats and connectivity data together as dt
   tar_target(
-    hydrocon_compiled,
+    hydrocon_sites_compiled,
     lapply(drn_dt$country, function(in_country) {
-      compile_hydrocon_country(hydrostats_sub_comb,
+      compile_hydrocon_country(hydrostats_sites_tsub_comb,
                                STcon_directed_formatted,
                                STcon_undirected_formatted,
                                Fdist_directed,
@@ -645,8 +645,8 @@ analysis_targets <- list(
   ,
   
   tar_target(
-    hydrocon_summarized,
-    summarize_sampling_hydrocon(in_hydrocon_compiled = hydrocon_compiled)
+    hydrocon_sites_summarized,
+    summarize_sampling_hydrocon(in_hydrocon_compiled = hydrocon_sites_compiled)
   )
   ,
   
@@ -661,25 +661,25 @@ analysis_targets <- list(
     spdiv_local,
     lapply(names(bio_dt), function(in_org) {
       print(in_org)
-      bio_dt[[in_org]][, calc_spdiv(in_biodt = .SD, 
+      bio_dt[[in_org]][, calc_spdiv(in_biodt = .SD,
                                     in_metacols = metacols,
                                     level = 'local'),
                        by=country]
-    }) %>% 
+    }) %>%
       rbindlist
   )
   ,
-  
+
   #Compute regional taxonomic diversity
   tar_target(
     spdiv_drn,
     lapply(names(bio_dt), function(in_org) {
       print(in_org)
-      bio_dt[[in_org]][, calc_spdiv(in_biodt = .SD, 
+      bio_dt[[in_org]][, calc_spdiv(in_biodt = .SD,
                                     in_metacols = metacols,
                                     level = 'regional'),
                        by=country]
-    }) %>% 
+    }) %>%
       rbindlist
   )
   ,
@@ -689,8 +689,8 @@ analysis_targets <- list(
     allvars_merged,
     merge_allvars_sites(in_spdiv_local = spdiv_local, 
                         in_spdiv_drn = spdiv_drn,
-                        in_hydrocon_compiled = hydrocon_compiled,
-                        in_hydrocon_summarized = hydrocon_summarized,
+                        in_hydrocon_compiled = hydrocon_sites_compiled,
+                        in_hydrocon_summarized = hydrocon_sites_summarized,
                         in_env_dt = env_dt,
                         in_env_summarized = env_summarized,
                         in_genal_upa = genal_sites_upa_dt)
@@ -704,7 +704,7 @@ analysis_targets <- list(
   #Visualize percentage of flowing sites by DRN over time
   tar_target(
     relF_bydrn_plot,
-    compare_drn_hydro(in_hydrocon_compiled = hydrocon_compiled, 
+    compare_drn_hydro(in_hydrocon_compiled = hydrocon_sites_compiled, 
                       in_sites_dt = sites_dt) 
   )
   ,

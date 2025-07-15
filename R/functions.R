@@ -2526,7 +2526,7 @@ reassign_netids <- function(rivnet_path, strahler_dt,
   #Rename reaches attribute columns
   setDT(in_reaches_attri_dt) %>%
     setnames(c('to-reach', 'length', 'slope', 'upstream_area'),
-             c('to_reach_datagouv', 'length_datagouv', 'slope', 'upstream_area')
+             c('to_reach_datagouv', 'length_datagouv', 'slope_net', 'upstream_area_net')
     )
   
   #Merge all data
@@ -2553,7 +2553,7 @@ reassign_netids <- function(rivnet_path, strahler_dt,
   #Export results to gpkg
   write_sf(st_as_sf(out_rivnet)[
     , c('UID', 'strahler','length_uid', 'UID_fullseg', 'cat_cor', 'from', 'to',
-        'to_reach_shpcor', 'to_reach_hydromod', 'upstream_area', 
+        'to_reach_shpcor', 'to_reach_hydromod', 'upstream_area_net', 
         'hydromod_shpcor_match')],
     out_path)
   
@@ -2595,7 +2595,7 @@ compute_hydrostats_drn <- function(in_network_path,
     
     if ('nsim' %in% names(intermod_dt)) {
       q_stats <- list()
-      #Compute hydrological statistics for entire DRN
+      #Compute hydrological statistics at the DRN scale (Relative flowing length)
       q_stats$drn <- intermod_dt[, 
                                  compute_hydrostats_intermittence(
                                    in_hydromod_dt = .SD,
@@ -2603,7 +2603,7 @@ compute_hydrostats_drn <- function(in_network_path,
                                    scale = 'drn')$drn, 
                                  by = nsim] 
       
-      #Compute hydrological statistics for individual sites
+      #Compute hydrological statistics at the scale of individual sites
       q_stats$site <- intermod_dt[, 
                                   compute_hydrostats_intermittence(
                                     in_hydromod_dt = .SD,
@@ -2873,7 +2873,8 @@ snap_river_sites <- function(in_sites_path,
             in_pts = pt,
             in_target = tar,
             sites_idcol = in_sites_unique_id,
-            attri_to_join = c(in_network_idcol_tomatch, in_network_unique_id)
+            attri_to_join = c(in_network_idcol_tomatch, in_network_unique_id,
+                              'upstream_area_net')
           )
         } 
         return(out_p)
@@ -3675,10 +3676,12 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
     hydro_con_summarized = setdiff(names(in_hydrocon_summarized), 
                                    c(group_cols, exclude_cols,
                                      names(spdiv), names(in_env_dt))), 
-    env = setdiff(names(in_env_dt),
+    env = setdiff(c(names(in_env_dt),
+                    'upstream_area_net'),
                   c(group_cols, exclude_cols,
                     names(spdiv), names(in_hydrocon_compiled))),
-    env_summarized = setdiff(names(in_env_summarized$dt_nopools),
+    env_summarized = setdiff(c(names(in_env_summarized$dt_nopools), 
+                               'upstream_area_net'),
                              c(group_cols, exclude_cols)),
     group_cols =  group_cols,
     exclude_cols = exclude_cols
@@ -4221,16 +4224,22 @@ ordinate_local_env <- function(in_allvars_dt) {
   ))
 }
 
+#------ create_ssn_preds -------------------------------------------------------
+# in_network_path = tar_read(network_ssnready_shp_list)
+# in_hydromod = tar_read(hydromod_comb)
+
+
+
 #------ create_ssn_europe ------------------------------------------------------
-in_network_path = tar_read(network_ssnready_shp_list)
-in_sites_path = tar_read(site_snapped_gpkg_list)
-in_barriers_path = tar_read(barrier_snapped_gpkg_list)
-in_allvars_merged = tar_read(allvars_merged)$dt
-in_local_env_pca = tar_read(local_env_pca)
-in_hydromod = tar_read(hydromod_comb)
-out_dir = 'results/ssn'
-out_ssn_name = 'all_drns'
-overwrite=T
+# in_network_path = tar_read(network_ssnready_shp_list)
+# in_sites_path = tar_read(site_snapped_gpkg_list)
+# in_barriers_path = tar_read(barrier_snapped_gpkg_list)
+# in_allvars_merged = tar_read(allvars_merged)$dt
+# in_local_env_pca = tar_read(local_env_pca)
+# in_hydromod = tar_read(hydromod_comb)
+# out_dir = 'results/ssn'
+# out_ssn_name = 'all_drns'
+# overwrite=T
 
 
 # in_network_path = tar_read(network_ssnready_shp_list)
@@ -4242,6 +4251,8 @@ overwrite=T
 # out_dir = file.path(resdir, 'ssn')
 # out_ssn_name = 'ssn_eu_summarized'
 # overwrite = T
+
+
 
 create_ssn_europe <- function(in_network_path,
                               in_sites_path,
@@ -4290,8 +4301,9 @@ create_ssn_europe <- function(in_network_path,
       .[, country := in_country]
     
     net_hydro <- merge(net_proj, hydromod_prep,
-                       by.x = 'cat', by.y = 'reach_id') %>%
-      return(net_hydro)
+                       by.x = 'cat', by.y = 'reach_id')
+    
+    return(net_hydro)
   }) %>% do.call(rbind, .)
   
   edges_lsn <- SSNbler::lines_to_lsn(
@@ -4302,6 +4314,10 @@ create_ssn_europe <- function(in_network_path,
     topo_tolerance = 20,
     overwrite = overwrite
   )
+  
+  
+  #Create prediction sites for each reach --------------------------------------
+  
   
   #Incorporate sites into the landscape network --------------------------------
   sites_eu <- lapply(names(in_sites_path), function(in_country) {
@@ -6306,169 +6322,6 @@ plot_alpha_cor <- function(in_alphadat_merged, out_dir, facet_wrap=F) {
     discharge = plotlist_discharge
   ))
 }
-
-###################### NOT USED #####################################################
-#------ create_ssn_drn ---------------------------------------------------------
-# in_country <- 'Croatia'
-# in_network_path = tar_read(network_ssnready_gpkg_list)[[in_country]]
-# in_sites_path = tar_read(site_snapped_gpkg_list)[[in_country]]
-# in_barriers_path = tar_read(barrier_snapped_gpkg_list)[[in_country]]
-# out_dir = 'results/ssn'
-# out_ssn_name = paste0(in_country, '_drn')
-# overwrite=T
-
-create_ssn_drn <- function(in_network_path,
-                           in_sites_path,
-                           in_barriers_path,
-                           in_hydromod,
-                           out_dir,
-                           out_ssn_name,
-                           overwrite = T) {
-  
-  if (!dir.exists(out_dir)) {
-    dir.create(out_dir)
-  }
-  
-  lsn_path <- file.path(out_dir,
-                        tools::file_path_sans_ext(
-                          sub('[.](?=(shp|gpkg)$)', '_lsn.',
-                              basename(in_network_path), perl=T)
-                        ))
-  
-  #Read input network
-  net <- st_read(in_network_path) %>%
-    st_cast("LINESTRING") %>%
-    #Make sure that the geometry column is equally named regardless 
-    #of file format (see https://github.com/r-spatial/sf/issues/719)
-    st_set_geometry('geometry') %>%
-    merge(in_hydromod$data_all[date < as.Date('2021-10-01', '%Y-%m-%d'),  #Link q data
-                               list(mean_qsim = mean(qsim, na.rm=T)), 
-                               by=reach_id],
-          by.x = 'cat', by.y = 'reach_id') 
-  
-  #Build landscape network
-  edges_lsn <- SSNbler::lines_to_lsn(
-    streams = net,
-    lsn_path = lsn_path,
-    check_topology = TRUE,
-    snap_tolerance = 0.05,
-    topo_tolerance = 20,
-    overwrite = overwrite
-  )
-  
-  #Incorporate sites into the landscape network
-  sites_lsn <- SSNbler::sites_to_lsn(
-    sites = st_read(in_sites_path),
-    edges =  edges_lsn,
-    lsn_path = lsn_path,
-    file_name = "sites",
-    snap_tolerance = 5,
-    save_local = TRUE,
-    overwrite = TRUE
-  )
-  
-  sites_list <- list(sites = sites_lsn)
-  
-  #Incorporate barriers into the landscape network
-  #Only keep barriers over 2 m and under 100 m snap from network
-  barriers_sf_sub <- read_sf(in_barriers_path) %>%
-    filter((!is.na(Height) & Height > 2) & snap_dist_m < 100)
-  
-  if (nrow(barriers_sf_sub) > 0) {
-    barriers_lsn <- sites_to_lsn(
-      sites = barriers_sf_sub,
-      edges =  edges_lsn,
-      lsn_path = lsn_path,
-      file_name = "barriers",
-      snap_tolerance = 5,
-      save_local = TRUE,
-      overwrite = TRUE
-    )
-    
-    sites_list$barriers <- barriers_lsn
-  }
-  
-  #Calculate upstream distance
-  edges_lsn <- updist_edges(
-    edges =  edges_lsn,
-    save_local = TRUE,
-    lsn_path = lsn_path,
-    calc_length = TRUE
-  )
-  
-  sites_list_lsn <- updist_sites(
-    sites = sites_list,
-    edges = edges_lsn,
-    length_col = "Length",
-    save_local = TRUE,
-    lsn_path = lsn_path
-  )
-  
-  #Compute segment Proportional Influence (PI) and Additive Function Values (AFVs)
-  if (min(net$mean_qsim) > 0) {
-    edges_lsn$mean_qsim_sqrt <- sqrt(edges_lsn$mean_qsim)
-    
-    edges_lsn <- afv_edges(
-      edges = edges_lsn,
-      infl_col = "mean_qsim_sqrt",
-      segpi_col = "pi_qsqrt",
-      afv_col = "afv_qsqrt",
-      lsn_path = lsn_path
-    )
-    
-    sites_list_lsn <- afv_sites(
-      sites = sites_list_lsn,
-      edges = edges_lsn,
-      afv_col = "afv_qsqrt",
-      save_local = TRUE,
-      lsn_path = lsn_path
-    )
-    
-  } else {
-    stop("Trying to use mean discharge to compute Additive Function Values (AFVs),
-         but there are 0s in the discharge column.")
-  }
-  
-  
-  #Assemble the SSN
-  out_ssn_path <- paste0(out_dir, out_ssn_name)
-  
-  out_ssn <- ssn_assemble(
-    edges = edges_lsn,
-    lsn_path = lsn_path,
-    obs_sites = sites_list_lsn$sites,
-    ssn_path = out_ssn_path,
-    import = TRUE,
-    check = TRUE,
-    afv_col = "afv_qsqrt",
-    overwrite = TRUE
-  )
-  
-  # ggplot() +
-  #   geom_sf(
-  #     data = out_ssn$edges,
-  #     color = "medium blue",
-  #     aes(linewidth = mean_qsim_sqrt)
-  #   ) +
-  #   scale_linewidth(range = c(0.1, 2.5)) +
-  #   geom_sf(
-  #     data = out_ssn$obs,
-  #     size = 1.7,
-  #     aes(color = id)
-  #   ) +
-  #   coord_sf(datum = st_crs(out_ssn$edges)) +
-  #   labs(color = "ID", linewidth = "sqrt(Q average)") +
-  #   theme(
-  #     legend.text = element_text(size = 6),
-  #     legend.title = element_text(size = 8)
-  #   )
-  
-  return(list(
-    path = out_ssn_path,
-    ssn = out_ssn)
-  )
-}
-
 
 
 ###################### OLD #####################################################
