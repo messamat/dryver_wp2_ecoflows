@@ -2138,12 +2138,12 @@ remove_pseudonodes <- function(in_net, equal_cols = FALSE,
 }
 
 #Parameters
-in_country <- 'Croatia'
-rivnet_path <- tar_read(network_nocomplexconf_gpkg_list)[[in_country]]
-strahler_dt <- tar_read(network_strahler)[[in_country]]
-in_reaches_hydromod_dt <- tar_read(reaches_dt)[country==in_country,]
-in_reaches_attri_dt <- tar_read(reaches_attri)[[in_country]]
-country <- in_country
+# in_country <- 'Croatia'
+# rivnet_path <- tar_read(network_nocomplexconf_gpkg_list)[[in_country]]
+# strahler_dt <- tar_read(network_strahler)[[in_country]]
+# in_reaches_hydromod_dt <- tar_read(reaches_dt)[country==in_country,]
+# in_reaches_attri_dt <- tar_read(reaches_attri)[[in_country]]
+# country <- in_country
 
 reassign_netids <- function(rivnet_path, strahler_dt, 
                             in_reaches_hydromod_dt,
@@ -2536,7 +2536,7 @@ reassign_netids <- function(rivnet_path, strahler_dt,
     merge(reaches_hydromod_format[, .(ID_hydromod, to_reach_hydromod)],
           by.x='cat_cor', by.y='ID_hydromod', all.x=T) %>%
     .[, hydromod_shpcor_match := (to_reach_hydromod == to_reach_shpcor)] %>%
-    merge(in_reaches_attri_dt, by.x='cat_cor', by.y='ID')
+    merge(in_reaches_attri_dt, by.x='cat_cor', by.y='ID', all.x=T)
 
   #Check for discrepancies between old and new reach data... few
   check <- out_rivnet[length_hydromod != length_datagouv,]
@@ -2642,9 +2642,9 @@ compute_hydrostats_drn <- function(in_network_path,
 # hydrostats <- tar_read_raw(paste0("hydrostats_", in_country, '_qsim'))
 # in_bio_dt <- tar_read(bio_dt)
 
-subset_hydrostats <- function(hydrostats, in_country, in_bio_dt) {
+subset_hydrostats <- function(hydrostats, in_bio_dt) {
   unique_sampling_dates <- lapply(in_bio_dt, function(org_dt) {
-    org_dt[country==in_country, .(date)]
+    org_dt[, .(date)]
   }) %>% rbindlist %>% unique %>% .$date
   
   min_date <- min(unique_sampling_dates, na.rm=T)
@@ -3516,34 +3516,39 @@ compile_hydrocon_sites_country <- function(in_hydrostats_sub_comb,
   return(out_dt)  
 }
 
-#------ summarize_sampling_hydrocon --------------------------------------------
+#------ summarize_sites_hydrocon --------------------------------------------
 # in_hydrocon_compiled <- tar_read(hydrocon_compiled)
 
 #Compute summary statistics over the period of sampling for relevant hydrological
 #and connectivity statistics
-summarize_sampling_hydrocon <- function(in_hydrocon_compiled) {
-  hydrocon_summmarized <- in_hydrocon_compiled[, list( #`:=`
-    DurD_samp = sum(isflowing==0)/.N, #Total number of no-flow days 
-    DurD3650past = .SD[.N, DurD3650past]/3650,
-    PDurD365past = .SD[.N, PDurD365past],
-    FreD_samp = length(.SD[!is.na(noflow_period), unique(noflow_period)])*.N/365, #Total number of no-flow periods 
-    FreD3650past = .SD[.N, FreD3650past]/10,
-    PFreD365past = .SD[.N, PFreD365past],
-    DurD_max_samp = nafill(as.integer(max(noflow_period_dur, na.rm=T)), fill=0), #Maximum duration of no-flow period
-    DurD_avg_samp = nafill(.SD[!duplicated(noflow_period), mean(noflow_period_dur, na.rm=T)], fill=0), #AVerage duration of no-flow period (same as DurD/FreD)
-    RelF_avg_samp = mean(relF),
-    RelF_min_samp = min(relF),
-    relF3650past = .SD[.N, relF3650past],
-    qsim_avg_samp = mean(qsim),
-    Pqsim_avg_samp = mean(Pqsim),
-    PmeanQ10past_max_samp = max(PmeanQ10past),
-    STcon_m10_directed_avg_samp = mean(STcon_m10_directed, na.rm=T),
-    STcon_m10_undirected_avg_samp = mean(STcon_m10_undirected, na.rm=T),
-    Fdist_mean_10past_directed_avg_samp = mean(Fdist_mean_10past_directed),
-    Fdist_mean_10past_undirected_avg_samp = mean(Fdist_mean_10past_undirected)
-    #PDurD_samp =
-    #PDurdmax_samp = 
-  ), by=.(site, UID)]
+#keep one year
+summarize_sites_hydrocon <- function(in_hydrocon_compiled
+                                        #, date_range
+                                        ) {
+  hydrocon_summmarized <- in_hydrocon_compiled[
+    #(date >= min(date_range)) &   (date <= max(date_range))
+    , list( #`:=`
+      DurD_samp = sum(isflowing==0)/.N, #Total number of no-flow days 
+      DurD3650past = .SD[.N, DurD3650past]/3650,
+      PDurD365past = .SD[.N, PDurD365past],
+      FreD_samp = length(.SD[!is.na(noflow_period), unique(noflow_period)])*.N/365, #Total number of no-flow periods 
+      FreD3650past = .SD[.N, FreD3650past]/10,
+      PFreD365past = .SD[.N, PFreD365past],
+      DurD_max_samp = nafill(as.integer(max(noflow_period_dur, na.rm=T)), fill=0), #Maximum duration of no-flow period
+      DurD_avg_samp = nafill(.SD[!duplicated(noflow_period), mean(noflow_period_dur, na.rm=T)], fill=0), #AVerage duration of no-flow period (same as DurD/FreD)
+      RelF_avg_samp = mean(relF),
+      RelF_min_samp = min(relF),
+      relF3650past = .SD[.N, relF3650past],
+      qsim_avg_samp = mean(qsim),
+      Pqsim_avg_samp = mean(Pqsim),
+      PmeanQ10past_max_samp = max(PmeanQ10past),
+      STcon_m10_directed_avg_samp = mean(STcon_m10_directed, na.rm=T),
+      STcon_m10_undirected_avg_samp = mean(STcon_m10_undirected, na.rm=T),
+      Fdist_mean_10past_directed_avg_samp = mean(Fdist_mean_10past_directed),
+      Fdist_mean_10past_undirected_avg_samp = mean(Fdist_mean_10past_undirected)
+      #PDurD_samp =
+      #PDurdmax_samp = 
+    ), by=.(site, UID)]
   
   return(hydrocon_summmarized)
 }
@@ -3562,9 +3567,9 @@ summarize_network_hydrostats <- function(
     in_country) {
   
   qsim_country <- in_hydromod[[
-    paste0('hydromod_dt_', in_country, '_qsim')]]
+    paste0('hydromod_hist_dt_', in_country, '_qsim')]]
   isflowing_country <- in_hydromod[[
-    paste0('hydromod_dt_', in_country, '_isflowing')]]
+    paste0('hydromod_hist_dt_', in_country, '_isflowing')]]
   
   #Link q data - keep only full hydrological years, 
   #Exclude 2022 because includes period after sampling
@@ -3695,18 +3700,18 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path) {
     as.list %>%
     data.frame %>%
     setDT %>%
-    .[, path := hydropoj_path]
-  metadata_dt[varname=='flowstate', varname:='isflowing']
+    .[, path := hydroproj_path]
   
   nc <- nc_open(hydroproj_path) # open netcdf file
   reachID <- ncvar_get(nc, "reachID") # get list of reaches IDs
   dates <- ncvar_get(nc, "date") # get dates of simulation period
   dates <- as.Date(dates, origin="1950-01-01") # convert dates into R date format
   
-  hydro_dt <- get_nc_var_present(nc = nc, varname = varname, # 0=dry, 1=flowing
+  hydro_dt <- get_nc_var_present(nc = nc, varname = metadata_dt$varname, # 0=dry, 1=flowing
                                  reachID = reachID, dates = dates,
                                  selected_sims = NULL) 
   setnames(hydro_dt$data_all, 'flowstate', 'isflowing', skip_absent = TRUE)
+  metadata_dt[varname=='flowstate', varname:='isflowing']
   
   # qsim_samp_dt <- qsim_country$data_all[
   #   (date >= min(in_samp_date_range)) &
@@ -4355,11 +4360,10 @@ ordinate_local_env <- function(in_allvars_dt) {
 # in_barriers_path = tar_read(barrier_snapped_gpkg_list)
 # in_allvars_merged = tar_read(allvars_merged)$dt
 # in_local_env_pca = tar_read(local_env_pca)
-# in_hydromod = tar_read(hydromod_comb_hist)
-# out_dir = 'results/ssn'
-# out_ssn_name = 'all_drns'
+# in_hydrostats_net_hist = tar_read(hydrostats_net_hist)
+# out_dir = file.path(resdir, 'ssn')
+# out_ssn_name = 'ssn_eu'
 # overwrite=T
-
 
 # in_network_path = tar_read(network_ssnready_shp_list)
 # in_sites_path = tar_read(site_snapped_gpkg_list)

@@ -212,7 +212,7 @@ preformatting_targets <- list(
     bio_dt,
     read_biodt(path_list = bio_data_paths,
                in_metadata_edna = metadata_edna,
-               include_bacteria = T) 
+               include_bacteria = F) 
   )
   ,
   
@@ -334,10 +334,10 @@ preformatting_targets <- list(
     network_ssnready_shp_list,
     lapply(network_ssnready_gpkg_list, function(path) {
       old_cols <- c('UID', 'strahler', 'length_uid', 'cat_cor', 'from', 'to',
-                    'to_reach_shpcor', 'to_reach_hydromod', 'upstream_area',
+                    'to_reach_shpcor', 'to_reach_hydromod', 'upstream_area_net',
                     'hydromod_shpcor_match', 'geom')
       new_cols <- c('UID', 'strahler', 'length_m', 'cat', 'from', 'to',
-                    'to_cat_shp', 'to_cat_mod', 'upstream_area',
+                    'to_cat_shp', 'to_cat_mod', 'upstream_area_net',
                     'mod_match', 'geom')
       lyr <- st_read(path)[,old_cols]
       names(lyr) <- new_cols
@@ -454,7 +454,6 @@ mapped_hydrotargets <- tarchetypes::tar_map(
   tar_target(
     hydrostats_sites_tsub,
     subset_hydrostats(hydrostats_sites_hist, 
-                      in_country = in_country, 
                       in_bio_dt = bio_dt)
   )
 )
@@ -473,33 +472,6 @@ combined_hydrotargets <- list(
 )
 
 analysis_targets <- list(
-  #Compute summary hydrostats for each reach in network 
-  tar_target(
-    hydrostats_net_hist,
-    lapply(names(network_ssnready_shp_list), function(in_country) {
-      summarize_network_hydrostats(
-        in_country = in_country,
-        in_hydromod = hydromod_comb_hist,
-        in_all_date_range = c(as.Date('1960-10-01', '%Y-%m-%d'),
-                              as.Date('2021-10-01', '%Y-%m-%d')),
-        in_samp_date_range = hydrocon_compiled[, range(date)])
-      }) %>% rbindlist
-  )
-  ,
-  
-  
-  tar_target(
-    hydrostats_net_proj,
-    lapply(list.files(file.path(wp1_data_gouv_dir, 'projections'), 
-                      pattern='flowstate.*2015[-]2100',
-                      full.names = TRUE),
-           function(in_path) {
-             print(in_path)
-             summarize_drn_hydroproj_stats(hydroproj_path=in_path)
-           }) %>% rbindlist
-  )
-  ,
-
   #Prepare data for STcon
   tar_target(
     preformatted_data_STcon,
@@ -673,10 +645,40 @@ analysis_targets <- list(
   
   tar_target(
     hydrocon_sites_summarized,
-    summarize_sampling_hydrocon(in_hydrocon_compiled = hydrocon_sites_compiled)
+    summarize_sites_hydrocon(
+      in_hydrocon_compiled = hydrocon_sites_compiled
+      #date_range = hydrocon_sites_compiled[, c(min(date), min(date)+years(1))])
+    )
   )
   ,
   
+  #Compute summary hydrostats for each reach in network 
+  tar_target(
+    hydrostats_net_hist,
+    lapply(names(network_ssnready_shp_list), function(in_country) {
+      summarize_network_hydrostats(
+        in_country = in_country,
+        in_hydromod = hydromod_comb_hist,
+        in_all_date_range = c(as.Date('1960-10-01', '%Y-%m-%d'),
+                              as.Date('2021-10-01', '%Y-%m-%d')),
+        in_samp_date_range = hydrocon_sites_compiled[, range(date)] #c(min(date), min(date)+years(1))]
+      )
+    }) %>% rbindlist
+  )
+  ,
+  
+  
+  tar_target(
+    hydrostats_net_proj,
+    lapply(list.files(file.path(wp1_data_gouv_dir, 'projections'), 
+                      pattern='flowstate.*2015[-]2100',
+                      full.names = TRUE),
+           function(in_path) {
+             print(in_path)
+             summarize_drn_hydroproj_stats(hydroproj_path=in_path)
+           }) %>% rbindlist
+  )
+  ,
   tar_target(
     env_summarized,
     summarize_env(in_env_dt = env_dt)
@@ -814,150 +816,150 @@ analysis_targets <- list(
   # MODEL SITES x DATE
   ##############################################################################
   #Ordinate local environmental variables to use axes in regression models
-  # tar_target(
-  #   local_env_pca,
-  #   ordinate_local_env(in_allvars_dt = allvars_merged$dt)
-  # ),
-  # 
-  # #Create Spatial Stream Network (SSN) object
-  # tar_target(
-  #   ssn_eu,
-  #   create_ssn_europe(in_network_path = network_ssnready_shp_list,
-  #                     in_sites_path = site_snapped_gpkg_list,
-  #                     in_allvars_dt = allvars_merged$dt,
-  #                     in_local_env_pca = local_env_pca,
-  #                     in_barriers_path = barrier_snapped_gpkg_list,
-  #                     in_hydrostats_net_hist = hydrostats_net_hist,
-  #                     out_dir = file.path(resdir, 'ssn'),
-  #                     out_ssn_name = 'ssn_eu',
-  #                     overwrite = T)
-  # )
-  # ,
-  # 
-  # #Define all hydrological variables: 16 (max ~73)
-  # tar_target(
-  #   hydro_vars_forssn, 
-  #   {
-  #     hydrovar_grid <- expand.grid(
-  #       c('DurD', 'FreD'), #'PDurD', 'FreD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'
-  #       paste0(c(30, 60, 90, 365, 3650), 'past')
-  #     ) 
-  #     stcon_grid <- expand.grid(paste0('STcon_m', c(30, 60, 90, 180, 365)),
-  #                               c('_directed', '_undirected'))
-  #     fdist_grid <- expand.grid(paste0('Fdist_mean_', c(30, 60, 90, 180, 365, 3650), 'past'),
-  #                               c('_directed', '_undirected'))
-  #     hydro_regex_list <- c(
-  #       paste0(hydrovar_grid$Var1,'.*', hydrovar_grid$Var2),
-  #       paste0(stcon_grid$Var1, stcon_grid$Var2),
-  #       paste0(fdist_grid$Var1, fdist_grid$Var2)
-  #     )
-  #     
-  #     lapply(hydro_regex_list, function(var_str) {
-  #       grep(paste0('^', var_str), 
-  #            names(ssn_eu[[1]]$ssn$obs), 
-  #            value=T)
-  #     }) %>% unlist
-  #   }
-  # )
-  # ,
-  # 
-  # # Run a first SSN with a single hydrological variable for each organism
-  # # to determine the top spatial covariance types
-  # tar_target(
-  #   ssn_richness_covtype,
-  #   model_ssn_hydrowindow(
-  #     in_ssn = ssn_eu,
-  #     organism = organism_list,
-  #     formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country',
-  #     hydro_var = 'DurD365past',
-  #     response_var = 'richness',
-  #     ssn_covtypes = ssn_covtypes
-  #   ),
-  #   pattern = map(organism_list),
-  #   iteration = "list"
-  # )
-  # ,
-  # 
-  # #Select the top 5 covariance structures for each organism based on AIC and
-  # #structure the models to run
-  # tar_target(
-  #   ssn_richness_models_to_run,
-  #   {
-  #     #Get top 5 covtypes by organism
-  #     selected_covtypes <- lapply(ssn_richness_covtype, `[[`, "ssn_glance") %>%
-  #       rbindlist %>%
-  #       .[, .SD[order(AIC)][1:5, .(covtypes)], by = organism]
-  # 
-  #     #Convert to named list by organism
-  #     covtypes_by_organism <- selected_covtypes[, .(covtypes = list(covtypes)), by = organism]
-  # 
-  #     #Build a list of model setups (one per organism × hydro_var)
-  #     model_setups <- CJ(
-  #       organism = covtypes_by_organism$organism,
-  #       hydro_var = hydro_vars_forssn
-  #     )
-  # 
-  #     #Attach covtypes to each setup
-  #     model_setup_list <- list()
-  #     for (org in unique(covtypes_by_organism$organism)) {
-  #       for (hv in hydro_vars_forssn) {
-  #         model_setup_list[[length(model_setup_list) + 1]] <- list(
-  #           organism = org,
-  #           hydro_var = hv,
-  #           covtypes = covtypes_by_organism[organism==org,]$covtypes[[1]]
-  #         )
-  #       }
-  #     }
-  # 
-  #     return(model_setup_list)
-  #   }
-  # )
-  # ,
-  #
-  # #Run SSN for each chosen variable and time window
-  # tar_target(
-  #   ssn_richness_hydrowindow,
-  #   future_lapply(
-  #     ssn_richness_models_to_run,
-  #     function(model_setup) {
-  #       print(model_setup)
-  #       model_ssn_hydrowindow(
-  #         in_ssn = ssn_eu,
-  #         organism = model_setup$organism,
-  #         formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country',
-  #         hydro_var = model_setup$hydro_var,
-  #         response_var = 'richness',
-  #         ssn_covtypes = ssn_covtypes[label %in% model_setup$covtypes, ]
-  #       )
-  #     })
-  # )
-  # ,
-  # 
-  # tar_target(
-  #   ssn_covtype_selected,
-  #   select_ssn_covariance(in_ssnmodels=ssn_richness_hydrowindow)
-  # )
-  # ,
-  # 
-  # tar_target(
-  #   ssn_richness_hydrowindow_formatted,
-  #   {
-  #     ssn_model_names <- do.call(rbind, ssn_richness_models_to_run)[,1:2] %>%
-  #       as.data.table
-  #     ssnmodels <- cbind(ssn_model_names, ssn_richness_hydrowindow)
-  # 
-  #     out_list <- lapply(organism_list, function(in_organism) {
-  #       print(in_organism)
-  #       format_ssn_hydrowindow(in_ssnmodels = ssnmodels,
-  #                              in_organism = in_organism,
-  #                              in_covtype_selected = ssn_covtype_selected)
-  #     })
-  #     names(out_list) <- organism_list
-  # 
-  #     return(out_list)
-  #   }
-  # )
-  # ,
+  tar_target(
+    local_env_pca,
+    ordinate_local_env(in_allvars_dt = allvars_merged$dt)
+  ),
+
+  #Create Spatial Stream Network (SSN) object
+  tar_target(
+    ssn_eu,
+    create_ssn_europe(in_network_path = network_ssnready_shp_list,
+                      in_sites_path = site_snapped_gpkg_list,
+                      in_allvars_dt = allvars_merged$dt,
+                      in_local_env_pca = local_env_pca,
+                      in_barriers_path = barrier_snapped_gpkg_list,
+                      in_hydrostats_net_hist = hydrostats_net_hist,
+                      out_dir = file.path(resdir, 'ssn'),
+                      out_ssn_name = 'ssn_eu',
+                      overwrite = T)
+  )
+  ,
+
+  #Define all hydrological variables: 16 (max ~73)
+  tar_target(
+    hydro_vars_forssn,
+    {
+      hydrovar_grid <- expand.grid(
+        c('DurD', 'FreD'), #'PDurD', 'FreD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'
+        paste0(c(30, 60, 90, 365, 3650), 'past')
+      )
+      stcon_grid <- expand.grid(paste0('STcon_m', c(30, 60, 90, 180, 365)),
+                                c('_directed', '_undirected'))
+      fdist_grid <- expand.grid(paste0('Fdist_mean_', c(30, 60, 90, 180, 365, 3650), 'past'),
+                                c('_directed', '_undirected'))
+      hydro_regex_list <- c(
+        paste0(hydrovar_grid$Var1,'.*', hydrovar_grid$Var2),
+        paste0(stcon_grid$Var1, stcon_grid$Var2),
+        paste0(fdist_grid$Var1, fdist_grid$Var2)
+      )
+
+      lapply(hydro_regex_list, function(var_str) {
+        grep(paste0('^', var_str),
+             names(ssn_eu[[1]]$ssn$obs),
+             value=T)
+      }) %>% unlist
+    }
+  )
+  ,
+
+  # Run a first SSN with a single hydrological variable for each organism
+  # to determine the top spatial covariance types
+  tar_target(
+    ssn_richness_covtype,
+    model_ssn_hydrowindow(
+      in_ssn = ssn_eu,
+      organism = organism_list,
+      formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country',
+      hydro_var = 'DurD365past',
+      response_var = 'richness',
+      ssn_covtypes = ssn_covtypes
+    ),
+    pattern = map(organism_list),
+    iteration = "list"
+  )
+  ,
+
+  #Select the top 5 covariance structures for each organism based on AIC and
+  #structure the models to run
+  tar_target(
+    ssn_richness_models_to_run,
+    {
+      #Get top 5 covtypes by organism
+      selected_covtypes <- lapply(ssn_richness_covtype, `[[`, "ssn_glance") %>%
+        rbindlist %>%
+        .[, .SD[order(AIC)][1:5, .(covtypes)], by = organism]
+
+      #Convert to named list by organism
+      covtypes_by_organism <- selected_covtypes[, .(covtypes = list(covtypes)), by = organism]
+
+      #Build a list of model setups (one per organism × hydro_var)
+      model_setups <- CJ(
+        organism = covtypes_by_organism$organism,
+        hydro_var = hydro_vars_forssn
+      )
+
+      #Attach covtypes to each setup
+      model_setup_list <- list()
+      for (org in unique(covtypes_by_organism$organism)) {
+        for (hv in hydro_vars_forssn) {
+          model_setup_list[[length(model_setup_list) + 1]] <- list(
+            organism = org,
+            hydro_var = hv,
+            covtypes = covtypes_by_organism[organism==org,]$covtypes[[1]]
+          )
+        }
+      }
+
+      return(model_setup_list)
+    }
+  )
+  ,
+
+  #Run SSN for each chosen variable and time window
+  tar_target(
+    ssn_richness_hydrowindow,
+    future_lapply(
+      ssn_richness_models_to_run,
+      function(model_setup) {
+        print(model_setup)
+        model_ssn_hydrowindow(
+          in_ssn = ssn_eu,
+          organism = model_setup$organism,
+          formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country',
+          hydro_var = model_setup$hydro_var,
+          response_var = 'richness',
+          ssn_covtypes = ssn_covtypes[label %in% model_setup$covtypes, ]
+        )
+      })
+  )
+  ,
+
+  tar_target(
+    ssn_covtype_selected,
+    select_ssn_covariance(in_ssnmodels=ssn_richness_hydrowindow)
+  )
+  ,
+
+  tar_target(
+    ssn_richness_hydrowindow_formatted,
+    {
+      ssn_model_names <- do.call(rbind, ssn_richness_models_to_run)[,1:2] %>%
+        as.data.table
+      ssnmodels <- cbind(ssn_model_names, ssn_richness_hydrowindow)
+
+      out_list <- lapply(organism_list, function(in_organism) {
+        print(in_organism)
+        format_ssn_hydrowindow(in_ssnmodels = ssnmodels,
+                               in_organism = in_organism,
+                               in_covtype_selected = ssn_covtype_selected)
+      })
+      names(out_list) <- organism_list
+
+      return(out_list)
+    }
+  )
+  ,
   ##############################################################################
   # MODEL SITES SUMMARIZED
   ##############################################################################
