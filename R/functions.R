@@ -3442,11 +3442,11 @@ compute_Fdist_rolling <- function(in_Fdist_dt, in_sites_dt) {
 
 
 #------ compile_hydrocon_sites_country -----------------------------------------------
-# in_hydrostats_sub_comb <- tar_read(hydrostats_sub_comb)
+# in_hydrostats_sub_comb <- tar_read(hydrostats_sites_tsub_comb)
 # in_STcon_directed <- tar_read(STcon_directed_formatted)
 # in_STcon_undirected <- tar_read(STcon_undirected_formatted)
-# in_Fdist_directed <- tar_read(Fdist_network_directed)
-# in_Fdist_undirected <- tar_read(Fdist_network_undirected)
+# in_Fdist_directed <- tar_read(Fdist_directed)
+# in_Fdist_undirected <- tar_read(Fdist_undirected)
 # in_site_snapped_gpkg_list <- tar_read(site_snapped_gpkg_list)
 # in_country <- 'Spain'
 
@@ -3461,15 +3461,15 @@ compile_hydrocon_sites_country <- function(in_hydrostats_sub_comb,
   in_sites_dt <- as.data.table(vect(in_site_snapped_gpkg_list[[in_country]]))
   
   hydrostats_isflowing_site <- in_hydrostats_sub_comb[[
-    paste0('hydrostats_sub_', in_country, '_isflowing')]][['site']] %>%
+    paste0('hydrostats_sites_tsub_', in_country, '_isflowing')]][['site']] %>%
     setDT
   
   hydrostats_isflowing_drn <- in_hydrostats_sub_comb[[
-    paste0('hydrostats_sub_', in_country, '_isflowing')]][['drn']] %>%
+    paste0('hydrostats_sites_tsub_', in_country, '_isflowing')]][['drn']] %>%
     setDT
   
   hydrostats_qsim <- in_hydrostats_sub_comb[[
-    paste0('hydrostats_sub_', in_country, '_qsim')]] %>%
+    paste0('hydrostats_sites_tsub_', in_country, '_qsim')]] %>%
     setDT
   
   cols_to_keep_site <- c(setdiff(names(hydrostats_isflowing_site),
@@ -3507,7 +3507,7 @@ compile_hydrocon_sites_country <- function(in_hydrostats_sub_comb,
                   by='date') %>%
     merge(hydrostats_qsim, by=c('date', 'site')) %>%
     merge(in_sites_dt[country_sub == in_country,
-                      .(site, UID)], ., by='site') %>%
+                      .(site, UID, upstream_area_net)], ., by='site') %>%
     merge(STcon_cast, by=c('date', 'UID'), all.x=T) %>%
     merge(Fdist_cast, by=c('date', 'UID'), all.x=T)
   
@@ -3732,15 +3732,14 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path) {
 }
 
 #------ merge_allvars_sites ----------------------------------------------------
-# in_country <- 'Spain'
-# in_spdiv_local <- tar_read(spdiv_local)
-# in_spdiv_drn <- tar_read(spdiv_drn)
-# in_hydrocon_compiled <- tar_read(hydrocon_compiled)
-# in_hydrocon_summarized <- tar_read(hydrocon_summarized)
-# in_ssn_eu <- tar_read(ssn_eu)
-# in_env_dt <- tar_read(env_dt)
-# in_env_summarized <- tar_read(env_summarized)
-# in_genal_upa = tar_read(genal_sites_upa_dt)
+in_country <- 'Spain'
+in_spdiv_local <- tar_read(spdiv_local)
+in_spdiv_drn <- tar_read(spdiv_drn)
+in_hydrocon_compiled <- tar_read(hydrocon_sites_compiled)
+in_hydrocon_summarized <- tar_read(hydrocon_sites_summarized)
+in_env_dt <- tar_read(env_dt)
+in_env_summarized <- tar_read(env_summarized)
+in_genal_upa = tar_read(genal_sites_upa_dt)
 
 merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
                                 in_hydrocon_compiled, in_hydrocon_summarized,
@@ -3778,7 +3777,7 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
   
   #List column names by originating dt
   group_cols = c("running_id", "site", "date", "campaign", "organism", 
-                 "organism_class", "country", "UID")
+                 "organism_class", "country", "UID", "upstream_area_net")
   exclude_cols = c("ncampaigns", "name", "isflowing", "reach_length",
                    "noflow_period", "noflow_period_dur", "last_noflowdate", "drn",
                    "if_ip_number_and_size_2_axes_+_depth_of_the_pools",
@@ -3800,8 +3799,7 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
     hydro_con_summarized = setdiff(names(in_hydrocon_summarized), 
                                    c(group_cols, exclude_cols,
                                      names(spdiv), names(in_env_dt))), 
-    env = setdiff(c(names(in_env_dt),
-                    'upstream_area_net'),
+    env = setdiff(names(in_env_dt),
                   c(group_cols, exclude_cols,
                     names(spdiv), names(in_hydrocon_compiled))),
     env_summarized = setdiff(c(names(in_env_summarized$dt_nopools), 
@@ -3861,6 +3859,7 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
                            c(dtcols$hydro_con_summarized, 'site'), 
                            with=F], 
     by='site', all.x=T) %>%
+    merge(in_hydrocon_compiled[!duplicated(site), .(site, upstream_area_net)], by='site') %>%
     merge(in_env_summarized$dt_nopools[, 
                                        c(dtcols$env_summarized, 'site'), 
                                        with=F],
@@ -4350,7 +4349,60 @@ ordinate_local_env <- function(in_allvars_dt) {
 
 #------ create_ssn_preds -------------------------------------------------------
 # in_network_path = tar_read(network_ssnready_shp_list)
-# in_hydromod = tar_read(hydromod_comb_hist)
+# in_hydrostats_net_hist = tar_read(hydrostats_net_hist)
+# in_hydrostats_net_proj = tar_read(hydrostats_net_proj)
+
+create_ssn_preds <- function(in_network_path,
+                             in_hydrostats_net_hist,
+                             in_hydrostats_net_proj) {
+  
+  net_proj <- lapply(names(in_network_path), function(in_country) {
+    #print(in_country)
+    out_sf <- in_network_path[[in_country]] %>%
+      st_cast("LINESTRING") %>%
+      #Make sure that the geometry column is equally named regardless 
+      #of file format (see https://github.com/r-spatial/sf/issues/719)
+      st_set_geometry('geometry') %>%
+      st_transform(3035)
+    out_sf$country <- in_country
+    return(out_sf)
+  }) %>% do.call(rbind, .)
+  
+  net_centroids <- net_proj
+  net_centroids$geometry <- st_line_sample(net_proj, sample=0.5) %>%
+    st_cast('POINT')
+
+  net_predpts_hist <- merge(net_centroids, 
+                             in_hydrostats_net_hist,
+                             by.x = c('cat', 'country'), 
+                             by.y = c('reach_id', 'country'),
+                             all.x=T
+  ) %>%
+    setNames(c('upstream_area_net'),
+             c('basin_area_km2'))
+
+  # in_hydrostats_net_proj <- in_hydrostats_net_proj %>%
+  #   setDT %>% 
+  #   .[catchment == "Lepsamanjoki", catchment := "Lepsamaanjoki"] %>%
+  #   merge(drn_dt[, .(country, catchment)], by='catchment')
+  
+  net_predpts_proj_dt <- in_hydrostats_net_proj[, list(
+    preds = list(
+      merge(net_centroids, .SD,
+            by.x = c('cat', 'country'), 
+            by.y = c('reach_id', 'country'),
+            all.x=T) %>%
+        setNames(c('upstream_area_net'),
+                 c('basin_area_km2'))
+    )
+  )
+  , by = c('year', 'gcm', 'scenario')]
+  
+  return(list(
+    hist_sf = net_predpts_hist,
+    proj_dt = net_predpts_proj_dt 
+  ))
+}
 
 
 
@@ -4411,7 +4463,7 @@ create_ssn_europe <- function(in_network_path,
       st_set_geometry('geometry') %>%
       st_transform(3035)
     
-    net_hydro <- merge(net_proj, in_hydrostats_net_hist,
+    net_hydro <- merge(net_proj, in_hydrostats_net_hist[country==in_country,],
                        by.x = 'cat', by.y = 'reach_id')
     
     return(net_hydro)
@@ -4426,9 +4478,7 @@ create_ssn_europe <- function(in_network_path,
     overwrite = overwrite
   )
   
-  
   #Create prediction sites for each reach --------------------------------------
-  
   
   #Incorporate sites into the landscape network --------------------------------
   sites_eu <- lapply(names(in_sites_path), function(in_country) {
@@ -4719,7 +4769,8 @@ map_ssn_summarized <- function(in_ssn_summarized,
   
   #Plot every physical variable
   physvars <- c(in_allvars_merged$cols$hydro_con_summarized,
-                in_allvars_merged$cols$env_summarized_num)
+                in_allvars_merged$cols$env_summarized_num,
+                'upstream_area_net')
   maps_physvars <- lapply(physvars, function(in_color_col) {
     if (verbose) {print(paste('Mapping', in_color_col))}
     
@@ -6071,7 +6122,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
   #With only variables that are available for all reaches
 
   #Test covariance structures again
-  ssn_mod_predictions <- model_ssn_hydrowindow(
+  ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
     in_ssn = in_ssn_eu_summarized,
     organism = c('miv_nopools'),
     formula_root = '~ sqrt(basin_area_km2) + country:sqrt(basin_area_km2)',
@@ -6082,12 +6133,12 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     random_formula = NULL,
     estmethod='reml'
   )
-  selected_glance <- ssn_mod_predictions$ssn_glance
+  selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
   #Still Upstream: none, Downstream: none, Euclidean: spherical
   
   #Check Torgegram
   tg_selected <- SSN2::Torgegram(
-    formula = ssn_mod_selected$ssn_list$spherical_none_none$formula,
+    formula = ssn_mod_predictions_covtypes$ssn_list$spherical_none_none$formula,
     ssn.object = ssn_miv,
     type = c("flowcon", "flowuncon", "euclid"),
     partition_factor = as.formula('~ country'),
@@ -6109,7 +6160,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     mean_richness ~ DurD_samp + country:DurD_samp + 
       sqrt(basin_area_km2) + country:sqrt(basin_area_km2),
     estmethod = 'reml'
-    )
+  )
   
   ssn_miv_mod_preds <- augment(ssn_miv_pred_final,
                                drop=F)
@@ -6130,15 +6181,14 @@ model_miv_yr <- function(in_ssn_eu_summarized,
   
   return(list(
     model_selection_table = mod_perf_tab,
-    ssn_mod_fit = ssn_mod_predictions, #Prediction model fit with REML
-    ssn_pred_final = ssn_miv_pred_final, #AUgmented data with prediction model
+    ssn_mod_fit = ssn_miv_pred_final, #Prediction model fit with REML
+    ssn_pred_final = ssn_miv_mod_preds, #AUgmented data with prediction model
     torgegram_mod_pred = tg_plot, #Torgegram for prediction model 
     ssn_mod_fit_best = ssn_miv_best_final, #"Best" model fit with REML
     ssn_pred_best = ssn_miv_best_preds #Augmented data for "best" model
   ))
 }
   
-
 #------ diagnose_ssn_mod -----------------------------------------------------
 # #Plot the "marginal" effect of each hydrological variable while
 # #keeping surface area at global mean and global intercept

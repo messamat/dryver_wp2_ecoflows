@@ -676,9 +676,13 @@ analysis_targets <- list(
            function(in_path) {
              print(in_path)
              summarize_drn_hydroproj_stats(hydroproj_path=in_path)
-           }) %>% rbindlist
+           }) %>% 
+      rbindlist %>%
+      .[catchment == "Lepsamanjoki", catchment := "Lepsamaanjoki"] %>%
+      merge(drn_dt[, .(country, catchment)], by='catchment')
   )
   ,
+  
   tar_target(
     env_summarized,
     summarize_env(in_env_dt = env_dt)
@@ -723,6 +727,15 @@ analysis_targets <- list(
                         in_env_dt = env_dt,
                         in_env_summarized = env_summarized,
                         in_genal_upa = genal_sites_upa_dt)
+  )
+  ,
+  
+  #Prepare prediction points and data for SSN
+  tar_target(
+    ssn_pred_pts,
+    create_ssn_preds(in_network_path = network_ssnready_shp_list,
+                     in_hydrostats_net_hist = hydrostats_net_hist,
+                     in_hydrostats_net_proj = hydrostats_net_proj)
   )
   ,
   
