@@ -212,7 +212,7 @@ preformatting_targets <- list(
     bio_dt,
     read_biodt(path_list = bio_data_paths,
                in_metadata_edna = metadata_edna,
-               include_bacteria = F) 
+               include_bacteria = T) 
   )
   ,
   
@@ -843,6 +843,7 @@ analysis_targets <- list(
                       in_local_env_pca = local_env_pca,
                       in_barriers_path = barrier_snapped_gpkg_list,
                       in_hydrostats_net_hist = hydrostats_net_hist,
+                      in_pred_pts =  ssn_pred_pts,
                       out_dir = file.path(resdir, 'ssn'),
                       out_ssn_name = 'ssn_eu',
                       overwrite = T)
@@ -947,32 +948,32 @@ analysis_targets <- list(
       })
   )
   ,
-
-  tar_target(
-    ssn_covtype_selected,
-    select_ssn_covariance(in_ssnmodels=ssn_richness_hydrowindow)
-  )
-  ,
-
-  tar_target(
-    ssn_richness_hydrowindow_formatted,
-    {
-      ssn_model_names <- do.call(rbind, ssn_richness_models_to_run)[,1:2] %>%
-        as.data.table
-      ssnmodels <- cbind(ssn_model_names, ssn_richness_hydrowindow)
-
-      out_list <- lapply(organism_list, function(in_organism) {
-        print(in_organism)
-        format_ssn_hydrowindow(in_ssnmodels = ssnmodels,
-                               in_organism = in_organism,
-                               in_covtype_selected = ssn_covtype_selected)
-      })
-      names(out_list) <- organism_list
-
-      return(out_list)
-    }
-  )
-  ,
+  # 
+  # tar_target(
+  #   ssn_covtype_selected,
+  #   select_ssn_covariance(in_ssnmodels=ssn_richness_hydrowindow)
+  # )
+  # ,
+  # 
+  # tar_target(
+  #   ssn_richness_hydrowindow_formatted,
+  #   {
+  #     ssn_model_names <- do.call(rbind, ssn_richness_models_to_run)[,1:2] %>%
+  #       as.data.table
+  #     ssnmodels <- cbind(ssn_model_names, ssn_richness_hydrowindow)
+  # 
+  #     out_list <- lapply(organism_list, function(in_organism) {
+  #       print(in_organism)
+  #       format_ssn_hydrowindow(in_ssnmodels = ssnmodels,
+  #                              in_organism = in_organism,
+  #                              in_covtype_selected = ssn_covtype_selected)
+  #     })
+  #     names(out_list) <- organism_list
+  # 
+  #     return(out_list)
+  #   }
+  # )
+  # ,
   ##############################################################################
   # MODEL SITES SUMMARIZED
   ##############################################################################

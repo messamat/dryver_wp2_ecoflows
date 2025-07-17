@@ -3351,8 +3351,11 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
 # raw_dist_matrix <- in_preformatted_data$river_dist_mat
 # routing_mode = 'in'
 
-compute_Fdist <- function(sites_status_matrix, network_structure, 
-                          routing_mode, raw_dist_matrix, in_net_shp_path) {
+compute_Fdist <- function(sites_status_matrix, 
+                          network_structure, 
+                          routing_mode, 
+                          raw_dist_matrix, 
+                          in_net_shp_path) {
   
   #Get a matrix of adjacency relationship among segments that includes routing mode
   #(1 if connected, Inf if not connected -- depending on routing mode)
@@ -4378,8 +4381,7 @@ create_ssn_preds <- function(in_network_path,
                              by.y = c('reach_id', 'country'),
                              all.x=T
   ) %>%
-    setNames(c('upstream_area_net'),
-             c('basin_area_km2'))
+    rename(c('basin_area_km2'='upstream_area_net'))
 
   # in_hydrostats_net_proj <- in_hydrostats_net_proj %>%
   #   setDT %>% 
@@ -4392,8 +4394,7 @@ create_ssn_preds <- function(in_network_path,
             by.x = c('cat', 'country'), 
             by.y = c('reach_id', 'country'),
             all.x=T) %>%
-        setNames(c('upstream_area_net'),
-                 c('basin_area_km2'))
+        rename(c('basin_area_km2'='upstream_area_net'))
     )
   )
   , by = c('year', 'gcm', 'scenario')]
@@ -4423,11 +4424,10 @@ create_ssn_preds <- function(in_network_path,
 # in_local_env_pca = tar_read(local_env_pca_summarized)
 # in_barriers_path = tar_read(barrier_snapped_gpkg_list)
 # in_hydromod = tar_read(hydromod_comb_hist)
+# in_predpts = tar_read(ssn_pred_pts)
 # out_dir = file.path(resdir, 'ssn')
 # out_ssn_name = 'ssn_eu_summarized'
 # overwrite = T
-
-
 
 create_ssn_europe <- function(in_network_path,
                               in_sites_path,
@@ -4435,6 +4435,7 @@ create_ssn_europe <- function(in_network_path,
                               in_local_env_pca,
                               in_barriers_path,
                               in_hydrostats_net_hist,
+                              in_pred_pts = NULL,
                               out_dir,
                               out_ssn_name,
                               overwrite = T) {
@@ -4600,9 +4601,9 @@ create_ssn_europe <- function(in_network_path,
 #Examples in https://cran.r-project.org/web/packages/SSNbler/vignettes/introduction.html
 # in_ssn <- tar_read(ssn_eu_summarized)$miv_nopools$ssn
 
-
+# 
 # in_country='Hungary'
-# color_col='Beta'
+# color_col='upstream_area_net'
 # linewidth_col='qsim_avg'
 # in_edges <- in_ssn$edges[in_ssn$edges$country==in_country,]
 # in_obs <- in_ssn$obs[in_ssn$obs$country==in_country,]
@@ -4674,10 +4675,11 @@ pad_ssn_map <- function(in_edges, in_obs) {
 # facet_col <- 'country'
 # page_title <- 'Macroinvertebrates - Mean richness'
 
+# in_ssn_summarized <- tar_read(ssn_eu_summarized)
 # in_organism = 'miv_nopools'
-# in_color_col <- 'mean_richness'
-# in_ssn = in_ssn_summarized[[in_organism]]$ssn 
-# color_col = as.character(in_color_col) 
+# in_color_col <- 'upstream_area_net'
+# in_ssn = in_ssn_summarized[[in_organism]]$ssn
+# color_col = as.character(in_color_col)
 # facet_col = 'country'
 # linewidth_col = 'qsim_avg'
 # page_title = paste(in_organism, in_color_col, sep=' - ')
