@@ -4382,26 +4382,22 @@ create_ssn_preds <- function(in_network_path,
                              all.x=T
   ) %>%
     rename(c('basin_area_km2'='upstream_area_net'))
-
-  # in_hydrostats_net_proj <- in_hydrostats_net_proj %>%
-  #   setDT %>% 
-  #   .[catchment == "Lepsamanjoki", catchment := "Lepsamaanjoki"] %>%
-  #   merge(drn_dt[, .(country, catchment)], by='catchment')
   
-  net_predpts_proj_dt <- in_hydrostats_net_proj[, list(
-    preds = list(
-      merge(net_centroids, .SD,
-            by.x = c('cat', 'country'), 
-            by.y = c('reach_id', 'country'),
-            all.x=T) %>%
-        rename(c('basin_area_km2'='upstream_area_net'))
-    )
-  )
-  , by = c('year', 'gcm', 'scenario')]
+  in_hydrostats_net_proj[, proj_id := paste(gcm, scenario, year, sep='_')]
+  proj_cast <- dcast(in_hydrostats_net_proj,
+                     reach_id + country ~ proj_id,
+                     value.var = 'DurD_yr')
+  
+  net_predpts_proj <- merge(
+    net_centroids, proj_cast,
+    by.x = c('cat', 'country'), 
+    by.y = c('reach_id', 'country'),
+    all.x=T) %>%
+    rename(c('basin_area_km2'='upstream_area_net'))
   
   return(list(
-    hist_sf = net_predpts_hist,
-    proj_dt = net_predpts_proj_dt 
+    hist = net_predpts_hist,
+    proj = net_predpts_proj
   ))
 }
 
@@ -4424,7 +4420,7 @@ create_ssn_preds <- function(in_network_path,
 # in_local_env_pca = tar_read(local_env_pca_summarized)
 # in_barriers_path = tar_read(barrier_snapped_gpkg_list)
 # in_hydromod = tar_read(hydromod_comb_hist)
-# in_predpts = tar_read(ssn_pred_pts)
+# in_pred_pts = tar_read(ssn_pred_pts)
 # out_dir = file.path(resdir, 'ssn')
 # out_ssn_name = 'ssn_eu_summarized'
 # overwrite = T
@@ -4478,10 +4474,9 @@ create_ssn_europe <- function(in_network_path,
     topo_tolerance = 20,
     overwrite = overwrite
   )
-  
-  #Create prediction sites for each reach --------------------------------------
-  
+
   #Incorporate sites into the landscape network --------------------------------
+  #Incorporate observation sites
   sites_eu <- lapply(names(in_sites_path), function(in_country) {
     st_read(in_sites_path[[in_country]]) %>%
       st_transform(3035)  
@@ -4502,11 +4497,49 @@ create_ssn_europe <- function(in_network_path,
   setDT(in_allvars_dt)[country == 'Czech Republic', country := 'Czech']
   sites_lsn_attri <- merge(sites_lsn,
                            in_allvars_dt, 
-                           by=c('country', 'site')) %>%
+                           by=c('country', 'site', 'upstream_area_net')) %>%
     merge(in_local_env_pca$dt_all,
           by=c(id_cols, 'organism_class'))
   
   sites_list <- list(sites = sites_lsn_attri)
+  
+  #Incorporate prediction "sites" 
+  if (!(is.null(in_pred_pts))) {
+    #Add historical prediction sites
+    if (!(crs(in_pred_pts$hist) == crs(sites_eu))) {
+      in_pred_pts$hist <- st_transform(in_pred_pts$hist, 3035) 
+    }
+    
+    preds_hist_lsn <- SSNbler::sites_to_lsn(
+      sites = in_pred_pts$hist,
+      edges =  edges_lsn,
+      lsn_path = lsn_path,
+      file_name = "preds_hist",
+      snap_tolerance = 5,
+      save_local = TRUE,
+      overwrite = overwrite
+    )
+    
+    sites_list$preds_hist <- preds_hist_lsn
+    
+    #Add future prediction "sites"
+    if (!(crs(in_pred_pts$proj) == crs(sites_eu))) {
+      in_pred_pts$proj <- st_transform(in_pred_pts$proj, 3035) 
+    }
+    
+    preds_proj_lsn <- SSNbler::sites_to_lsn(
+      sites = in_pred_pts$proj,
+      edges =  edges_lsn,
+      lsn_path = lsn_path,
+      file_name = "preds_proj",
+      snap_tolerance = 5,
+      save_local = TRUE,
+      overwrite = overwrite
+    )
+    
+    sites_list$preds_proj <- preds_proj_lsn
+  }
+
   
   #Incorporate barriers into the landscape network
   #Only keep barriers over 2 m and under 100 m snap from network
@@ -6265,6 +6298,8 @@ model_miv_yr <- function(in_ssn_eu_summarized,
 # }
 
 #------ predict_ssn_mod ------------------------------------------------------
+
+
 # ssn_create_distmat(
 #   ssn.object = mf04p,
 #   predpts = c("pred1km", "CapeHorn"),
