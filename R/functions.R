@@ -3735,14 +3735,14 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path) {
 }
 
 #------ merge_allvars_sites ----------------------------------------------------
-in_country <- 'Spain'
-in_spdiv_local <- tar_read(spdiv_local)
-in_spdiv_drn <- tar_read(spdiv_drn)
-in_hydrocon_compiled <- tar_read(hydrocon_sites_compiled)
-in_hydrocon_summarized <- tar_read(hydrocon_sites_summarized)
-in_env_dt <- tar_read(env_dt)
-in_env_summarized <- tar_read(env_summarized)
-in_genal_upa = tar_read(genal_sites_upa_dt)
+# in_country <- 'Spain'
+# in_spdiv_local <- tar_read(spdiv_local)
+# in_spdiv_drn <- tar_read(spdiv_drn)
+# in_hydrocon_compiled <- tar_read(hydrocon_sites_compiled)
+# in_hydrocon_summarized <- tar_read(hydrocon_sites_summarized)
+# in_env_dt <- tar_read(env_dt)
+# in_env_summarized <- tar_read(env_summarized)
+# in_genal_upa = tar_read(genal_sites_upa_dt)
 
 merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
                                 in_hydrocon_compiled, in_hydrocon_summarized,
@@ -3819,10 +3819,11 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
                                          sapply(in_env_dt, class) 
                                          %in% c('numeric', 'integer')])
               ),
-              env_summarized_num = list(intersect(dtcols$env_summarized,
-                                                  names(in_env_summarized$dt_nopools)[
-                                                    sapply(in_env_summarized$dt_nopools, class) 
-                                                    %in% c('numeric', 'integer')])
+              env_summarized_num = list(intersect(
+                dtcols$env_summarized,
+                names(in_env_summarized$dt_nopools)[
+                  sapply(in_env_summarized$dt_nopools, class) 
+                  %in% c('numeric', 'integer')])
               )
   )
   
@@ -3854,18 +3855,19 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
   
   
   #------------ Create data.table summarized by site across campaigns ---------
+  spdiv_summarized <- spdiv[!duplicated(paste(site, organism)), 
+                            intersect(names(spdiv), 
+                                      c(group_cols, dtcols$div_summarized)), 
+                            with=F] %>%
+    .[, mean_richness := as.integer(round(mean_richness))]
+  
   all_vars_summarized <- merge(
-    spdiv[!duplicated(paste(site, organism)), 
-          intersect(names(spdiv), c(group_cols, dtcols$div_summarized)), 
-          with=F],
-    in_hydrocon_summarized[, 
-                           c(dtcols$hydro_con_summarized, 'site'), 
-                           with=F], 
+    spdiv_summarized,
+    in_hydrocon_summarized[, c(dtcols$hydro_con_summarized, 'site'),  with=F], 
     by='site', all.x=T) %>%
-    merge(in_hydrocon_compiled[!duplicated(site), .(site, upstream_area_net)], by='site') %>%
-    merge(in_env_summarized$dt_nopools[, 
-                                       c(dtcols$env_summarized, 'site'), 
-                                       with=F],
+    merge(in_hydrocon_compiled[!duplicated(site), .(site, upstream_area_net)],
+          by='site') %>%
+    merge(in_env_summarized$dt_nopools[, c(dtcols$env_summarized, 'site'), with=F],
           by='site', all.x=T) %>%
     .[, c('campaign', 'date') := NULL] %>%
     .[!(site %in% dry_only_sites), ] #Remove sites that never flowed
@@ -5049,7 +5051,7 @@ plot_scatter_lm <-  function(in_allvars_merged, temporal_var_substr, response_va
 quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,  
                       partition_formula = as.formula("~ as.factor(campaign)"),
                       random_formula = as.formula("~ country"),
-                      family = NULL,
+                      family = "Gaussian", # arguments are passed to and evaluated by ssn_lm()
                       estmethod = "ml") {
   SSN2::ssn_create_distmat(in_ssn)
   
@@ -5058,32 +5060,18 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
   ssn_list <- mapply(function(down_type, up_type, euc_type) {
     print(paste(down_type, up_type, euc_type))
     
-    if (is.null(family)) {
-      out_ssn <- ssn_lm(
-        formula = as.formula(in_formula),
-        ssn.object = in_ssn,
-        taildown_type = down_type,
-        tailup_type = up_type,
-        euclid_type = euc_type,
-        additive = "afv_qsqrt",
-        partition_factor = partition_formula,
-        random = random_formula,
-        estmethod = estmethod
-      )
-    } else {
-      out_ssn <- ssn_glm(
-        formula = as.formula(in_formula),
-        family = family,
-        ssn.object = in_ssn,
-        taildown_type = down_type,
-        tailup_type = up_type,
-        euclid_type = euc_type,
-        additive = "afv_qsqrt",
-        partition_factor = partition_formula,
-        random = random_formula,
-        estmethod = estmethod
-      )
-    }
+    out_ssn <- ssn_glm(
+      formula = as.formula(in_formula),
+      family = eval(family),
+      ssn.object = in_ssn,
+      taildown_type = down_type,
+      tailup_type = up_type,
+      euclid_type = euc_type,
+      additive = "afv_qsqrt",
+      partition_factor = partition_formula,
+      random = random_formula,
+      estmethod = estmethod
+    )
 
     return(out_ssn)
   },
@@ -5109,11 +5097,22 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
 # response_var = 'richness'
 # tar_load(ssn_covtypes)
 
+# in_ssn = in_ssn_eu_summarized
+# family = "poisson"  #Gamma(link = "log")
+# organism = c('miv_nopools')
+# formula_root = '~ sqrt(basin_area_km2)'
+# hydro_var = 'DurD3650past'
+# response_var = 'mean_richness'
+# ssn_covtypes = ssn_covtypes[1:10,]
+# partition_formula = as.formula('~ country')
+# random_formula = NULL
+# estmethod='ml'
+
 model_ssn_hydrowindow <- function(in_ssn, organism, formula_root, 
                                   hydro_var, response_var, ssn_covtypes,
                                   partition_formula = as.formula("~ as.factor(campaign)"),
                                   random_formula = as.formula("~ country"),
-                                  family = NULL,
+                                  family = "Gaussian",
                                   estmethod = "ml") {
   
   # hydro_var <- grep(paste0('^', hydro_var_str), 
@@ -6017,19 +6016,50 @@ model_miv_yr <- function(in_ssn_eu_summarized,
   
   #Test all possible covariance structures
   if (interactive) {
-    ssn_mod_ini <- model_ssn_hydrowindow(
+    ssn_norm_ini <- model_ssn_hydrowindow(
       in_ssn = in_ssn_eu_summarized,
       organism = c('miv_nopools'),
       formula_root = '~ sqrt(basin_area_km2)',
       hydro_var = 'DurD3650past',
       response_var = 'mean_richness',
-      ssn_covtypes = ssn_covtypes,
+      ssn_covtypes = ssn_covtypes[1:10,],
       partition_formula = as.formula('~ country'),
       random_formula = NULL,
-      estmethod='reml'
+      estmethod='ml'
     )
     
-    selected_ssn_cov <- ssn_mod_ini$ssn_glance
+    ssn_gamm_ini <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = "poisson",  #Gamma(link = "log"),
+      organism = c('miv_nopools'),
+      formula_root = '~ sqrt(basin_area_km2)',
+      hydro_var = 'DurD3650past',
+      response_var = 'mean_richness',
+      ssn_covtypes = ssn_covtypes[1:10,],
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='ml'
+    )
+  
+    ssn_invg_ini <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = "nbinomial",
+      organism = c('miv_nopools'),
+      formula_root = '~ sqrt(basin_area_km2)',
+      hydro_var = 'DurD3650past',
+      response_var = 'mean_richness',
+      ssn_covtypes = ssn_covtypes[1:10,],
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='ml'
+    )
+    
+    ssn_cov_glance <- rbindlist(list(
+      ssn_norm_ini$ssn_glance,
+      ssn_pois_ini$ssn_glance,
+      ssn_nbin_in$ssn_glance
+    ))
+    
     loocv(ssn_mod_ini$ssn_list$none_none_none)
     loocv(ssn_mod_ini$ssn_list$none_none_exponential)
     loocv(ssn_mod_ini$ssn_list$none_none_spherical)
