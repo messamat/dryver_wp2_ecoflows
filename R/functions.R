@@ -4614,6 +4614,7 @@ create_ssn_europe <- function(in_network_path,
       edges = edges_lsn,
       lsn_path = lsn_path,
       obs_sites = sites_list_lsn$sites[sites_list_lsn$sites$organism == in_org,],
+      preds_list = sites_list_lsn[c("preds_hist", "preds_proj")],
       ssn_path = out_ssn_path,
       import = TRUE,
       check = TRUE,
@@ -4643,7 +4644,8 @@ create_ssn_europe <- function(in_network_path,
 
 map_ssn_sites_util <- function(in_ssn, in_edges, in_obs,
                                color_col, color_lims=NULL,
-                               linewidth_col='qsim_avg'
+                               linewidth_col='qsim_avg', 
+                               shape_col='16'
 ) {
   
   if (is.null(color_lims)) {
@@ -4657,11 +4659,9 @@ map_ssn_sites_util <- function(in_ssn, in_edges, in_obs,
     ) +
     geom_sf(data = in_obs,
             aes(color = get(as.character(color_col)), 
-                shape=stream_type),
+                shape=eval(shape_col)),
             size = 3
     ) +
-    scale_shape(name='Stream type',
-                labels = c('Perennial', 'Non-perennial')) +
     scale_linewidth(name = str_to_sentence(gsub('_', ' ', linewidth_col)),
                     transform='sqrt',
                     limits = range(in_ssn$edges[[linewidth_col]]),
@@ -4672,6 +4672,17 @@ map_ssn_sites_util <- function(in_ssn, in_edges, in_obs,
     ggspatial::annotation_scale(location = "br", style='ticks') +
     theme_classic() +
     theme(axis.text = element_blank())
+  
+  if (shape_col == 'stream_type') {
+    out_map <- out_map + 
+      scale_shape(name='Stream type',
+                  labels = c('Perennial', 'Non-perennial'))
+  }
+  
+  if (shape_col == '16') {
+    out_map <- out_map +
+      scale_shape(guide="none")
+  }
   
   return(out_map)
 }
@@ -4719,9 +4730,11 @@ pad_ssn_map <- function(in_edges, in_obs) {
                    
                    
 facet_ssn_maps <- function(in_ssn, 
+                           in_pts = NULL,
                            color_col, 
                            facet_col,
                            linewidth_col = 'qsim_avg',
+                           shape_col = '16',
                            page_title=NULL) {
   
   assert_that((facet_col %in% names(in_ssn$edges)) &
@@ -4731,27 +4744,35 @@ facet_ssn_maps <- function(in_ssn,
   #Define the different facet values to iterate over
   facet_vals <- unique(in_ssn$edges[[facet_col]])
   
+  if (is.null(in_pts)) {
+    pts <- in_ssn$obs 
+  } else {
+    pts <- in_pts
+  }
+  
   #Define global limits for the color scale
-  color_lims <- range(in_ssn$obs[[color_col]])
+  color_lims <- range(pts[[color_col]])
   
   map_list <- lapply(facet_vals, function(facet_i) {
     #Subset edges and observations for given facet
     edges_i <- in_ssn$edges[in_ssn$edges[[facet_col]] == facet_i, ]
-    obs_i   <- in_ssn$obs[in_ssn$obs[[facet_col]] == facet_i, ]
+    
+    pts_i <- pts[pts[[facet_col]] == facet_i, ]
     
     #Define cartographic extent to make sure the map is square to 
     #allow uniform faceting (despite uneven cartographic scale among facets)
     map_lims <- pad_ssn_map(in_edges = edges_i, 
-                            in_obs = obs_i)
+                            in_obs = pts_i)
     
     #Map individual facet
     map_ssn_sites_util(
       in_ssn = in_ssn,
       in_edges = edges_i,
-      in_obs = obs_i,
+      in_obs = pts_i,
       color_col = color_col,
       color_lims = color_lims,
-      linewidth_col = linewidth_col
+      linewidth_col = linewidth_col,
+      shape_col = shape_col
       ) +
       ggtitle(facet_i) +
       coord_sf(xlim = map_lims$xlim, 
@@ -4793,6 +4814,7 @@ map_ssn_summarized <- function(in_ssn_summarized,
                      color_col = in_color_col, 
                      facet_col = 'country',
                      linewidth_col = 'qsim_avg',
+                     shape_col = 'stream_type',
                      page_title = paste(in_organism, in_color_col, sep=' - ')
       )
     }
@@ -5027,6 +5049,7 @@ plot_scatter_lm <-  function(in_allvars_merged, temporal_var_substr, response_va
 quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,  
                       partition_formula = as.formula("~ as.factor(campaign)"),
                       random_formula = as.formula("~ country"),
+                      family = NULL,
                       estmethod = "ml") {
   SSN2::ssn_create_distmat(in_ssn)
   
@@ -5034,17 +5057,34 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
   
   ssn_list <- mapply(function(down_type, up_type, euc_type) {
     print(paste(down_type, up_type, euc_type))
-    out_ssn <- ssn_lm(
-      formula = as.formula(in_formula),
-      ssn.object = in_ssn,
-      taildown_type = down_type,
-      tailup_type = up_type,
-      euclid_type = euc_type,
-      additive = "afv_qsqrt",
-      partition_factor = partition_formula,
-      random = random_formula,
-      estmethod = estmethod
-    )
+    
+    if (is.null(family)) {
+      out_ssn <- ssn_lm(
+        formula = as.formula(in_formula),
+        ssn.object = in_ssn,
+        taildown_type = down_type,
+        tailup_type = up_type,
+        euclid_type = euc_type,
+        additive = "afv_qsqrt",
+        partition_factor = partition_formula,
+        random = random_formula,
+        estmethod = estmethod
+      )
+    } else {
+      out_ssn <- ssn_glm(
+        formula = as.formula(in_formula),
+        family = family,
+        ssn.object = in_ssn,
+        taildown_type = down_type,
+        tailup_type = up_type,
+        euclid_type = euc_type,
+        additive = "afv_qsqrt",
+        partition_factor = partition_formula,
+        random = random_formula,
+        estmethod = estmethod
+      )
+    }
+
     return(out_ssn)
   },
   down_type = ssn_covtypes$down,
@@ -5073,6 +5113,7 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
                                   hydro_var, response_var, ssn_covtypes,
                                   partition_formula = as.formula("~ as.factor(campaign)"),
                                   random_formula = as.formula("~ country"),
+                                  family = NULL,
                                   estmethod = "ml") {
   
   # hydro_var <- grep(paste0('^', hydro_var_str), 
@@ -5085,6 +5126,7 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
   
   ssn_list <- quick_ssn(in_ssn = in_ssn[[organism]]$ssn, 
                         in_formula = as.formula(full_formula),
+                        family = family,
                         ssn_covtypes = ssn_covtypes, #ssn_covtypes[sample(144, 10)],
                         partition_formula = partition_formula,
                         random_formula = random_formula,
@@ -6298,7 +6340,37 @@ model_miv_yr <- function(in_ssn_eu_summarized,
 # }
 
 #------ predict_ssn_mod ------------------------------------------------------
+# in_ssn_mods <- tar_read(ssn_mods_miv_yr)
+# in_ssn <- tar_read(ssn_eu_summarized)
 
+predict_ssn_mod <- function(in_ssn,
+                            in_ssn_mods) {
+  preds_hist_pts <- augment(in_ssn_mods$ssn_mod_fit 
+                        , newdata = 'preds_hist'
+                        , interval = 'prediction'
+                        )
+  
+  ggplot() +
+    geom_sf(data = in_ssn$miv_nopools$ssn$edges) +
+    geom_sf(data =   preds_hist_pts, aes(color = .fitted), size = 2) +
+    scale_color_viridis_c(option = "H") +
+    theme_bw() +
+    facet_wrap(~country)
+  
+  map_ssn_sites_util(in_ssn = in_ssn$miv_nopools$ssn,
+                     )
+  
+  facet_ssn_maps(in_ssn = in_ssn$miv_nopools$ssn, 
+                 in_pts = preds_hist_pts,
+                 color_col = '.fitted', 
+                 facet_col = 'country',
+                 linewidth_col = 'qsim_avg',
+                 page_title=NULL) 
+  
+
+  
+
+}
 
 # ssn_create_distmat(
 #   ssn.object = mf04p,

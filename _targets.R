@@ -828,13 +828,13 @@ analysis_targets <- list(
   ##############################################################################
   # MODEL SITES x DATE
   ##############################################################################
-  #Ordinate local environmental variables to use axes in regression models
-  tar_target(
-    local_env_pca,
-    ordinate_local_env(in_allvars_dt = allvars_merged$dt)
-  ),
-
-  #Create Spatial Stream Network (SSN) object
+  # #Ordinate local environmental variables to use axes in regression models
+  # tar_target(
+  #   local_env_pca,
+  #   ordinate_local_env(in_allvars_dt = allvars_merged$dt)
+  # ),
+  # 
+  # #Create Spatial Stream Network (SSN) object
   # tar_target(
   #   ssn_eu,
   #   create_ssn_europe(in_network_path = network_ssnready_shp_list,
