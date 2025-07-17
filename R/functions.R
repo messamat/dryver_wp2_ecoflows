@@ -5055,25 +5055,54 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
                       estmethod = "ml") {
   SSN2::ssn_create_distmat(in_ssn)
   
-  #summary(lm(formula = as.formula(in_formula), data=in_ssn$obs))
-  
   ssn_list <- mapply(function(down_type, up_type, euc_type) {
-    print(paste(down_type, up_type, euc_type))
+    label <- paste(down_type, up_type, euc_type, sep = "_")
+    message("Fitting model: ", label)
     
-    out_ssn <- ssn_glm(
-      formula = as.formula(in_formula),
-      family = eval(family),
-      ssn.object = in_ssn,
-      taildown_type = down_type,
-      tailup_type = up_type,
-      euclid_type = euc_type,
-      additive = "afv_qsqrt",
-      partition_factor = partition_formula,
-      random = random_formula,
-      estmethod = estmethod
-    )
+    result <- tryCatch({
+      if (family %in% c("Gaussian", "gaussian", gaussian())) {
+        fit <- ssn_lm(
+          formula = as.formula(in_formula),
+          ssn.object = in_ssn,
+          taildown_type = down_type,
+          tailup_type = up_type,
+          euclid_type = euc_type,
+          additive = "afv_qsqrt",
+          partition_factor = partition_formula,
+          random = random_formula,
+          estmethod = estmethod
+        )
+      } else {
+        fit <- ssn_glm(
+          formula = as.formula(in_formula),
+          family = eval(family),
+          ssn.object = in_ssn,
+          taildown_type = down_type,
+          tailup_type = up_type,
+          euclid_type = euc_type,
+          additive = "afv_qsqrt",
+          partition_factor = partition_formula,
+          random = random_formula,
+          estmethod = estmethod
+        )
+      }
 
-    return(out_ssn)
+      fit$fit_status <- "ok"
+      return(fit)
+      
+    }, error = function(e) {
+      warning(paste("Model failed for", label, ":", e$message))
+      structure(list(
+        fit_status = "failed",
+        error_message = e$message,
+        label = label,
+        taildown = down_type,
+        tailup = up_type,
+        euclid = euc_type
+      ), class = "ssn_glm_failed")
+    })
+    
+    return(result)
   },
   down_type = ssn_covtypes$down,
   up_type = ssn_covtypes$up,
@@ -5107,6 +5136,7 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
 # partition_formula = as.formula('~ country')
 # random_formula = NULL
 # estmethod='ml'
+# family= "Gaussian"
 
 model_ssn_hydrowindow <- function(in_ssn, organism, formula_root, 
                                   hydro_var, response_var, ssn_covtypes,
@@ -5131,15 +5161,31 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
                         random_formula = random_formula,
                         estmethod = estmethod)
   
-  ssn_glance <- purrr::map(ssn_list, SSN2::glance,
-                           .id=names(ssn_list)) %>%
-    rbindlist(id='covtypes') %>%
-    setorder(AIC) %>%
-    as.data.table %>%
+  ssn_glance <- lapply(names(ssn_list), function(label) {
+    model <- ssn_list[[label]]
+    
+    if (inherits(model, "ssn_glm_failed")) {
+      data.table(
+        covtypes = label,
+        fit_status = "failed",
+        error_message = model$error_message
+      )
+    } else {
+      out <- SSN2::glance(model) %>%
+        setDT
+      out[, covtypes := label]
+      out[, fit_status := "ok"]
+      out[, error_message := NA_character_]
+      return(out)
+    }
+  }) %>% 
+    rbindlist(fill = TRUE) %>%
+    setorder(fit_status, AICc) %>%
     .[, `:=`(
       organism = organism,
       response_var = response_var,
-      hydro_var = hydro_var
+      hydro_var = hydro_var,
+      family = family
     )]
   
   return(list(
@@ -5148,6 +5194,7 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
   ))
 }
 
+#------ plot_hydro_comparison --------------------------------------------------
 #------ compare standard hydro metrics with flow-duration curve-based metrics ---
 # vars_list <- c('DurD', 'FreD')
 # var_substr <- vars_list[[1]]
@@ -6022,33 +6069,33 @@ model_miv_yr <- function(in_ssn_eu_summarized,
       formula_root = '~ sqrt(basin_area_km2)',
       hydro_var = 'DurD3650past',
       response_var = 'mean_richness',
-      ssn_covtypes = ssn_covtypes[1:10,],
+      ssn_covtypes = ssn_covtypes,
       partition_formula = as.formula('~ country'),
       random_formula = NULL,
       estmethod='ml'
     )
     
-    ssn_gamm_ini <- model_ssn_hydrowindow(
+    ssn_pois_ini <- model_ssn_hydrowindow(
       in_ssn = in_ssn_eu_summarized,
       family = "poisson",  #Gamma(link = "log"),
       organism = c('miv_nopools'),
       formula_root = '~ sqrt(basin_area_km2)',
       hydro_var = 'DurD3650past',
       response_var = 'mean_richness',
-      ssn_covtypes = ssn_covtypes[1:10,],
+      ssn_covtypes = ssn_covtypes,
       partition_formula = as.formula('~ country'),
       random_formula = NULL,
       estmethod='ml'
     )
   
-    ssn_invg_ini <- model_ssn_hydrowindow(
+    ssn_nbin_ini <- model_ssn_hydrowindow(
       in_ssn = in_ssn_eu_summarized,
       family = "nbinomial",
       organism = c('miv_nopools'),
       formula_root = '~ sqrt(basin_area_km2)',
       hydro_var = 'DurD3650past',
       response_var = 'mean_richness',
-      ssn_covtypes = ssn_covtypes[1:10,],
+      ssn_covtypes = ssn_covtypes,
       partition_formula = as.formula('~ country'),
       random_formula = NULL,
       estmethod='ml'
@@ -6057,7 +6104,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     ssn_cov_glance <- rbindlist(list(
       ssn_norm_ini$ssn_glance,
       ssn_pois_ini$ssn_glance,
-      ssn_nbin_in$ssn_glance
+      ssn_nbin_ini$ssn_glance
     ))
     
     loocv(ssn_mod_ini$ssn_list$none_none_none)
