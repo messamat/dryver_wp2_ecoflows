@@ -3723,8 +3723,8 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path) {
   #   by=reach_id] 
   
   if (metadata_dt$varname == 'isflowing') {
-    stats_dt <- hydro_dt$data_all[(date > as.Date('2021-12-31')) &
-                                    (date < as.Date('2041-12-31')), 
+    stats_dt <- hydro_dt$data_all[(date > as.Date('2019-12-31')) &
+                                    (date < as.Date('2100-01-01')), 
                                   list(DurD_yr = sum(isflowing==0)/.N), 
                                   by=.(reach_id, format(date, '%Y'))] %>%
       setnames('format', 'year')
@@ -4635,7 +4635,7 @@ create_ssn_europe <- function(in_network_path,
   return(out_ssn_list)
 }
 
-#------ map_ssn_sites_util -----------------------------------------------------
+#------ map_ssn_util -----------------------------------------------------
 #Examples in https://cran.r-project.org/web/packages/SSNbler/vignettes/introduction.html
 # in_ssn <- tar_read(ssn_eu_summarized)$miv_nopools$ssn
 
@@ -4646,13 +4646,13 @@ create_ssn_europe <- function(in_network_path,
 # in_edges <- in_ssn$edges[in_ssn$edges$country==in_country,]
 # in_pts <- in_ssn$obs[in_ssn$obs$country==in_country,]
 
-map_ssn_sites_util <- function(in_ssn, 
-                               in_edges,
-                               linewidth_col='qsim_avg',                                
-                               linecolor_col=NULL, linecolor_lims=NULL,
-                               in_pts=NULL, 
-                               shape_col=NULL,
-                               ptcolor_col=NULL, ptcolor_lims=NULL
+map_ssn_util <- function(in_ssn, 
+                         in_edges,
+                         linewidth_col='qsim_avg',                                
+                         linecolor_col=NULL, linecolor_lims=NULL,
+                         in_pts=NULL, 
+                         shape_col=NULL,
+                         ptcolor_col=NULL, ptcolor_lims=NULL
 ) {
   
   # Compute limits if missing
@@ -4690,11 +4690,24 @@ map_ssn_sites_util <- function(in_ssn,
           linewidth = !!sym(linewidth_col),
           color = !!sym(linecolor_col)
         )
-      ) +
-      scale_color_viridis_b(
-        name = str_to_sentence(gsub('_', ' ', linecolor_col)),
-        limits = linecolor_lims,
-        n.breaks=5) 
+      )
+    
+    if (length(setdiff(sign(linecolor_lims), 0)) == 2) {
+      out_map <- out_map +
+        scale_color_fermenter(
+          name = str_to_sentence(gsub('_', ' ', linecolor_col)),
+          limits = linecolor_lims,
+          n.breaks = 8,
+          palette = "Spectral"
+        )
+    } else {
+      out_map <- out_map +
+        scale_color_viridis_b(
+          name = str_to_sentence(gsub('_', ' ', linecolor_col)),
+          limits = linecolor_lims,
+          n.breaks=5) 
+    }
+
   }
   
   if (!is.null(in_pts)) {
@@ -4809,17 +4822,17 @@ map_ssn_facets <- function(in_ssn,
     ptcolor_lims <- NULL
   } else if (in_pts == 'obs') {
     pts <- in_ssn$obs 
-    ptcolor_lims <- range(pts[[ptcolor_col]])
+    ptcolor_lims <- range(pts[[ptcolor_col]], na.rm=T)
   } else {
     pts <- in_pts
-    ptcolor_lims <- range(pts[[ptcolor_col]])
+    ptcolor_lims <- range(pts[[ptcolor_col]], na.rm=T)
   }
   
   #Define global limits for the color scale
   if (is.null(linecolor_col)) {
     linecolor_lims <- NULL
   } else {
-    linecolor_lims <- range(in_ssn$edges[[linecolor_col]])
+    linecolor_lims <- range(in_ssn$edges[[linecolor_col]], na.rm=T)
   } 
   
   map_list <- lapply(facet_vals, function(facet_i) {
@@ -4834,7 +4847,7 @@ map_ssn_facets <- function(in_ssn,
                             in_pts = pts_i)
     
     #Map individual facet
-    map_ssn_sites_util(
+    map_ssn_util(
       in_ssn = in_ssn, 
       in_edges = edges_i,
       linewidth_col = linewidth_col,                                
@@ -6043,10 +6056,6 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
   
 }
 
-
-
-
-
 #------ model_miv_yr -----------------------------------------------------------
 # in_allvars_merged <- tar_read(allvars_merged)
 # in_ssn_eu_summarized <- tar_read(ssn_eu_summarized)
@@ -6548,47 +6557,170 @@ model_miv_yr <- function(in_ssn_eu_summarized,
 #   return(out_plot)
 # }
 
-#------ predict_ssn_mod ------------------------------------------------------
-# in_ssn_mods <- tar_read(ssn_mods_miv_yr)
-# in_ssn <- tar_read(ssn_eu_summarized)
+#------ predict_ssn_proj -------------------------------------------------------
+# in_ssn_mods = tar_read(ssn_mods_miv_yr)
+# proj_years <- c(2025, 2026, 2030, 2035, 2041)
 
-predict_ssn_mod <- function(in_ssn,
-                            in_ssn_mods) {
-  
-  #Make map of 2021 (historical) richness
-  preds_hist_pts <- augment(in_ssn_mods$ssn_mod_fit 
+predict_ssn_mod <- function(in_ssn_mods, proj_years = NULL) {
+  #Historical predictions ------------------------------------------------------
+  preds_hist_dt <- augment(in_ssn_mods$ssn_mod_fit 
                             , newdata = 'preds_hist'
                             , drop = FALSE
                             , type = 'response',
                             , interval = 'prediction'
+  ) %>% 
+    .[, c('rid', 'country', '.fitted', '.lower', '.upper')] %>%
+    st_drop_geometry %>%
+    as.data.table %>%
+    .[, `:=`(year = 2021,
+             colname = 'historical')]
+  
+  #Future predictions  ---------------------------------------------------------
+  preds_proj_colnames <- names(in_ssn_mods$ssn_mod_fit$ssn.object$preds$preds_proj)
+  
+  durd_proj_col_dt <- data.table(
+    colname = setdiff(
+      preds_proj_colnames,
+      c(names(in_ssn_mods$ssn_mod_fit$ssn.object$obs),
+        names(in_ssn_mods$ssn_mod_fit$ssn.object$edges))
+    ) 
+  ) %>%
+    .[, c('gcm', 'scenario', 'year') := tstrsplit(colname, '_')]
+  
+  if (is.null(proj_years)) {
+    proj_years <- as.integer(unique(durd_proj_col_dt$year))
+  }
+  
+  preds_proj_dt <- lapply(
+    durd_proj_col_dt[(as.integer(year) %in% proj_years) &
+                       (gcm=='gfdl-esm4'), colname],
+    function(in_colname) {
+      print(paste0('Predicting for ', in_colname))
+      
+      ssn_mod_fit_copy <- copy(in_ssn_mods$ssn_mod_fit)
+      
+      names(ssn_mod_fit_copy$ssn.object$preds$preds_proj)[
+        preds_proj_colnames == in_colname] <- 'DurD_samp'
+      
+      preds_proj_pts <- augment(ssn_mod_fit_copy  
+                                , newdata = 'preds_proj'
+                                , drop = FALSE
+                                , type = 'response',
+                                , interval = 'prediction'
+      ) %>% 
+        .[, c('rid', 'country', '.fitted', '.lower', '.upper')] %>%
+        st_drop_geometry %>%
+        as.data.table %>%
+        .[, colname := in_colname]
+      
+      return(preds_proj_pts)
+    }
+  ) %>%
+    rbindlist %>%
+    merge(durd_proj_col_dt,
+        by='colname')
+  
+  #Compute future statistics
+  preds_decade_mean <- preds_proj_dt %>%
+    .[, decade := floor(as.integer(year)/10)*10] %>%
+    .[, list(fitted_mean_decade = mean(.fitted, na.rm=T),
+             lower_mean_decade = mean(.lower, na.rm=T),
+             upper_mean_decade = mean(.upper, na.rm=T)),
+      by=.(rid, country, gcm, scenario, decade)] %>%
+    merge(y=preds_hist_dt[, .(rid, country, .fitted)],
+          by=c('rid', 'country')) %>%
+    .[, preds_diff := fitted_mean_decade - .fitted]
+
+  return(list(
+    hist = preds_hist_dt,
+    proj = preds_proj_dt,
+    proj_stats = preds_decade_mean
+    )
   )
-  
-  ssn_preds <- in_ssn_mods$ssn_mod_fit$ssn.object
-  ssn_preds$edges <- merge(
+}
+
+#------ map_ssn_mod --------------------------------------------------------
+# in_ssn_mods <- tar_read(ssn_mods_miv_yr)
+# in_ssn <- tar_read(ssn_eu_summarized)
+# in_ssn_preds <- tar_read(ssn_preds)
+
+map_ssn_mod <- function(in_ssn,
+                        in_ssn_mods,
+                        in_ssn_preds) {
+
+  #------------- Makes maps ----------------------------------------------------
+  #Make map of 2021 (historical) richness -------------
+  ssn_preds_hist <- in_ssn_mods$ssn_mod_fit$ssn.object
+  ssn_preds_hist$edges <- merge(
     in_ssn_mods$ssn_mod_fit$ssn.object$edges,
-    st_drop_geometry(preds_hist_pts[, c('rid', '.fitted', '.lower', '.upper')]),
-    by = 'rid', all.x=T)
+    in_ssn_preds$hist,
+    by = c('country', 'rid'), all.x=T)
   
-  
-  # map_ssn_sites_util(in_ssn=ssn_preds, 
-  #                    in_edges=filter(ssn_preds$edges, country=="France"), 
-  #                    in_pts=NULL,
-  #                    ptcolor_col=NULL, 
-  #                    ptcolor_lims=NULL,
-  #                    linewidth_col='qsim_avg', 
-  #                    linecolor_col='.fitted', 
-  #                    linecolor_lims=NULL,
-  #                    shape_col='16'
-  # )
-  
-  map_ssn_facets(in_ssn=ssn_preds, 
+  map_hist <- map_ssn_facets(in_ssn=ssn_preds_hist, 
                  facet_col='country',
                  linewidth_col='qsim_avg',                                
                  linecolor_col='.fitted', 
-                 shape_col='16',
-                 page_title='miv 2021 predictions'
+                 page_title='Macroinvertebrate richness - Historical'
+  )
+  
+  
+  # Makes maps of specific projection scenario/year ----------------------------
+  
+  ssn_preds_proj <- in_ssn_mods$ssn_mod_fit$ssn.object
+  
+  #For a given scenario and gcm
+  ssn_preds_proj$edges <- merge(
+    in_ssn_mods$ssn_mod_fit$ssn.object$edges,
+    in_ssn_preds$proj_stats[decade==2040 & colname=='gfdl-esm4_ssp585_2040',],
+    by = c('country', 'rid'), all.x=T)
+  
+  map_diff_indiv <- map_ssn_facets(in_ssn=ssn_preds_proj, 
+                 facet_col='country',
+                 linewidth_col='qsim_avg',                                
+                 linecolor_col='preds_diff', 
+                 page_title=unique( ssn_preds_proj$edges$colname)
+  )
+  
+  #Mean and SNR across gcms
+  proj_stats_gcm <- in_ssn_preds$proj_stats[, list(
+    preds_diff_gcm_avg = mean(preds_diff, na.rm=T),
+    preds_diff_gcm_snr = mean(preds_diff, na.rm=T)/diff(range(preds_diff, na.rm=T))
+  ), by = c('country', 'rid', 'decade', 'scenario')] %>%
+    .[is.na(preds_diff_gcm_snr), preds_diff_gcm_snr := 0]
+  
+  ssn_preds_proj$edges <- merge(
+    in_ssn_mods$ssn_mod_fit$ssn.object$edges,
+    proj_stats_gcm[decade==2040 & scenario=='ssp585',],
+    by = c('country', 'rid'), all.x=T)
+  
+  map_diff_avg <- map_ssn_facets(in_ssn=ssn_preds_proj, 
+                             facet_col='country',
+                             linewidth_col='qsim_avg',                                
+                             linecolor_col='preds_diff_gcm_avg', 
+                             page_title=unique( ssn_preds_proj$edges$colname)
+  )
+  
+  
+  # Makes maps of specific projection scenario/year ----------------------------
+  ssn_preds_proj <- in_ssn_mods$ssn_mod_fit$ssn.object
+  in_colname <- 'gfdl-esm4_ssp585_2026'
+  ssn_preds_proj$edges <- merge(
+    in_ssn_mods$ssn_mod_fit$ssn.object$edges,
+    in_ssn_preds$proj[colname==in_colname,],
+    by = c('country', 'rid'), all.x=T)
+  
+  map_proj <- map_ssn_facets(in_ssn=ssn_preds_proj, 
+                 facet_col='country',
+                 linewidth_col='qsim_avg',                                
+                 linecolor_col='.fitted', 
+                 page_title=in_colname
   )
 }
+
+#------ plot_ssn_proj ----------------------------------------------------------
+# ggplot(preds_decade_mean, aes(x=scenario, y=preds_diff, fill=as.factor(decade))) +
+#   geom_boxplot() +
+#   facet_wrap(~country)
 
 
 ################################################################################
