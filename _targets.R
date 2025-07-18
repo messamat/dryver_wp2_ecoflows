@@ -828,55 +828,55 @@ analysis_targets <- list(
   ##############################################################################
   # MODEL SITES x DATE
   ##############################################################################
-  # #Ordinate local environmental variables to use axes in regression models
-  # tar_target(
-  #   local_env_pca,
-  #   ordinate_local_env(in_allvars_dt = allvars_merged$dt)
-  # ),
-  # 
-  # #Create Spatial Stream Network (SSN) object
-  # tar_target(
-  #   ssn_eu,
-  #   create_ssn_europe(in_network_path = network_ssnready_shp_list,
-  #                     in_sites_path = site_snapped_gpkg_list,
-  #                     in_allvars_dt = allvars_merged$dt,
-  #                     in_local_env_pca = local_env_pca,
-  #                     in_barriers_path = barrier_snapped_gpkg_list,
-  #                     in_hydrostats_net_hist = hydrostats_net_hist,
-  #                     in_pred_pts =  NULL,
-  #                     out_dir = file.path(resdir, 'ssn'),
-  #                     out_ssn_name = 'ssn_eu',
-  #                     overwrite = T)
-  # )
-  # ,
-  # 
-  # #Define all hydrological variables: 16 (max ~73)
-  # tar_target(
-  #   hydro_vars_forssn,
-  #   {
-  #     hydrovar_grid <- expand.grid(
-  #       c('DurD', 'FreD'), #'PDurD', 'FreD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'
-  #       paste0(c(30, 60, 90, 365, 3650), 'past')
-  #     )
-  #     stcon_grid <- expand.grid(paste0('STcon_m', c(30, 60, 90, 180, 365)),
-  #                               c('_directed', '_undirected'))
-  #     fdist_grid <- expand.grid(paste0('Fdist_mean_', c(30, 60, 90, 180, 365, 3650), 'past'),
-  #                               c('_directed', '_undirected'))
-  #     hydro_regex_list <- c(
-  #       paste0(hydrovar_grid$Var1,'.*', hydrovar_grid$Var2),
-  #       paste0(stcon_grid$Var1, stcon_grid$Var2),
-  #       paste0(fdist_grid$Var1, fdist_grid$Var2)
-  #     )
-  # 
-  #     lapply(hydro_regex_list, function(var_str) {
-  #       grep(paste0('^', var_str),
-  #            names(ssn_eu[[1]]$ssn$obs),
-  #            value=T)
-  #     }) %>% unlist
-  #   }
-  # )
-  # ,
-  # 
+  #Ordinate local environmental variables to use axes in regression models
+  tar_target(
+    local_env_pca,
+    ordinate_local_env(in_allvars_dt = allvars_merged$dt)
+  ),
+
+  #Create Spatial Stream Network (SSN) object
+  tar_target(
+    ssn_eu,
+    create_ssn_europe(in_network_path = network_ssnready_shp_list,
+                      in_sites_path = site_snapped_gpkg_list,
+                      in_allvars_dt = allvars_merged$dt,
+                      in_local_env_pca = local_env_pca,
+                      in_barriers_path = barrier_snapped_gpkg_list,
+                      in_hydrostats_net_hist = hydrostats_net_hist,
+                      in_pred_pts = NULL,
+                      out_dir = file.path(resdir, 'ssn'),
+                      out_ssn_name = 'ssn_eu',
+                      overwrite = T)
+  )
+  ,
+
+  #Define all hydrological variables: 16 (max ~73)
+  tar_target(
+    hydro_vars_forssn,
+    {
+      hydrovar_grid <- expand.grid(
+        c('DurD', 'FreD'), #'PDurD', 'FreD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'
+        paste0(c(30, 60, 90, 365, 3650), 'past')
+      )
+      stcon_grid <- expand.grid(paste0('STcon_m', c(30, 60, 90, 180, 365)),
+                                c('_directed', '_undirected'))
+      fdist_grid <- expand.grid(paste0('Fdist_mean_', c(30, 60, 90, 180, 365, 3650), 'past'),
+                                c('_directed', '_undirected'))
+      hydro_regex_list <- c(
+        paste0(hydrovar_grid$Var1,'.*', hydrovar_grid$Var2),
+        paste0(stcon_grid$Var1, stcon_grid$Var2),
+        paste0(fdist_grid$Var1, fdist_grid$Var2)
+      )
+
+      lapply(hydro_regex_list, function(var_str) {
+        grep(paste0('^', var_str),
+             names(ssn_eu[[1]]$ssn$obs),
+             value=T)
+      }) %>% unlist
+    }
+  )
+  ,
+
   # # Run a first SSN with a single hydrological variable for each organism
   # # to determine the top spatial covariance types
   # tar_target(
@@ -884,7 +884,7 @@ analysis_targets <- list(
   #   model_ssn_hydrowindow(
   #     in_ssn = ssn_eu,
   #     organism = organism_list,
-  #     formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country',
+  #     formula_root = 'log10(basin_area_km2) + log10(basin_area_km2):country',
   #     hydro_var = 'DurD365past',
   #     response_var = 'richness',
   #     ssn_covtypes = ssn_covtypes
@@ -999,7 +999,7 @@ analysis_targets <- list(
                       overwrite = T)
   )
   ,
-  
+
   tar_target(
     ssn_summarized_maps,
     map_ssn_summarized(in_ssn_summarized = ssn_eu_summarized,
@@ -1007,221 +1007,27 @@ analysis_targets <- list(
                       selected_organism_list = organism_list)
   )
   ,
-  
+
   tar_target(
     ssn_mods_miv_yr,
     model_miv_yr(in_ssn_eu_summarized = ssn_eu_summarized,
                  in_allvars_merged = allvars_merged,
-                 in_cor_matrices = cor_matrices_list_summarized, 
+                 in_cor_matrices = cor_matrices_list_summarized,
                  ssn_covtypes = ssn_covtypes)
+  ),
+  
+  tar_target(
+    ssn_preds,
+    predict_ssn_mod(in_ssn = ssn_eu_summarized,
+                    in_ssn_mods = ssn_mods_miv_yr)
   )
+  
+  
 )
 
 
 #Run for other diversity indices
   
-  # combined_ssntargets <- list(
-  #   tar_combine(
-  #     ssnmodels_combined,
-  #     mapped_ssntargets[["ssn_richness_hydrowindow"]],
-  #     command = list(!!!.x)
-  #   )
-  # )
-  
-
 list(preformatting_targets, mapped_hydrotargets, 
      combined_hydrotargets, analysis_targets) %>%
   unlist(recursive = FALSE)
-
-
-
-######################### OLD TARGETS ##########################################
-#   tar_target(
-#     alpha_cor_plots_wrap,
-#     plot_alpha_cor(alphadat_merged,
-#                    out_dir = file.path(resdir, 'Null_models'),
-#                    facet_wrap = TRUE)
-#   )
-#   ,
-# 
-# tar_target(
-#   alpha_cor_plots_all,
-#   plot_alpha_cor(alphadat_merged,
-#                  out_dir = file.path(resdir, 'Null_models'),
-#                  facet_wrap = FALSE)
-# )
-
-# tar_target(
-#   alpha_cor,
-#   alphadat_merged[, list(meanS_totdur90_cor = stats::cor(mean_S, TotDur90),
-#                          meanS_discharge_cor = stats::cor(mean_S, discharge)
-#   ), by=Country]
-# )
-# ,
-#
-
-#
-# tar_target(
-#   lmer_S_int,
-#   compute_lmer_mods(
-#     in_dt = unique(alphadat_merged, by=c('site', 'organism')),
-#     in_yvar = 'mean_S')
-# ),
-#
-# # fungi_biof_path <- file.path(datdir, 'Datasets', 'fungi_dna_Biof_removed_zero_rows_and_columns.csv')
-# # fungi_biof <- fread(fungi_biof_path)
-# # fungi_biof[Country == 'Czech Republic', Country := 'Czech']
-# # countries_list <- unique(fungi_biof$Country)
-# # fungi_biof[1:10, 1:10]
-#
-# tar_target(
-#   null_models,
-#   lapply(
-#     names(bio_dt)[!(names(bio_dt) %in% c('bac_sedi', 'bac_biof'))],
-#     function(organism_type) {
-#       print(organism_type)
-#       organism_dt <- bio_dt[[organism_type]]
-#
-#       if (organism_type %in% c("bac_biof_nopools", "bac_sedi_nopools")) {
-#         in_nsimul = 99; in_method = 'greedyqswap'; in_thin = 100
-#       } else {
-#         in_nsimul = 999; in_method = 'quasiswap'; in_thin = 1
-#       }
-#
-#       organism_dt[, compute_null_model_inner(
-#         in_dt = .SD,
-#         in_metacols = metacols,
-#         min_siteN = 2,
-#         nsimul = in_nsimul,
-#         method = in_method,
-#         thin = in_thin)
-#         , by = Country] %>%
-#         .[, organism := organism_type]
-#     }
-#   )  %>% rbindlist
-# ),
-#
-# tar_target(
-#   env_null_models_dt,
-#   merge_env_null_models(in_null_models = null_models,
-#                         in_env = env_dt,
-#                         in_int = interm90_dt)
-# ),
-#
-# tar_target(
-#   p_z_by_stream_type,
-#   for (in_organism in unique(env_null_models_dt$organism)) {
-#     print(in_organism)
-#     plot_z_by_stream_type(in_env_null_models_dt = env_null_models_dt[organism==in_organism,],
-#                           outdir = resdir)
-#   }
-# ),
-#
-# tar_map(
-#   values = list(env_var_mapped = c('TotDur90', 'TotLeng90', 'discharge')),
-#   tar_target(
-#     p_by_env,
-#     plot_z_by_env(in_env_null_models_dt = env_null_models_dt,
-#                   env_var = env_var_mapped,
-#                   outdir = resdir),
-#
-#   )
-# ),
-#
-# tar_target(
-#   lmer_z_int,
-#   compute_lmer_mods(in_dt = env_null_models_dt,
-#                     in_yvar = 'z')
-# ),
-#
-# tar_target(
-#   p_z_jitter,
-#   plot_z_jitter_by_organism(in_env_null_models_dt = env_null_models_dt,
-#                             outdir = resdir)
-# )
-
-
-######################## UNUSED TARGETS ########################################
-#Plot spearman's correlation between hydro metrics by time window 
-#and site-specific richness and t-minus1 betadiv
-# tar_target(
-#   corplots_div_hydrowindow, {
-#     hydrovar_list <- c('DurD', 'PDurD', 'FreD', 'PFreD', 
-#                        'uQ90', 'oQ10', 'maxPQ', 'PmeanQ',
-#                        'STcon.*_directed', 'STcon.*_undirected',
-#                        'Fdist.*_directed', 'Fdist.*_undirected')
-#     lapply(hydrovar_list, function(in_var_substr) {
-#       plot_cor_hydrowindow(in_cor_dt = cor_matrices_list$div_bydrn, 
-#                            temporal_var_substr = in_var_substr, 
-#                            response_var_list = c('richness', 'invsimpson','Jtm1'),
-#                            colors_list = drn_dt$color,
-#                            save_plot=T,
-#                            out_dir = resdir)
-#     }) %>% setNames(hydrovar_list)
-#     
-#     lapply(hydrovar_list, function(in_var_substr) {
-#       plot_cor_hydrowindow(in_cor_dt = cor_matrices_list_ires$div_bydrn, 
-#                            temporal_var_substr = in_var_substr, 
-#                            response_var_list = c('richness','invsimpson','Jtm1'),
-#                            colors_list = drn_dt$color,
-#                            save_plot=T,
-#                            plot_name_suffix = '_IRES',
-#                            out_dir = resdir)
-#     }) %>% setNames(paste0(hydrovar_list, '_IRES'))
-#   }
-# )
-# ,
-# 
-#
-# tar_target(
-#   STcon_rolling_ref_list,
-#   {
-#     out_STcon_list <- future_lapply(
-#       names(preformatted_data_STcon), function(in_country) {
-#         print(in_country)
-# 
-#         unique_sampling_dates <- lapply(bio_dt, function(org_dt) {
-#           org_dt[country==in_country, .(date)]
-#         }) %>% rbindlist %>% unique
-#         in_dates <- unique_sampling_dates
-# 
-#         window_size_list <-  c(10, 365) #30, 60, 90, 180,
-#         lapply(window_size_list, function(in_window) {
-#           print(in_window)
-# 
-#           if (in_window == 365) {
-#             in_output <- 'all'
-#           } else {
-#             in_output <- 'STcon'
-#           }
-# 
-#           compute_STcon_rolling(in_preformatted_data = preformatted_data_STcon[[in_country]],
-#                                 ref = TRUE,
-#                                 in_nsim = NULL,
-#                                 in_dates = in_dates,
-#                                 window = in_window,
-#                                 output = in_output,
-#                                 direction = 'directed',
-#                                 routing_mode = 'in',
-#                                 weighting = FALSE)
-#         }) %>% setNames(paste0('STcon_m', window_size_list))
-#       })
-#     setNames(out_STcon_list, names(preformatted_data_STcon))
-#   }
-# )
-# ,
-
-#Paths to intermittence data (90 days)
-# tar_target(
-#   interm90_data_paths,
-#   {path_list <- sapply(countries_list,
-#                        function(country) {
-#                          file.path(datdir, 'Datasets', 'Intermittence_Data',
-#                                    paste0(country, '_Local_Interm_90_d.csv'))
-#                        },
-#                        USE.NAMES = TRUE)
-#   path_list['France'] <- gsub('90_d', '90_d_corrected', path_list['France'])
-#   return(path_list)
-#   }
-# ),
-

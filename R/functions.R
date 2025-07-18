@@ -4409,9 +4409,10 @@ create_ssn_preds <- function(in_network_path,
 # in_network_path = tar_read(network_ssnready_shp_list)
 # in_sites_path = tar_read(site_snapped_gpkg_list)
 # in_barriers_path = tar_read(barrier_snapped_gpkg_list)
-# in_allvars_merged = tar_read(allvars_merged)$dt
+# in_allvars_dt= tar_read(allvars_merged)$dt
 # in_local_env_pca = tar_read(local_env_pca)
 # in_hydrostats_net_hist = tar_read(hydrostats_net_hist)
+# in_pred_pts = NULL
 # out_dir = file.path(resdir, 'ssn')
 # out_ssn_name = 'ssn_eu'
 # overwrite=T
@@ -4478,7 +4479,7 @@ create_ssn_europe <- function(in_network_path,
   )
 
   #Incorporate sites into the landscape network --------------------------------
-  #Incorporate observation sites
+  #Incorporate observation sites-----
   sites_eu <- lapply(names(in_sites_path), function(in_country) {
     st_read(in_sites_path[[in_country]]) %>%
       st_transform(3035)  
@@ -4505,7 +4506,7 @@ create_ssn_europe <- function(in_network_path,
   
   sites_list <- list(sites = sites_lsn_attri)
   
-  #Incorporate prediction "sites" 
+  #Incorporate prediction "sites" -----
   if (!(is.null(in_pred_pts))) {
     #Add historical prediction sites
     if (!(crs(in_pred_pts$hist) == crs(sites_eu))) {
@@ -4542,7 +4543,6 @@ create_ssn_europe <- function(in_network_path,
     sites_list$preds_proj <- preds_proj_lsn
   }
 
-  
   #Incorporate barriers into the landscape network
   #Only keep barriers over 2 m and under 100 m snap from network
   barriers_eu_sub <- lapply(names(in_barriers_path), function(in_country) {
@@ -4616,7 +4616,9 @@ create_ssn_europe <- function(in_network_path,
       edges = edges_lsn,
       lsn_path = lsn_path,
       obs_sites = sites_list_lsn$sites[sites_list_lsn$sites$organism == in_org,],
-      preds_list = sites_list_lsn[c("preds_hist", "preds_proj")],
+      preds_list = if (!is.null(in_pred_pts)) {
+        sites_list_lsn[c("preds_hist", "preds_proj")]
+      } else {NULL},
       ssn_path = out_ssn_path,
       import = TRUE,
       check = TRUE,
@@ -4633,7 +4635,7 @@ create_ssn_europe <- function(in_network_path,
   return(out_ssn_list)
 }
 
-#------ map_ssn ----------------------------------------------------------------
+#------ map_ssn_sites_util -----------------------------------------------------
 #Examples in https://cran.r-project.org/web/packages/SSNbler/vignettes/introduction.html
 # in_ssn <- tar_read(ssn_eu_summarized)$miv_nopools$ssn
 
@@ -4642,38 +4644,78 @@ create_ssn_europe <- function(in_network_path,
 # color_col='upstream_area_net'
 # linewidth_col='qsim_avg'
 # in_edges <- in_ssn$edges[in_ssn$edges$country==in_country,]
-# in_obs <- in_ssn$obs[in_ssn$obs$country==in_country,]
+# in_pts <- in_ssn$obs[in_ssn$obs$country==in_country,]
 
-map_ssn_sites_util <- function(in_ssn, in_edges, in_obs,
-                               color_col, color_lims=NULL,
-                               linewidth_col='qsim_avg', 
-                               shape_col='16'
+map_ssn_sites_util <- function(in_ssn, 
+                               in_edges,
+                               linewidth_col='qsim_avg',                                
+                               linecolor_col=NULL, linecolor_lims=NULL,
+                               in_pts=NULL, 
+                               shape_col=NULL,
+                               ptcolor_col=NULL, ptcolor_lims=NULL
 ) {
   
-  if (is.null(color_lims)) {
-    color_lims <- range(in_obs[[color_col]])
+  # Compute limits if missing
+  if (is.null(ptcolor_lims) & !is.null(in_pts)) {
+    ptcolor_lims <- range(in_pts[[ptcolor_col]])
   }
   
+  if (is.null(linecolor_lims) & !is.null(linecolor_col)) {
+    linecolor_lims <- range(in_edges[[linecolor_col]])
+  }
+  
+  # Base plot with in_edges
   out_map <- ggplot() +
     geom_sf(data = in_edges,
-            aes(linewidth = get(linewidth_col)),
-            color = "grey"
+            aes(
+              linewidth = !!sym(linewidth_col)
+            ),
+            color = 'grey'
+    ) + 
+    scale_linewidth(
+      name = str_to_sentence(gsub('_', ' ', linewidth_col)),
+      transform = 'sqrt',
+      limits = range(in_ssn$edges[[linewidth_col]]),
+      range = c(1, 2.5)
     ) +
-    geom_sf(data = in_obs,
-            aes(color = get(as.character(color_col)), 
-                shape=eval(shape_col)),
-            size = 3
-    ) +
-    scale_linewidth(name = str_to_sentence(gsub('_', ' ', linewidth_col)),
-                    transform='sqrt',
-                    limits = range(in_ssn$edges[[linewidth_col]]),
-                    range = c(0.1, 2.5)) +
-    scale_color_viridis_b(name = str_to_sentence(gsub('_', ' ', color_col)),
-                          limits = color_lims,
-                          n.breaks=5) +
     ggspatial::annotation_scale(location = "br", style='ticks') +
     theme_classic() +
     theme(axis.text = element_blank())
+  
+  if (!is.null(linecolor_col)) {
+    out_map <- out_map +
+      geom_sf(
+        data = in_edges,
+        aes(
+          linewidth = !!sym(linewidth_col),
+          color = !!sym(linecolor_col)
+        )
+      ) +
+      scale_color_viridis_b(
+        name = str_to_sentence(gsub('_', ' ', linecolor_col)),
+        limits = linecolor_lims,
+        n.breaks=5) 
+  }
+  
+  if (!is.null(in_pts)) {
+    out_map <- out_map +    
+      geom_sf(
+        data = in_pts,
+        aes(color = get(as.character(ptcolor_col)), 
+            shape= if (!is.null(shape_col)) {get(shape_col)} else {'16'},
+            size = 3
+        )
+      )
+    
+    if (!is.null(linecolor_col)) {
+      out_map <- out_map +  new_scale_color()
+    }
+    out_map <- out_map + 
+      scale_color_viridis_b(
+        name = str_to_sentence(gsub('_', ' ', ptcolor_col)),
+        limits = ptcolor_lims,
+        n.breaks=5) 
+  }
   
   if (shape_col == 'stream_type') {
     out_map <- out_map + 
@@ -4689,10 +4731,14 @@ map_ssn_sites_util <- function(in_ssn, in_edges, in_obs,
   return(out_map)
 }
 
-pad_ssn_map <- function(in_edges, in_obs) {
+#------ pad_ssn_map ------------------------------------------------------------
+#SHould generalize: useless to use edges and pts, could just be a list of sf
+#then lapplied
+pad_ssn_map <- function(in_edges=NULL, in_pts=NULL) {
   #Get bbox for edges + obs combined
-  bb_edges <- sf::st_bbox(in_edges)
-  bb_obs   <- sf::st_bbox(in_obs)
+  bb_edges <- if (!is.null(in_edges)) {sf::st_bbox(in_edges)}
+  bb_obs   <- if (!is.null(in_pts)) {sf::st_bbox(in_pts)}
+  
   bb <- c(
     xmin = min(bb_edges["xmin"], bb_obs["xmin"]),
     ymin = min(bb_edges["ymin"], bb_obs["ymin"]),
@@ -4716,6 +4762,7 @@ pad_ssn_map <- function(in_edges, in_obs) {
   ))
 }
 
+#------ map_ssn_facets-----------------------------------------------------------
 # color_col='mean_richness'
 # linewidth_col='qsim_avg'
 # facet_col <- 'country'
@@ -4730,13 +4777,23 @@ pad_ssn_map <- function(in_edges, in_obs) {
 # linewidth_col = 'qsim_avg'
 # page_title = paste(in_organism, in_color_col, sep=' - ')
                    
+
+# in_ssn = ssn_preds
+# facet_col = 'country'
+# in_pts = NULL
+# linewidth_col='qsim_avg'
+# linecolor_col='.fitted'
+# shape_col='16'
+# ptcolor_col=NULL
+# page_title=paste('miv', 'test', sep=' - ')
                    
-facet_ssn_maps <- function(in_ssn, 
-                           in_pts = NULL,
-                           color_col, 
+map_ssn_facets <- function(in_ssn, 
                            facet_col,
-                           linewidth_col = 'qsim_avg',
-                           shape_col = '16',
+                           in_pts = NULL,
+                           linewidth_col='qsim_avg',                                
+                           linecolor_col=NULL, 
+                           shape_col='16',
+                           ptcolor_col=NULL,
                            page_title=NULL) {
   
   assert_that((facet_col %in% names(in_ssn$edges)) &
@@ -4746,14 +4803,24 @@ facet_ssn_maps <- function(in_ssn,
   #Define the different facet values to iterate over
   facet_vals <- unique(in_ssn$edges[[facet_col]])
   
+  #Define global limits for the color scale
   if (is.null(in_pts)) {
+    pts <- NULL
+    ptcolor_lims <- NULL
+  } else if (in_pts == 'obs') {
     pts <- in_ssn$obs 
+    ptcolor_lims <- range(pts[[ptcolor_col]])
   } else {
     pts <- in_pts
+    ptcolor_lims <- range(pts[[ptcolor_col]])
   }
   
   #Define global limits for the color scale
-  color_lims <- range(pts[[color_col]])
+  if (is.null(linecolor_col)) {
+    linecolor_lims <- NULL
+  } else {
+    linecolor_lims <- range(in_ssn$edges[[linecolor_col]])
+  } 
   
   map_list <- lapply(facet_vals, function(facet_i) {
     #Subset edges and observations for given facet
@@ -4764,17 +4831,19 @@ facet_ssn_maps <- function(in_ssn,
     #Define cartographic extent to make sure the map is square to 
     #allow uniform faceting (despite uneven cartographic scale among facets)
     map_lims <- pad_ssn_map(in_edges = edges_i, 
-                            in_obs = pts_i)
+                            in_pts = pts_i)
     
     #Map individual facet
     map_ssn_sites_util(
-      in_ssn = in_ssn,
+      in_ssn = in_ssn, 
       in_edges = edges_i,
-      in_obs = pts_i,
-      color_col = color_col,
-      color_lims = color_lims,
-      linewidth_col = linewidth_col,
-      shape_col = shape_col
+      linewidth_col = linewidth_col,                                
+      linecolor_col = linecolor_col,
+      linecolor_lims = linecolor_lims,
+      in_pts = pts_i, 
+      shape_col = shape_col,
+      ptcolor_col = ptcolor_col, 
+      ptcolor_lims = ptcolor_lims
       ) +
       ggtitle(facet_i) +
       coord_sf(xlim = map_lims$xlim, 
@@ -4789,7 +4858,8 @@ facet_ssn_maps <- function(in_ssn,
   return(map_patchwork)
 }
 
-# 
+
+#------ map_ssn_summarized -----------------------------------------------------
 # in_ssn_summarized <- tar_read(ssn_eu_summarized)
 # in_allvars_merged <- tar_read(allvars_merged)
 # selected_organism_list <- tar_read(organism_list)[1]
@@ -4809,20 +4879,21 @@ map_ssn_summarized <- function(in_ssn_summarized,
     setnames(c('organism', 'divcol'))
   
   maps_div <- mapply(
-    function(in_organism, in_color_col) {
-      if (verbose) {print(paste('Mapping', in_organism, in_color_col))}
+    function(in_organism, in_ptcolor_col) {
+      if (verbose) {print(paste('Mapping', in_organism, in_ptcolor_col))}
       
-      facet_ssn_maps(in_ssn = in_ssn_summarized[[in_organism]]$ssn, 
-                     color_col = in_color_col, 
+      map_ssn_facets(in_ssn = in_ssn_summarized[[in_organism]]$ssn, 
+                     in_pts = 'obs',
+                     ptcolor_col = in_ptcolor_col, 
                      facet_col = 'country',
                      linewidth_col = 'qsim_avg',
                      shape_col = 'stream_type',
-                     page_title = paste(in_organism, in_color_col, sep=' - ')
+                     page_title = paste(in_organism, in_ptcolor_col, sep=' - ')
       )
     }
     ,
     in_organism = div_map_params$organism,
-    in_color_col = div_map_params$divcol
+    in_ptcolor_col = div_map_params$divcol
   ) %>% setNames(div_map_params[, paste0(organism, '_', divcol)])
   
   
@@ -4830,14 +4901,15 @@ map_ssn_summarized <- function(in_ssn_summarized,
   physvars <- c(in_allvars_merged$cols$hydro_con_summarized,
                 in_allvars_merged$cols$env_summarized_num,
                 'upstream_area_net')
-  maps_physvars <- lapply(physvars, function(in_color_col) {
-    if (verbose) {print(paste('Mapping', in_color_col))}
+  maps_physvars <- lapply(physvars, function(in_ptcolor_col) {
+    if (verbose) {print(paste('Mapping', in_ptcolor_col))}
     
-    facet_ssn_maps(in_ssn = in_ssn_summarized[[1]]$ssn, 
-                   color_col = as.character(in_color_col), 
+    map_ssn_facets(in_ssn = in_ssn_summarized[[1]]$ssn, 
+                   in_pts = 'obs',
+                   ptcolor_col = as.character(in_ptcolor_col), 
                    facet_col = 'country',
                    linewidth_col = 'qsim_avg',
-                   page_title = in_color_col
+                   page_title = in_ptcolor_col
     )
   }) %>% setNames(physvars)
   
@@ -5121,7 +5193,7 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
 
 # in_ssn = tar_read(ssn_eu)
 # organism = 'miv_nopools_flying'
-# formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country'
+# formula_root = ' log10(basin_area_km2) + log10(basin_area_km2):country'
 # hydro_var = 'DurD365past'
 # response_var = 'richness'
 # tar_load(ssn_covtypes)
@@ -5129,7 +5201,7 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
 # in_ssn = in_ssn_eu_summarized
 # family = "poisson"  #Gamma(link = "log")
 # organism = c('miv_nopools')
-# formula_root = '~ sqrt(basin_area_km2)'
+# formula_root = ' sqrt(basin_area_km2)'
 # hydro_var = 'DurD3650past'
 # response_var = 'mean_richness'
 # ssn_covtypes = ssn_covtypes[1:10,]
@@ -5149,8 +5221,8 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
   #                   names(in_ssn[[organism]]$ssn$obs), 
   #                   value=T)
   
-  full_formula <- paste0(response_var, formula_root,' + ', hydro_var, ' + ',
-                         hydro_var, ':country')
+  full_formula <- paste0(response_var, ' ~ ', hydro_var, ' + ',
+                         hydro_var, ':country +', formula_root)
   
   
   ssn_list <- quick_ssn(in_ssn = in_ssn[[organism]]$ssn, 
@@ -5991,7 +6063,12 @@ model_miv_yr <- function(in_ssn_eu_summarized,
   
   #Subset SSN and create distance matrices-----
   ssn_miv <- in_ssn_eu_summarized$miv_nopools$ssn
-  SSN2::ssn_create_distmat(ssn_miv)
+  SSN2::ssn_create_distmat(
+    ssn_miv,
+    predpts = c("preds_hist", "preds_proj"),
+    among_predpts = TRUE,
+    overwrite = TRUE
+  )
   
   allvars_dt <- as.data.table(ssn_miv$obs) %>%
     setorderv(c('country', 'site')) 
@@ -6066,7 +6143,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     ssn_norm_ini <- model_ssn_hydrowindow(
       in_ssn = in_ssn_eu_summarized,
       organism = c('miv_nopools'),
-      formula_root = '~ sqrt(basin_area_km2)',
+      formula_root = ' sqrt(basin_area_km2)',
       hydro_var = 'DurD3650past',
       response_var = 'mean_richness',
       ssn_covtypes = ssn_covtypes,
@@ -6079,7 +6156,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
       in_ssn = in_ssn_eu_summarized,
       family = "poisson",  #Gamma(link = "log"),
       organism = c('miv_nopools'),
-      formula_root = '~ sqrt(basin_area_km2)',
+      formula_root = ' sqrt(basin_area_km2)',
       hydro_var = 'DurD3650past',
       response_var = 'mean_richness',
       ssn_covtypes = ssn_covtypes,
@@ -6092,7 +6169,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
       in_ssn = in_ssn_eu_summarized,
       family = "nbinomial",
       organism = c('miv_nopools'),
-      formula_root = '~ sqrt(basin_area_km2)',
+      formula_root = ' sqrt(basin_area_km2)',
       hydro_var = 'DurD3650past',
       response_var = 'mean_richness',
       ssn_covtypes = ssn_covtypes,
@@ -6107,19 +6184,36 @@ model_miv_yr <- function(in_ssn_eu_summarized,
       ssn_nbin_ini$ssn_glance
     ))
     
-    loocv(ssn_mod_ini$ssn_list$none_none_none)
-    loocv(ssn_mod_ini$ssn_list$none_none_exponential)
-    loocv(ssn_mod_ini$ssn_list$none_none_spherical)
+    #CHoose negative binomial
+    ssn_nbin_cov <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = "nbinomial",
+      organism = c('miv_nopools'),
+      formula_root = ' sqrt(basin_area_km2)',
+      hydro_var = 'DurD3650past',
+      response_var = 'mean_richness',
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
+    )
+    
+    View(ssn_nbin_cov$ssn_glance)
+    
+    loocv(ssn_nbin_cov$ssn_list$none_none_none)
+    loocv(ssn_nbin_cov$ssn_list$none_epa_none)
+    loocv(ssn_nbin_cov$ssn_list$none_linear_none)
   }
 
   #Set basic model structure
   quick_miv_ssn <- function(in_formula, in_random=NULL, estmethod='ml') {
-    ssn_lm(
+    ssn_glm(
       formula = in_formula,
+      family = 'nbinomial',
       ssn.object = ssn_miv,
       taildown_type = 'none',
-      tailup_type = 'none',
-      euclid_type = 'spherical',
+      tailup_type = 'linear',
+      euclid_type = 'none',
       additive = "afv_qsqrt",
       partition_factor = ~ country,
       random = in_random,
@@ -6241,14 +6335,18 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     summary(miv_rich_modlist[['mod25']])
     varcomp(miv_rich_modlist[['mod25']])
     summary(miv_rich_modlist[['mod34']])
-    summary(miv_rich_modlist[['mod33']])
+    varcomp(miv_rich_modlist[['mod34']])
+    summary(miv_rich_modlist[['mod36']])
+    varcomp(miv_rich_modlist[['mod36']])
     varcomp(miv_rich_modlist[['mod33']])
     summary(miv_rich_modlist[['mod35']])
     summary(miv_rich_modlist[['mod37']])
+    summary(miv_rich_modlist[['mod43']])
+    varcomp(miv_rich_modlist[['mod43']])
   }
   
   #####CHOOSE MOD 43 for "absolute" best model
-  #####CHOOSE MOD 34 for continuous predictions
+  #####CHOOSE MOD 36 OR MOD 34 for continuous predictions
   
   #------ For "best" model -------------------------------------------------
   #Re-fit with REML
@@ -6268,18 +6366,38 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     #Check predictions
     ggplot(data=ssn_miv_best_preds, aes(x=.fitted, y=mean_richness)) +
       geom_point(aes(color=stream_type)) +
-      geom_smooth(method='gam') +
+      geom_smooth(method='lm') +
+      geom_abline() +
       facet_wrap(~country)
   }
   
   #------ For prediction model -------------------------------------------------
   #With only variables that are available for all reaches
-
-  #Test covariance structures again
+  
+  if (interactive) {
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'nbinomial',
+      organism = c('miv_nopools'),
+      formula_root = 'sqrt(qsim_avg_samp) + country:sqrt(qsim_avg_samp)',
+      hydro_var = 'DurD_samp',
+      response_var = 'mean_richness',
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
+    )
+    
+    selected_glance_qsim <- ssn_mod_predictions_covtypes$ssn_glance
+    
+  }
+  
+  #Test covariance structures again, this time with REML 
   ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
     in_ssn = in_ssn_eu_summarized,
+    family = 'nbinomial',
     organism = c('miv_nopools'),
-    formula_root = '~ sqrt(basin_area_km2) + country:sqrt(basin_area_km2)',
+    formula_root = 'sqrt(basin_area_km2) + country:sqrt(basin_area_km2)',
     hydro_var = 'DurD_samp',
     response_var = 'mean_richness',
     ssn_covtypes = ssn_covtypes,
@@ -6287,12 +6405,13 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     random_formula = NULL,
     estmethod='reml'
   )
+  
   selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
-  #Still Upstream: none, Downstream: none, Euclidean: spherical
+  #Turns out area is better than the qsim
   
   #Check Torgegram
   tg_selected <- SSN2::Torgegram(
-    formula = ssn_mod_predictions_covtypes$ssn_list$spherical_none_none$formula,
+    formula = ssn_mod_predictions_covtypes$ssn_list$linear_none_none$formula,
     ssn.object = ssn_miv,
     type = c("flowcon", "flowuncon", "euclid"),
     partition_factor = as.formula('~ country'),
@@ -6303,21 +6422,33 @@ model_miv_yr <- function(in_ssn_eu_summarized,
   tg_plot <- ggplot(tg_selected, 
                     aes(x=dist, y=gamma, color = dist_type)) +
     geom_point(aes(size=np)) +
-    geom_smooth(method='gam', size=2, se=F) +
+    geom_smooth(method='lm', size=2, se=F) +
     scale_size_continuous(range=c(0.5, 7)) +
     scale_x_sqrt(breaks=c(1000, 5000, 10000, 20000)) +
     theme_classic() +
     facet_wrap(~dist_type)
   
-  #Re-fit with REML
-  ssn_miv_pred_final <- quick_miv_ssn(
-    mean_richness ~ DurD_samp + country:DurD_samp + 
-      sqrt(basin_area_km2) + country:sqrt(basin_area_km2),
+  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
+  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
+  
+  summary(ssn_mod_predictions_covtypes$ssn_list$linear_none_none)
+  varcomp(ssn_mod_predictions_covtypes$ssn_list$linear_none_none)
+  
+  #Re-fit final model with REML
+  ssn_miv_pred_final <- ssn_glm(
+    formula =  ssn_mod_predictions_covtypes$ssn_list$linear_none_none$formula,
+    family = 'nbinomial',
+    ssn.object = ssn_miv,
+    taildown_type = 'linear',
+    tailup_type = 'none',
+    euclid_type = 'none',
+    additive = "afv_qsqrt",
+    partition_factor = ~ country,
+    random = NULL,
     estmethod = 'reml'
   )
   
-  ssn_miv_mod_preds <- augment(ssn_miv_pred_final,
-                               drop=F)
+  ssn_miv_mod_preds <- augment(ssn_miv_pred_final, drop=F)
   
   if (interactive) {
     tidy(miv_rich_modlist[['mod34']])
@@ -6329,7 +6460,8 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     #Check predictions
     ggplot(data=ssn_miv_mod_preds, aes(x=.fitted, y=mean_richness)) +
       geom_point(aes(color=stream_type)) +
-      geom_smooth(method='gam') +
+      geom_smooth(method='lm') +
+      geom_abline() +
       facet_wrap(~country)
   }
   
@@ -6422,39 +6554,41 @@ model_miv_yr <- function(in_ssn_eu_summarized,
 
 predict_ssn_mod <- function(in_ssn,
                             in_ssn_mods) {
+  
+  #Make map of 2021 (historical) richness
   preds_hist_pts <- augment(in_ssn_mods$ssn_mod_fit 
-                        , newdata = 'preds_hist'
-                        , interval = 'prediction'
-                        )
+                            , newdata = 'preds_hist'
+                            , drop = FALSE
+                            , type = 'response',
+                            , interval = 'prediction'
+  )
   
-  ggplot() +
-    geom_sf(data = in_ssn$miv_nopools$ssn$edges) +
-    geom_sf(data =   preds_hist_pts, aes(color = .fitted), size = 2) +
-    scale_color_viridis_c(option = "H") +
-    theme_bw() +
-    facet_wrap(~country)
+  ssn_preds <- in_ssn_mods$ssn_mod_fit$ssn.object
+  ssn_preds$edges <- merge(
+    in_ssn_mods$ssn_mod_fit$ssn.object$edges,
+    st_drop_geometry(preds_hist_pts[, c('rid', '.fitted', '.lower', '.upper')]),
+    by = 'rid', all.x=T)
   
-  map_ssn_sites_util(in_ssn = in_ssn$miv_nopools$ssn,
-                     )
   
-  facet_ssn_maps(in_ssn = in_ssn$miv_nopools$ssn, 
-                 in_pts = preds_hist_pts,
-                 color_col = '.fitted', 
-                 facet_col = 'country',
-                 linewidth_col = 'qsim_avg',
-                 page_title=NULL) 
+  # map_ssn_sites_util(in_ssn=ssn_preds, 
+  #                    in_edges=filter(ssn_preds$edges, country=="France"), 
+  #                    in_pts=NULL,
+  #                    ptcolor_col=NULL, 
+  #                    ptcolor_lims=NULL,
+  #                    linewidth_col='qsim_avg', 
+  #                    linecolor_col='.fitted', 
+  #                    linecolor_lims=NULL,
+  #                    shape_col='16'
+  # )
   
-
-  
-
+  map_ssn_facets(in_ssn=ssn_preds, 
+                 facet_col='country',
+                 linewidth_col='qsim_avg',                                
+                 linecolor_col='.fitted', 
+                 shape_col='16',
+                 page_title='miv 2021 predictions'
+  )
 }
-
-# ssn_create_distmat(
-#   ssn.object = mf04p,
-#   predpts = c("pred1km", "CapeHorn"),
-#   among_predpts = TRUE,
-#   overwrite = TRUE
-# )
 
 
 ################################################################################
