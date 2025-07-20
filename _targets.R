@@ -771,7 +771,6 @@ analysis_targets <- list(
     plot_drn_hydrorichness(in_hydrocon_compiled = hydrocon_sites_compiled, 
                            in_sites_dt = sites_dt,
                            in_allvars_dt = allvars_merged$dt,
-                           in_drn_dt = drn_dt,
                            in_organism_dt = organism_dt,
                            write_plots=T,
                            out_dir=figdir) 
@@ -1022,11 +1021,18 @@ analysis_targets <- list(
   tar_target(
     ssn_summarized_maps,
     map_ssn_summarized(in_ssn_summarized = ssn_eu_summarized,
-                      in_allvars_merged = allvars_merged,
-                      selected_organism_list = organism_list)
+                       in_allvars_merged = allvars_merged,
+                       in_organism_dt = organism_dt)
   )
   ,
-
+  
+  tar_target(
+    ssn_summarized_maps_paths,
+    save_ssn_summarized_maps(in_ssn_summarized_maps = ssn_summarized_maps,
+                             out_dir = figdir) 
+  )
+  ,
+  
   tar_target(
     ssn_mods_miv_yr,
     model_miv_yr(in_ssn_eu_summarized = ssn_eu_summarized,

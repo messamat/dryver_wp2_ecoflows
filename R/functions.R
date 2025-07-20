@@ -4673,7 +4673,11 @@ map_ssn_util <- function(in_ssn,
             color = 'grey'
     ) + 
     scale_linewidth(
-      name = str_to_sentence(gsub('_', ' ', linewidth_col)),
+      name = if (linewidth_col=='qsim_avg') {
+        expression('Simulated discharge'~m^3 * s^{-1})  
+      } else {
+        str_to_sentence(gsub('_', ' ', linewidth_col))
+      },
       transform = 'sqrt',
       limits = range(in_ssn$edges[[linewidth_col]]),
       range = c(1, 2.5)
@@ -4690,7 +4694,7 @@ map_ssn_util <- function(in_ssn,
           linewidth = !!sym(linewidth_col),
           color = !!sym(linecolor_col)
         )
-      )
+      ) 
     
     if (length(setdiff(sign(linecolor_lims), 0)) == 2) {
       out_map <- out_map +
@@ -4715,9 +4719,9 @@ map_ssn_util <- function(in_ssn,
       geom_sf(
         data = in_pts,
         aes(color = get(as.character(ptcolor_col)), 
-            shape= if (!is.null(shape_col)) {get(shape_col)} else {'16'},
-            size = 3
-        )
+            shape= if (!is.null(shape_col)) {get(shape_col)} else {'16'}
+        ),
+        size = 3
       )
     
     if (!is.null(linecolor_col)) {
@@ -4730,13 +4734,13 @@ map_ssn_util <- function(in_ssn,
         n.breaks=5) 
   }
   
-  if (shape_col == 'stream_type') {
+  if (!is.null(shape_col) && (shape_col == 'stream_type')) {
     out_map <- out_map + 
       scale_shape(name='Stream type',
                   labels = c('Perennial', 'Non-perennial'))
   }
   
-  if (shape_col == '16') {
+  if (is.null(shape_col)) {
     out_map <- out_map +
       scale_shape(guide="none")
   }
@@ -4791,30 +4795,40 @@ pad_ssn_map <- function(in_edges=NULL, in_pts=NULL) {
 # page_title = paste(in_organism, in_color_col, sep=' - ')
                    
 
-# in_ssn = ssn_preds
+# in_ssn = in_ssn_summarized[[1]]$ssn
+# in_ptcolor_col = 'DurD_samp'
+# in_pts = 'obs'
+# ptcolor_col = as.character(in_ptcolor_col)
 # facet_col = 'country'
-# in_pts = NULL
-# linewidth_col='qsim_avg'
-# linecolor_col='.fitted'
-# shape_col='16'
-# ptcolor_col=NULL
-# page_title=paste('miv', 'test', sep=' - ')
-                   
+# linewidth_col = 'qsim_avg'
+# page_title = in_ptcolor_col
+# linecolor_col=NULL
+# shape_col=NULL
+
 map_ssn_facets <- function(in_ssn, 
                            facet_col,
                            in_pts = NULL,
                            linewidth_col='qsim_avg',                                
                            linecolor_col=NULL, 
-                           shape_col='16',
+                           shape_col=NULL,
                            ptcolor_col=NULL,
                            page_title=NULL) {
   
   assert_that((facet_col %in% names(in_ssn$edges)) &
                 (facet_col %in% names(in_ssn$obs)),
               msg = paste0(facet_col, ' not in in_ssn edges or obs'))
-  
   #Define the different facet values to iterate over
-  facet_vals <- unique(in_ssn$edges[[facet_col]])
+  #Order countries by level of intermittence (RelF)
+  if (facet_col == 'country') {
+    in_ssn$edges[[facet_col]] <- factor(
+      in_ssn$edges[[facet_col]],
+      levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ),
+      ordered = T)
+    facet_vals <- levels(in_ssn$edges[[facet_col]])
+  } else {
+    facet_vals <- unique(in_ssn$edges[[facet_col]])
+  }
+
   
   #Define global limits for the color scale
   if (is.null(in_pts)) {
@@ -4875,33 +4889,34 @@ map_ssn_facets <- function(in_ssn,
 #------ map_ssn_summarized -----------------------------------------------------
 # in_ssn_summarized <- tar_read(ssn_eu_summarized)
 # in_allvars_merged <- tar_read(allvars_merged)
-# selected_organism_list <- tar_read(organism_list)[1]
+# in_organism_dt = tar_read(organism_dt)
 # verbose = T
 
 map_ssn_summarized <- function(in_ssn_summarized,
                                in_allvars_merged,
-                               selected_organism_list,
-                               verbose = F) {
+                               in_organism_dt,
+                               verbose = T) {
   
   #Plot every diversity variable for each organism
   div_map_params <- expand.grid(intersect(names(in_ssn_summarized), 
-                                          selected_organism_list),
+                                          in_organism_dt$organism),
                                 in_allvars_merged$cols$div_summarized,
                                 stringsAsFactors = FALSE) %>%
     setDT %>%
-    setnames(c('organism', 'divcol'))
+    setnames(c('organism', 'divcol')) 
   
   maps_div <- mapply(
     function(in_organism, in_ptcolor_col) {
-      if (verbose) {print(paste('Mapping', in_organism, in_ptcolor_col))}
+      if (verbose) {print(paste('Mapping', in_organism_label, in_ptcolor_col))}
       
-      map_ssn_facets(in_ssn = in_ssn_summarized[[in_organism]]$ssn, 
-                     in_pts = 'obs',
-                     ptcolor_col = in_ptcolor_col, 
-                     facet_col = 'country',
-                     linewidth_col = 'qsim_avg',
-                     shape_col = 'stream_type',
-                     page_title = paste(in_organism, in_ptcolor_col, sep=' - ')
+      map_ssn_facets(
+        in_ssn = in_ssn_summarized[[in_organism]]$ssn, 
+        in_pts = 'obs',
+        ptcolor_col = in_ptcolor_col, 
+        facet_col = 'country',
+        linewidth_col = 'qsim_avg',
+        shape_col = 'stream_type',
+        page_title = in_organism_dt[organism==in_organism, organism_label]
       )
     }
     ,
@@ -4929,7 +4944,42 @@ map_ssn_summarized <- function(in_ssn_summarized,
   return(c(maps_div, maps_physvars))
 }
 
-#------ plot_drn_hydro ------------------------------------------------------
+#------ save_ssn_summarized_maps -----------------------------------------------
+# in_ssn_summarized_maps = tar_read(ssn_summarized_maps)
+# out_dir = figdir
+
+save_ssn_summarized_maps <- function(in_ssn_summarized_maps,
+                                     out_dir) {
+  
+  pname_list <- c('miv_nopools_mean_richness',
+                  'dia_mean_richness',
+                  'fun_mean_richness',
+                  'bac_mean_richness',
+                  'DurD3650past',
+                  'FreD3650past',
+                  'STcon_m10_directed_avg_samp',
+                  'STcon_m10_undirected_avg_samp',
+                  'Fdist_mean_10past_directed_avg_samp',
+                  'Fdist_mean_10past_undirected_avg_samp'
+  )
+  
+  lapply(pname_list, function(pname) {
+    out_filename <- file.path(out_dir, paste0('map_ssn_',  pname, '.png'))
+    
+    ggsave(
+      filename = out_filename,
+      plot = in_ssn_summarized_maps[[pname]],
+      width = 9,
+      height = 9,
+      units='in',
+      dpi=600
+    )
+    
+    return(out_filename)
+  })
+}
+
+#------ plot_drn_hydrorichness ------------------------------------------------------
 # in_sites_dt <- tar_read(sites_dt)
 # in_hydrocon_compiled <- tar_read(hydrocon_sites_compiled)
 # in_allvars_dt <- tar_read(allvars_merged)$dt
@@ -4939,7 +4989,6 @@ map_ssn_summarized <- function(in_ssn_summarized,
 plot_drn_hydrorichness <- function(in_hydrocon_compiled,
                                    in_sites_dt,
                                    in_allvars_dt,
-                                   in_drn_dt,
                                    in_organism_dt,
                                    write_plots=F,
                                    out_dir) {
@@ -5037,14 +5086,14 @@ plot_drn_hydrorichness <- function(in_hydrocon_compiled,
           labels = scales::label_percent(),
           sec.axis = sec_axis(
             transform = ~ . * (rich_range[[2]] - rich_range[[1]]) + rich_range[[1]],  # reverse the scaling transformation
-            name = "Taxa richness (right)"
+            name = "Taxa richness (boxplots)"
           )
         ) +
         ggtitle(label = in_organism)
       return(plot_richness)
     }) %>% setNames(unique(in_allvars_dt$organism_label))
   
-  
+  #Write plots ----------------------------------------------------------------
   if (write_plots) {
     ggsave(filename = file.path(out_dir, 'relF90past_drn.png'),
            plot = plot_relF90past,
@@ -5068,7 +5117,7 @@ plot_drn_hydrorichness <- function(in_hydrocon_compiled,
                                          in_organism_label,
                                          '.png')
                                   ),
-             plot = richness_plot_list[(in_organism_label)],
+             plot = richness_plot_list[[in_organism_label]],
              width = 10,
              height = 6,
              units='in',
