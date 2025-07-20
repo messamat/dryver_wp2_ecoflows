@@ -24,6 +24,7 @@ wp1_data_gouv_dir <- file.path('data', 'wp1', 'data_gouv') #Official WP1 data pu
 bio_dir <- file.path('data', 'wp2', '01_WP2 final data')
 #datdir <- file.path('data', 'data_annika')
 resdir <- 'results'
+figdir <- file.path(resdir, 'figures')
 
 #Set more efficient data storage
 tar_option_set(format = "qs")
@@ -742,12 +743,38 @@ analysis_targets <- list(
   ##############################################################################
   # ANALYZE DATA
   ##############################################################################
+  #All organisms: max 12
+  tar_target(
+    organism_list,
+    c('miv_nopools', 'miv_nopools_flying', 'miv_nopools_nonflying', 
+      'fun', 'dia', 'bac')
+  )
+  ,
+  
+  tar_target(
+    organism_dt,
+    data.table(
+      organism = organism_list,
+      organism_label = c('Macroinvertebrates',
+               'Macroinvertebrates - flying',
+               'Macroinvertebrates - non-flying',
+               'Fungi',
+               'Diatoms',
+               'Bacteria')
+    )
+  )
+  ,
   
   #Visualize percentage of flowing sites by DRN over time
   tar_target(
-    relF_bydrn_plot,
-    compare_drn_hydro(in_hydrocon_compiled = hydrocon_sites_compiled, 
-                      in_sites_dt = sites_dt) 
+    hydrorichness_bydrn_plot,
+    plot_drn_hydrorichness(in_hydrocon_compiled = hydrocon_sites_compiled, 
+                           in_sites_dt = sites_dt,
+                           in_allvars_dt = allvars_merged$dt,
+                           in_drn_dt = drn_dt,
+                           in_organism_dt = organism_dt,
+                           write_plots=T,
+                           out_dir=figdir) 
   )
   ,
   
@@ -802,14 +829,6 @@ analysis_targets <- list(
   tar_target(
     corplots_div_habvol,
     check_cor_div_habvol(in_allvars_merged = allvars_merged)
-  )
-  ,
-  
-  #All organisms: max 12
-  tar_target(
-    organism_list,
-    c('miv_nopools', 'miv_nopools_flying', 'miv_nopools_nonflying', 
-      'fun', 'dia', 'bac')
   )
   ,
   
@@ -940,7 +959,7 @@ analysis_targets <- list(
         model_ssn_hydrowindow(
           in_ssn = ssn_eu,
           organism = model_setup$organism,
-          formula_root = '~ log10(basin_area_km2) + log10(basin_area_km2):country',
+          formula_root = 'log10(basin_area_km2) + log10(basin_area_km2):country',
           hydro_var = model_setup$hydro_var,
           response_var = 'richness',
           ssn_covtypes = ssn_covtypes[label %in% model_setup$covtypes, ]
@@ -1016,6 +1035,7 @@ analysis_targets <- list(
                  ssn_covtypes = ssn_covtypes)
   ),
   
+  #Compute statistics for two horizons: 2041-2070 and 2071-2100
   tar_target(
     ssn_preds,
     predict_ssn_mod(in_ssn_mods = ssn_mods_miv_yr,
@@ -1026,7 +1046,6 @@ analysis_targets <- list(
 
 
 #Run for other diversity indices
-  
 list(preformatting_targets, mapped_hydrotargets, 
      combined_hydrotargets, analysis_targets) %>%
   unlist(recursive = FALSE)

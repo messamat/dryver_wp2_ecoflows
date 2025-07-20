@@ -4929,52 +4929,160 @@ map_ssn_summarized <- function(in_ssn_summarized,
   return(c(maps_div, maps_physvars))
 }
 
-#------ compare_drn_hydro ------------------------------------------------------
+#------ plot_drn_hydro ------------------------------------------------------
 # in_sites_dt <- tar_read(sites_dt)
-# in_hydrocon_compiled <- tar_read(hydrocon_compiled)
+# in_hydrocon_compiled <- tar_read(hydrocon_sites_compiled)
+# in_allvars_dt <- tar_read(allvars_merged)$dt
+# in_drn_dt = drn_dt
+# out_dir = file.path(resdir, 'figures')
 
-compare_drn_hydro <- function(in_hydrocon_compiled, in_sites_dt) {
+plot_drn_hydrorichness <- function(in_hydrocon_compiled,
+                                   in_sites_dt,
+                                   in_allvars_dt,
+                                   in_drn_dt,
+                                   in_organism_dt,
+                                   write_plots=F,
+                                   out_dir) {
   hydrocon_compiled_country <- merge(in_hydrocon_compiled, 
                                      in_sites_dt[, .(site, country)], by='site')
-  sampling_date_lims <- hydrocon_compiled_country[, list(
+  
+  sampling_date_lims <-in_allvars_dt[, list(
     max_date = max(date, na.rm=T),
     min_date = min(date, na.rm=T)), by=country]
   
-  plot_relF90past <- ggplot(
-    hydrocon_compiled_country[!duplicated(paste(country ,date)),]) +
-    geom_area(aes(x=date, y=relF90past), fill='#2b8cbe') +
+  hydrocon_compiled_country[, country := factor(
+    country,
+    levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ))]
+  
+  hydrocon_compiled_country[, relD90past := 1-relF90past]
+  relF_melt <- hydrocon_compiled_country[!duplicated(paste(country ,date)),] %>%
+    melt(id.vars=c('country', 'date'), measure.vars = c('relF90past', 'relD90past'))
+  
+  plot_relF90past <- ggplot(relF_melt) +
+    geom_area(aes(x=date, y=value, fill=variable), alpha=0.7) +
+    scale_fill_manual(
+      name = 'Flow status',
+      values=c('#2b8cbe', '#feb24c'),
+      labels=c('Flowing', 'Non-flowing')) +
     geom_rect(data=sampling_date_lims, 
               aes(ymin=0, ymax=1, 
                   xmin=max_date, xmax=max(sampling_date_lims$max_date)),
-              fill = 'grey') +
+              fill = 'white', alpha=0.8) +
     geom_rect(data=sampling_date_lims, 
               aes(ymin=0, ymax=1, 
                   xmin=min(sampling_date_lims$min_date), xmax=min_date),
-              fill = 'grey') +
+              fill = 'white', alpha=0.8) +
     coord_cartesian(expand = FALSE) +
-    facet_grid(~country) +
-    theme_classic() +
-    theme(panel.background = element_rect(fill='#feb24c'))
+    scale_x_date(name = 'Date') +
+    scale_y_continuous(name=str_wrap(
+      'Mean % of network flowing/non-flowing over previous 90 days',
+      40),
+      labels = scales::label_percent()) +
+    facet_wrap(~as.factor(country)) +
+    theme_classic()  +
+    theme(
+      legend.position = "right",
+      legend.justification = c(0, 1),     # Top-left corner of legend box
+      legend.box.just = "top",            # Align legend at the top of its box
+      legend.box.margin = margin(10, 10, 10, 10),
+      plot.margin = margin(10, 50, 10, 10) # Add space on the right
+    )
   
-  # ggplot(hydrocon_compiled_country,
-  #        aes(x=date, y=DurD90past, color = site)) +
-  #   geom_line() +
-  #   geom_smooth(color='black', method='gam') +
-  #   coord_cartesian(expand = FALSE) +
-  #   facet_grid(~country) +
-  #   theme_classic() +
-  #   theme(legend.position = 'none')
-  # 
-  # ggplot(hydrocon_compiled_country,
-  #        aes(x=date, y=PDurD90past, color = site)) +
-  #   geom_line() +
-  #   geom_smooth(color='black', method='gam') +
-  #   coord_cartesian(expand = FALSE) +
-  #   facet_grid(~country) +
-  #   theme_classic() +
-  #   theme(legend.position = 'none')
+  #Plot sampling campaigns -----------------------------------------------------
+  plot_relF90past_sampling <- plot_relF90past +
+    geom_vline(data=in_allvars_dt, aes(xintercept=date, color=campaign), 
+               linewidth=1) +
+    scale_color_gradient(name='Campaign', low='black', high='grey') 
   
-  return(plot_relF90past)
+  #Plot diversity over time -----------------------------------------------------
+  in_allvars_dt <- in_allvars_dt %>%
+    setorderv(c('organism', 'country', 'site', 'date')) %>%
+    .[, #Compute change in richness in individual sites over time scaled to 1
+      richness_tstandard := richness - .SD[1, richness], 
+      by = c('organism', 'country', 'site')] %>%
+    .[, #COmpute mean campaign date for boxplot representation
+      mean_campaign_date := mean(date, na.rm=T),
+      by = c('organism', 'country', 'campaign')] %>%
+    .[,`:=`(richness_tstandard_scaled = scales::rescale(richness_tstandard),
+           richness_scaled = scales::rescale(richness)),
+     by = c('organism')] %>% 
+    merge(in_organism_dt, by='organism')
+  
+  richness_plot_list <- lapply(
+    unique(in_allvars_dt$organism_label), function(in_organism) {
+      dt_sub <- in_allvars_dt[organism_label==in_organism,]
+      
+      campaign_color_scale <- dt_sub[, uniqueN(campaign)] %>%
+        seq(0, 1, length.out=.) %>%
+        scales::pal_seq_gradient("black", "black")(.)
+      
+      rich_range <- range(dt_sub[, richness])
+      
+      plot_richness <- plot_relF90past + 
+        new_scale('fill') +
+        geom_boxplot(data=dt_sub,
+                     aes(x=mean_campaign_date, y=richness_scaled,
+                         color = factor(campaign), fill = stream_type),
+                     outliers=T,
+                     width = 20,
+                     position = position_dodge(preserve = "single")) +
+        scale_colour_manual(name='Campaign', 
+                            values=campaign_color_scale,
+                            guide='none') +
+        scale_fill_manual(name = 'Stream type',
+                          values=c('#2b8cbe', '#feb24c'),
+                          labels = c('Perennial', 'Non-perennial')) +
+        scale_y_continuous(
+          name = "Mean % of network flowing/non-flowing (background)",
+          labels = scales::label_percent(),
+          sec.axis = sec_axis(
+            transform = ~ . * (rich_range[[2]] - rich_range[[1]]) + rich_range[[1]],  # reverse the scaling transformation
+            name = "Taxa richness (right)"
+          )
+        ) +
+        ggtitle(label = in_organism)
+      return(plot_richness)
+    }) %>% setNames(unique(in_allvars_dt$organism_label))
+  
+  
+  if (write_plots) {
+    ggsave(filename = file.path(out_dir, 'relF90past_drn.png'),
+           plot = plot_relF90past,
+           width = 10,
+           height = 6,
+           units='in',
+           dpi=600
+           )
+    
+    ggsave(filename = file.path(out_dir, 'relF90past_drn_sampling.png'),
+           plot = plot_relF90past_sampling,
+           width = 10,
+           height = 6,
+           units='in',
+           dpi=600
+    )
+    
+    lapply(names(richness_plot_list), function(in_organism_label) {
+      ggsave(filename = file.path(out_dir, 
+                                  paste0('relF90past_drn_richness_',
+                                         in_organism_label,
+                                         '.png')
+                                  ),
+             plot = richness_plot_list[(in_organism_label)],
+             width = 10,
+             height = 6,
+             units='in',
+             dpi=600
+      )
+    })
+  }
+  
+  return(list(
+    hydro = plot_relF90past,
+    hydro_sampling =  plot_relF90past_sampling,
+    richness_list = richness_plot_list
+  )
+  )
 }
 
 #------ check_diversity_dependence_on_habitat_volume ---------------------------
@@ -6324,6 +6432,8 @@ model_miv_yr <- function(in_ssn_eu_summarized,
   
   miv_rich_modlist[['mod43']] <- quick_miv_ssn(mean_richness ~ DurD3650past + stream_type + country:stream_type + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)) 
   
+  # miv_rich_modlist[['mod44']] <- quick_miv_ssn(mean_richness ~ DurD_samp*Fdist_mean_10past_undirected_avg_samp + country:DurD_samp + sqrt(basin_area_km2) + country:sqrt(basin_area_km2))
+  
   #Summary table
   mod_perf_tab <- lapply(miv_rich_modlist, function(x) {
     cbind(Reduce(paste, deparse(x$formula)), 
@@ -6723,129 +6833,12 @@ map_ssn_mod <- function(in_ssn,
 #   facet_wrap(~country)
 
 
-################################################################################
-################################################################################
 
-#   alpha_env_melt <- melt(
-#     alphadat_env_dt,
-#     id.vars = idcols,
-#     measure.vars = predcols
-#   )
-#   
-#   alpha_env_cor_drn_type <- alpha_env_melt[, list(
-#     cor = .SD[!is.na(value),
-#               cor(richness, value, method='spearman')]),
-#     , by=c('drn', 'variable', 'organism', 'stream_type', 'nsim')] %>%
-#     .[,  list(mean_spr = mean(cor, na.rm=T),
-#               sd_spr = sd(cor, na.rm=T)),
-#       by=c('drn', 'variable', 'organism', 'stream_type')]
-#   
-#   #Compute correlation between all predictor variables and species richness
-#   #by organism and drn, then average across DRNs
-#   alpha_env_cor_drn <- alpha_env_melt[, list(
-#     cor = .SD[!is.na(value),
-#               cor(richness, value, method='spearman')]),
-#     , by=c('drn', 'variable', 'organism', 'nsim')] %>%
-#     .[,  list(mean_spr = mean(cor, na.rm=T), #Average across RF sims
-#               sd_spr = sd(cor, na.rm=T)),
-#       by=c('drn', 'variable', 'organism')]
-#   
-#   alpha_env_cor_avg <- alpha_env_cor_drn[
-#     , list(mean_spr = mean(mean_spr, na.rm=T)),
-#     by = c('variable', 'organism')]
-#   
-#   ggplot(alpha_env_cor_avg[
-#     abs(mean_spr) > 0.2 &
-#       !(organism %in% c('miv_nopools', 'miv_nopools_flying',
-#                         'miv_nopools_nonflying', 'bac_biof')),],
-#     aes(x=tidytext::reorder_within(variable, mean_spr, within=organism),
-#         y=mean_spr)) +
-#     geom_bar(aes(fill = mean_spr), stat='identity') +
-#     scale_fill_distiller(palette='Spectral', direction=1,
-#                          breaks = seq(-1, 1, 0.1)) +
-#     tidytext::scale_x_reordered(name = 'Candidate predictor variable') +
-#     scale_y_discrete(name = "Mean Spearman's correlation across DRNs", expand=c(0,0)) +
-#     facet_wrap(~organism, scales='free', nrow = 1) +
-#     coord_flip() +
-#     theme_bw()
-#   
-#   
-# }
-# 
-# env_dd_dep_cormat <- dcast(env_dd_dep_cor, NOM+INSEE_DEP~description,
-#                            value.var='cor')
-# mat_names <-  env_dd_dep_cormat$NOM
-# env_dd_dep_cormat <- as.matrix(env_dd_dep_cormat[, -c('NOM', 'INSEE_DEP')])
-# row.names(env_dd_dep_cormat) <- mat_names
-# 
-# #Heatmap of correlation between drainage density ratio and variables----------
-# colnames(env_dd_dep_cormat) <- 
-#   gsub("gw", "gw",
-#        gsub("surface water", "sw",
-#             gsub("water withdrawals", "ww", colnames(env_dd_dep_cormat))))
-# 
-# max(env_dd_dep_cormat, na.rm=T)
-# min(env_dd_dep_cormat, na.rm=T)
-# 
-# env_dd_dep_cormat_avg_morecl <- env_dd_dep_cormat[env_dd_dep_hclust_avg$order,]
-# #as.data.table(env_dd_dendo_avg_morecl[[1]])[order(ID),order(gclass)],]
-# 
-# class_colors_avg_morecl <- classcol[as.data.table(
-#   env_dd_dendo_avg_morecl[[1]])[order(gclass, ID),gclass]]
-# 
-# env_ddratio_corheatmap_avg_morecl <- 
-#   ggcorrplot(corr=env_dd_dep_cormat_avg_morecl, #method = "circle", 
-#              #hc.order = TRUE, hc.method = 'average',
-#              lab=T, lab_size =3,
-#              digits=1, insig='blank',
-#              outline.color = "white") +
-#   scale_fill_distiller(
-#     name=str_wrap("Correlation coefficient Spearman's rho", 20),
-#     palette='RdBu', 
-#     limits=c(-0.8, 0.81), 
-#     breaks=c(-0.7, -0.5, 0, 0.5, 0.7))  +
-#   coord_flip() +
-#   theme(axis.text.y = ggtext::element_markdown(
-#     colour = class_colors_avg_morecl))
-# 
-# #Plot heatmap of env-dd correlations, clustered
-# env_dd_dep_cormat_ward_morecl <- env_dd_dep_cormat[env_dd_dep_hclust_ward$order,]
-# 
-# class_colors_ward_morecl <- classcol[as.data.table(
-#   env_dd_dendo_ward_morecl[[1]])[order(gclass, ID),gclass]]
-# 
-# 
-# env_ddratio_corheatmap_ward_morecl <- 
-#   ggcorrplot(env_dd_dep_cormat_ward_morecl, #method = "circle", 
-#              #hc.order = TRUE, hc.method = 'average',
-#              lab=T, lab_size =3,
-#              digits=1, insig='blank',
-#              outline.color = "white") +
-#   scale_fill_distiller(
-#     name=str_wrap("Correlation coefficient Spearman's rho", 20),
-#     palette='RdBu', 
-#     limits=c(-0.81, 0.81), 
-#     breaks=c(-0.7, -0.5, 0, 0.5, 0.7))  +
-#   coord_flip() +
-#   theme(axis.text.y = element_text(
-#     colour = class_colors_ward_morecl))
+################################################################################
+################################################################################
 
 #------ tabulate_cor_matrix ----------------------------------------------------
-#------ plot_spdiv_local -------------------------------------------------------
 #------ plot_spdiv_drn ---------------------------------------------------------
-#------ train_lme_aspatial -----------------------------------------------------
-#------ analyze_residuals_autocor ----------------------------------------------
-#------ train_lme_ssn ----------------------------------------------------------
-
-
-#------ model_SSN --------------------------------------------------------------
-
-# in_ssn <- tar_read(ssn_list)[[in_country]]$ssn
-# SSN2::ssn_create_distmat(in_ssn, overwrite=TRUE)
-
-
-
-# merge_
 #------ plot_alpha_cor --------------------------------------------------------
 # tar_load(alphadat_merged)
 
@@ -6935,211 +6928,4 @@ plot_alpha_cor <- function(in_alphadat_merged, out_dir, facet_wrap=F) {
     discharge = plotlist_discharge
   ))
 }
-
-
-###################### OLD #####################################################
-#------ compute_null_model_inner -----------------------------------------------
-compute_null_model_inner <- function(in_dt, 
-                                     in_metacols,
-                                     min_siteN, 
-                                     method,
-                                     thin,
-                                     nsimul=999,
-                                     in_dist='jac') {
-  
-  #Remove sampling site/dates with 0 abundance across all species
-  sp_cols <- names(in_dt)[!(names(in_dt) %in% in_metacols)]
-  nonnull_sites <- in_dt[,rowSums(.SD), .SDcols=sp_cols]>0
-  in_dt_sub <- in_dt[nonnull_sites,] 
-  #Remove rate sites
-  nonrare_sites <- in_dt_sub[, .N, by=Site][N >= min_siteN, Site]
-  in_dt_sub <- in_dt_sub[Site %in% nonrare_sites,]
-  site_factorID <- as.factor(in_dt_sub$Site) #Get factor for each site
-  
-  #Only keep species that occur in at least one of the sites, and sites with at least one species
-  nonnull_cols <- in_dt_sub[, lapply(.SD, sum)>0, .SDcols=sp_cols] %>%
-    names(.)[.]
-  com <- in_dt_sub[, nonnull_cols, with=F]
-  
-  #Compute null models and compare to simulations
-  foo <-function(x, groups, ...) {
-    diag(meandist(vegdist(x, in_dist, binary =TRUE), grouping = groups))
-  }
-  oecosimu_out <- oecosimu(comm = com, nestfun = foo, method = method, 
-                           thin = thin, nsimul = nsimul, groups = site_factorID)
-  
-  #Format null model outputs
-  oecosimu_dt <- as.data.table(oecosimu_out$oecosimu)[
-    , .(statistic, z, means, pval)] %>%
-    .[, `:=`(Site = names(oecosimu_out$statistic),
-             dist = in_dist
-    )]
-  
-  return(oecosimu_dt)
-}
-
-#------ merge_env_mod ----------------------------------------
-merge_env_null_models <- function(in_null_models, in_env, in_int) {
-  res <- in_null_models[, Country := str_to_title(Country)] %>%
-    .[Country == 'Czech', Country := 'Czech Republic']
-  
-  env <- setDT(in_env) %>%
-    data.table::setnames(c('site', 'DRN'),
-                         c('Site', 'Country')) %>%
-    .[Country == 'Czech', Country := 'Czech Republic']
-  
-  int <- setDT(in_int) %>%
-    data.table::setnames('Sites', 'Site')
-  
-  int90 <- int[, list(TotDur90 = mean(TotDur, na.rm=T),
-                      TotLeng90 = mean(TotLeng, na.rm=T)), by=.(Site, Country)]
-  env_mean <- env[, list(discharge = mean(discharge_l_s, na.rm=T),
-                         moss = mean(moss_cover, na.rm=T),
-                         particle_size = mean(particle_size, na.rm=T)
-  )
-  , by=.(Site, Country, stream_type)]
-  
-  env_mods_dt <- merge(res, int90, by=c("Site", "Country"), all.x=T, sort=F) %>%
-    merge(env_mean, by=c("Site", "Country"), all.x=T, sort=F) %>%
-    .[Site != 'BUK52', ] %>% #Intermittence indicators are missing here 
-    .[, Country := as.factor(Country)] %>%
-    .[, significance := fifelse(pval <= 0.05, "sig", "nonsig")]
-  
-  return(env_mods_dt)
-}
-
-#------ plot_z_by_stream_type ------------------------------
-plot_z_by_stream_type <- function(in_env_null_models_dt, outdir) {
-  plots <- list()
-  for(i in levels(in_env_null_models_dt$Country)){
-    d <- subset(in_env_null_models_dt, Country == i)
-    plots[[paste0(i)]] <- ggplot(d, aes(x=z, y=Site, color=stream_type)) + 
-      scale_colour_manual(values = c("steelblue","orange")) +
-      geom_boxplot() + 
-      coord_flip() +
-      ggtitle(paste(i)) +
-      theme_classic() +
-      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-  }
-  
-  pdf(file.path(outdir, "Null_models", 
-                paste0(unique(in_env_null_models_dt$organism), "_SES_vs_streamtype.pdf")), 
-      height=10, width=10)
-  do.call('grid.arrange', c(plots))
-  dev.off()
-}
-
-#------ plot_z_by_env ----------------------------------------
-# in_env_null_models_dt <- tar_read(env_null_models_dt)
-# env_var <- 'TotDur90'
-# outdir <- resdir 
-
-plot_z_by_env <- function(in_env_null_models_dt, env_var, outdir) {
-  #### scatterplot, all countries in the same plot, separately for each organism group ####
-  organism_list <- unique(in_env_null_models_dt$organism)
-  
-  plotlist <- lapply(organism_list, function(in_organism) {
-    print(in_organism)
-    ss <- in_env_null_models_dt[organism == in_organism] %>%
-      .[, pval_lm := coef(summary(lm(z~get(env_var), data=.SD)))[2,4], 
-        by=Country]
-    ss2 <- ss[significance == "sig",]
-    
-    p1 <- ggplot() + 
-      geom_point(aes(get(env_var), z, colour=Country), data = ss, size = 1, alpha=0.2) +
-      geom_point(aes(get(env_var), z, colour=Country), data = ss2, size = 1, alpha=0.5) +
-      geom_smooth(data=ss[pval_lm <= 0.05,], 
-                  aes(get(env_var), z, colour=Country), 
-                  method = "lm", linewidth = 0.75, se = F) + 
-      geom_smooth(data=ss[pval_lm > 0.05,], 
-                  aes(get(env_var), z, colour=Country), 
-                  method = "lm", linewidth = 0.75, se = F, linetype="dashed") +
-      geom_smooth(aes(get(env_var), z), data=ss, 
-                  colour="black", method = "lm", linewidth = 1.1, se = F) + # , linetype="dashed"
-      theme_classic() +
-      ggtitle(in_organism) + 
-      xlab(env_var) +
-      ylab("z") +
-      scale_color_manual(values = c("Croatia" = "#ef476f",
-                                    "Czech Republic" = "#f78c6b", 
-                                    "Finland" = "#ffd166", 
-                                    "France" = "#06d6a0", 
-                                    "Hungary" = "#118ab2",
-                                    "Spain" = "#073b4c")) +
-      theme(legend.position = "none")
-    
-    out_path <- file.path(outdir, "Null_models", 
-                          paste0("All_", in_organism, "_SES_vs_",
-                                 env_var, "_lm2.pdf"))
-    pdf(out_path, height=3, width=4)
-    print(p1)
-    dev.off()
-    
-    return(p1)
-  })
-  names(plotlist) <- organism_list
-  
-  return(plotlist)
-}
-
-#------ compute_lmer_mods ------------------------------------------------------
-compute_lmer_mods <- function(in_dt, in_yvar) {
-  lmer_int <- in_dt[
-    ,  list(
-      #TotDur90 models
-      TotDur90_full = list(
-        lmer(as.formula(paste(in_yvar, 
-                              "~ TotDur90 + (1|Country)")), data=.SD)),
-      TotDur90_null = list(lmer(as.formula(paste(in_yvar, 
-                                                 "~ (1|Country)")), data=.SD)),
-      TotDur90_ML = list(anova(lmer(as.formula(paste(in_yvar, 
-                                                     "~ TotDur90 + (1|Country)")), data=.SD),
-                               lmer(as.formula(paste(in_yvar, 
-                                                     "~ (1|Country)")), data=.SD))),
-      #TotLeng90 models
-      TotLeng90_full = list(lmer(as.formula(paste(in_yvar, 
-                                                  "~ TotLeng90 + (1|Country)")), data=.SD)),
-      TotLeng90_null = list(lmer(as.formula(paste(in_yvar, 
-                                                  "~ (1|Country)")), data=.SD)),
-      TotLeng90_ML = list(anova(lmer(as.formula(paste(in_yvar, 
-                                                      "~ TotLeng90 + (1|Country)")), data=.SD),
-                                lmer(as.formula(paste(in_yvar, 
-                                                      "~ (1|Country)")), data=.SD)))
-    )
-    , by=organism] 
-  return(lmer_int)
-}
-
-#------ plot_z_jitter_by_organism ----------------------------------------------
-plot_z_jitter_by_organism_inner <- function(in_dt) {
-  jitter_p <- ggplot(in_dt) + 
-    scale_y_continuous() +
-    geom_jitter(aes(Country, z, colour=significance), 
-                shape=16, size = 2, alpha=0.7, position=position_jitter(0.2)) +
-    theme_classic() +
-    theme(axis.title.x = element_blank()) +
-    labs(y = "z") +
-    ggtitle(unique(in_dt$organism)) +
-    scale_color_manual(values = c("sig" = "mediumblue",
-                                  "nonsig" = "lightslateblue")) +
-    labs(colour = "Departure from zero") +
-    theme(axis.text.x = element_text(angle = 70, vjust = 1, hjust=1),
-          legend.position = 'non')
-  return(jitter_p)
-}
-
-plot_z_jitter_by_organism <- function(in_env_null_models_dt, outdir) {
-  plots_jitter <- list()
-  for (in_organism in unique(in_env_null_models_dt$organism)) {
-    print(in_organism)
-    plots_jitter[[in_organism]] <- plot_z_jitter_by_organism_inner(
-      in_dt = in_env_null_models_dt[organism==in_organism,])
-  }
-  
-  pdf(file.path(outdir, "Null_models", "Jitterplots_SES_significance.pdf"),
-      height=10, width=6)
-  do.call("grid.arrange", c(plots_jitter, ncol=2))
-  dev.off()
-}
-
 
