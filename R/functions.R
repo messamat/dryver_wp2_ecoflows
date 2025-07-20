@@ -4907,7 +4907,7 @@ map_ssn_summarized <- function(in_ssn_summarized,
   
   maps_div <- mapply(
     function(in_organism, in_ptcolor_col) {
-      if (verbose) {print(paste('Mapping', in_organism_label, in_ptcolor_col))}
+      if (verbose) {print(paste('Mapping', in_organism, in_ptcolor_col))}
       
       map_ssn_facets(
         in_ssn = in_ssn_summarized[[in_organism]]$ssn, 
