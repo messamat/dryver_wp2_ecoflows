@@ -14,6 +14,7 @@ pkg_vec <- list(
   'ggplot2',
   'ggspatial',
   'gridExtra',
+  'gt',
   'Hmisc',
   'igraph',
   'lmerTest', 

@@ -778,6 +778,28 @@ analysis_targets <- list(
   ,
   
   tar_target(
+    hydrowindow_lm_scatter,
+    plot_scatter_lm(in_allvars_merged=allvars_merged, 
+                    temporal_var_substr='DurD', 
+                    response_var='richness',
+                    in_organism_dt = organism_dt,
+                    colors_list=drn_dt$color,
+                    write_plots=T, 
+                    plot_name_suffix="", 
+                    out_dir=figdir)
+  )
+  ,
+  
+  tar_target(
+    area_div_scatter,
+    plot_areadiv_scatter(in_dt=allvars_merged$dt_summarized,
+                         in_organism_dt=organism_dt,
+                         write_plots=T,
+                         out_dir = figdir)
+  )
+  ,
+
+  tar_target(
     biof_vs_sedi_plots,
     plot_edna_biof_vs_sedi(in_allvars_merged=allvars_merged) 
   )
@@ -934,6 +956,14 @@ analysis_targets <- list(
       #Attach covtypes to each setup
       model_setup_list <- list()
       for (org in unique(covtypes_by_organism$organism)) {
+        #Add 'null' model (without the hydrovar)
+        model_setup_list[[length(model_setup_list) + 1]] <- list(
+          organism = org,
+          hydro_var = NULL,
+          covtypes = covtypes_by_organism[organism==org,]$covtypes[[1]]
+        )
+        
+        #Add all hydrovars
         for (hv in hydro_vars_forssn) {
           model_setup_list[[length(model_setup_list) + 1]] <- list(
             organism = org,
@@ -992,6 +1022,15 @@ analysis_targets <- list(
     }
   )
   ,
+  
+  tar_target(
+    ssn_richness_hydrowindow_plots_paths,
+    save_ssn_richness_hydrowindow_plots(
+      in_ssn_richness_hydrowindow_formatted = ssn_richness_hydrowindow_formatted,
+      out_dir = figdir
+    )
+  )
+  ,
   ##############################################################################
   # MODEL SITES SUMMARIZED
   ##############################################################################
@@ -1041,6 +1080,14 @@ analysis_targets <- list(
                  ssn_covtypes = ssn_covtypes)
   ),
   
+  
+  tar_target(
+    ssn_mods_miv_yr_diagnose,
+    diagnose_ssn_mod(in_ssn_mods=ssn_mods_miv_yr,
+                     write_plots=T,
+                     out_dir=figdir)
+  ),
+
   #Compute statistics for two horizons: 2041-2070 and 2071-2100
   tar_target(
     ssn_preds,

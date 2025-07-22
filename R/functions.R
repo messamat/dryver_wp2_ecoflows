@@ -2537,7 +2537,7 @@ reassign_netids <- function(rivnet_path, strahler_dt,
           by.x='cat_cor', by.y='ID_hydromod', all.x=T) %>%
     .[, hydromod_shpcor_match := (to_reach_hydromod == to_reach_shpcor)] %>%
     merge(in_reaches_attri_dt, by.x='cat_cor', by.y='ID', all.x=T)
-
+  
   #Check for discrepancies between old and new reach data... few
   check <- out_rivnet[length_hydromod != length_datagouv,]
   
@@ -3526,8 +3526,8 @@ compile_hydrocon_sites_country <- function(in_hydrostats_sub_comb,
 #and connectivity statistics
 #keep one year
 summarize_sites_hydrocon <- function(in_hydrocon_compiled
-                                        #, date_range
-                                        ) {
+                                     #, date_range
+) {
   hydrocon_summmarized <- in_hydrocon_compiled[
     #(date >= min(date_range)) &   (date <= max(date_range))
     , list( #`:=`
@@ -3589,10 +3589,10 @@ summarize_network_hydrostats <- function(
     by=reach_id] 
   
   isflowing_samp_dt <- isflowing_country$data_all[
-      (date >= min(in_samp_date_range)) &
-        (date <= max(in_samp_date_range)),  
-      list(DurD_samp = sum(isflowing==0)/.N), 
-      by=reach_id] 
+    (date >= min(in_samp_date_range)) &
+      (date <= max(in_samp_date_range)),  
+    list(DurD_samp = sum(isflowing==0)/.N), 
+    by=reach_id] 
   
   hydrostats_net <- mergeDTlist(
     list(qsim_all_dt, qsim_samp_dt, isflowing_samp_dt),
@@ -3731,7 +3731,7 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path) {
   }
   
   return(cbind(stats_dt, metadata_dt[, .(catchment, gcm, scenario)])
-    )
+  )
 }
 
 #------ merge_allvars_sites ----------------------------------------------------
@@ -4072,16 +4072,16 @@ plot_cor_heatmaps <- function(in_cor_matrices,
   # # --- 1. Hydro Correlation ---
   # Extract the correlation and p-value matrices for hydro
   cor_matrix_hydro <- dcast(in_cor_matrices$hydro, 
-                               variable1 ~ variable2, 
-                               value.var = "correlation")
+                            variable1 ~ variable2, 
+                            value.var = "correlation")
   rnames <- cor_matrix_hydro$variable1
   cor_matrix_hydro <- as.matrix(cor_matrix_hydro[, -1])
   rownames(cor_matrix_hydro) <- rnames
   cor_matrix_hydro[is.na(cor_matrix_hydro)] <- 0
   
   p_matrix_hydro <- dcast(in_cor_matrices$hydro, 
-                             variable1 ~ variable2, 
-                             value.var = "p_value")
+                          variable1 ~ variable2, 
+                          value.var = "p_value")
   p_matrix_hydro <- as.matrix(p_matrix_hydro[, -1])
   rownames(p_matrix_hydro) <- rnames
   p_matrix_hydro[is.na(p_matrix_hydro)] <- 1L
@@ -4376,12 +4376,12 @@ create_ssn_preds <- function(in_network_path,
   net_centroids <- net_proj
   net_centroids$geometry <- st_line_sample(net_proj, sample=0.5) %>%
     st_cast('POINT')
-
+  
   net_predpts_hist <- merge(net_centroids, 
-                             in_hydrostats_net_hist,
-                             by.x = c('cat', 'country'), 
-                             by.y = c('reach_id', 'country'),
-                             all.x=T
+                            in_hydrostats_net_hist,
+                            by.x = c('cat', 'country'), 
+                            by.y = c('reach_id', 'country'),
+                            all.x=T
   ) %>%
     rename(c('basin_area_km2'='upstream_area_net'))
   
@@ -4477,7 +4477,7 @@ create_ssn_europe <- function(in_network_path,
     topo_tolerance = 20,
     overwrite = overwrite
   )
-
+  
   #Incorporate sites into the landscape network --------------------------------
   #Incorporate observation sites-----
   sites_eu <- lapply(names(in_sites_path), function(in_country) {
@@ -4542,7 +4542,7 @@ create_ssn_europe <- function(in_network_path,
     
     sites_list$preds_proj <- preds_proj_lsn
   }
-
+  
   #Incorporate barriers into the landscape network
   #Only keep barriers over 2 m and under 100 m snap from network
   barriers_eu_sub <- lapply(names(in_barriers_path), function(in_country) {
@@ -4711,7 +4711,7 @@ map_ssn_util <- function(in_ssn,
           limits = linecolor_lims,
           n.breaks=5) 
     }
-
+    
   }
   
   if (!is.null(in_pts)) {
@@ -4793,7 +4793,7 @@ pad_ssn_map <- function(in_edges=NULL, in_pts=NULL) {
 # facet_col = 'country'
 # linewidth_col = 'qsim_avg'
 # page_title = paste(in_organism, in_color_col, sep=' - ')
-                   
+
 
 # in_ssn = in_ssn_summarized[[1]]$ssn
 # in_ptcolor_col = 'DurD_samp'
@@ -4828,7 +4828,7 @@ map_ssn_facets <- function(in_ssn,
   } else {
     facet_vals <- unique(in_ssn$edges[[facet_col]])
   }
-
+  
   
   #Define global limits for the color scale
   if (is.null(in_pts)) {
@@ -4871,7 +4871,7 @@ map_ssn_facets <- function(in_ssn,
       shape_col = shape_col,
       ptcolor_col = ptcolor_col, 
       ptcolor_lims = ptcolor_lims
-      ) +
+    ) +
       ggtitle(facet_i) +
       coord_sf(xlim = map_lims$xlim, 
                ylim = map_lims$ylim) +
@@ -4881,7 +4881,7 @@ map_ssn_facets <- function(in_ssn,
   map_patchwork <- patchwork::wrap_plots(map_list, ncol=2) +
     plot_layout(guides = 'collect') +
     plot_annotation(page_title)
-
+  
   return(map_patchwork)
 }
 
@@ -5001,7 +5001,8 @@ plot_drn_hydrorichness <- function(in_hydrocon_compiled,
   
   hydrocon_compiled_country[, country := factor(
     country,
-    levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ))]
+    levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ),
+    ordered=T)]
   
   hydrocon_compiled_country[, relD90past := 1-relF90past]
   relF_melt <- hydrocon_compiled_country[!duplicated(paste(country ,date)),] %>%
@@ -5053,8 +5054,8 @@ plot_drn_hydrorichness <- function(in_hydrocon_compiled,
       mean_campaign_date := mean(date, na.rm=T),
       by = c('organism', 'country', 'campaign')] %>%
     .[,`:=`(richness_tstandard_scaled = scales::rescale(richness_tstandard),
-           richness_scaled = scales::rescale(richness)),
-     by = c('organism')] %>% 
+            richness_scaled = scales::rescale(richness)),
+      by = c('organism')] %>% 
     merge(in_organism_dt, by='organism')
   
   richness_plot_list <- lapply(
@@ -5101,7 +5102,7 @@ plot_drn_hydrorichness <- function(in_hydrocon_compiled,
            height = 6,
            units='in',
            dpi=600
-           )
+    )
     
     ggsave(filename = file.path(out_dir, 'relF90past_drn_sampling.png'),
            plot = plot_relF90past_sampling,
@@ -5116,12 +5117,12 @@ plot_drn_hydrorichness <- function(in_hydrocon_compiled,
                                   paste0('relF90past_drn_richness_',
                                          in_organism_label,
                                          '.png')
-                                  ),
-             plot = richness_plot_list[[in_organism_label]],
-             width = 10,
-             height = 6,
-             units='in',
-             dpi=600
+      ),
+      plot = richness_plot_list[[in_organism_label]],
+      width = 10,
+      height = 6,
+      units='in',
+      dpi=600
       )
     })
   }
@@ -5195,6 +5196,75 @@ check_cor_div_habvol <- function(in_allvars_merged) {
 }
 
 
+#------ plot_areadiv_scatter ---------------------------------------------------
+# in_dt=tar_read(allvars_merged)$dt_summarized
+# in_organism_dt <- tar_read(organism_dt)
+# save_plots=T
+# out_dir = figdir
+
+plot_areadiv_scatter <- function(in_dt,
+                                 in_organism_dt,
+                                 write_plots=T,
+                                 out_dir=NULL) {
+  in_dt_labels <- merge(in_dt,
+                        in_organism_dt,
+                        by='organism', all.x=F) %>%
+    .[, country := factor(
+      country, 
+      levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ),
+      ordered=T)] %>%
+    .[organism != c('miv_nopools_flying', 'miv_nopools_noflying')]
+  
+  plot_area_rich <- ggplot(in_dt_labels, 
+                           aes(x=basin_area_km2, y=mean_richness)) +
+    geom_point(aes(color=stream_type)) +
+    geom_smooth(aes(color=stream_type), method='gam', se=F) +
+    geom_smooth(method='gam', color='black', se=F) +
+    scale_x_log10(name=expression('Basin area'~km^2))  +
+    scale_y_continuous(name='Mean site taxonomic richness') +
+    scale_color_manual(name = 'Stream type',
+                       values=c('#2b8cbe', '#feb24c'),
+                       labels = c('Perennial', 'Non-perennial')) +
+    facet_grid(organism_label~country, scales='free') +
+    theme_bw()
+  
+  plot_qsim_rich <- ggplot(in_dt_labels, 
+                           aes(x=qsim_avg_samp, y=mean_richness)) +
+    geom_point(aes(color=stream_type)) +
+    geom_smooth(aes(color=stream_type), method='lm', se=F) +
+    geom_smooth(method='gam', color='black', se=F) +
+    scale_x_log10(name=expression('Mean simulated discharge during sampling period'~m^3~s^-1))  +
+    scale_y_continuous(name='Mean site taxonomic richness') +
+    scale_color_manual(name = 'Stream type',
+                       values=c('#2b8cbe', '#feb24c'),
+                       labels = c('Perennial', 'Non-perennial')) +
+    facet_grid(organism_label~country, scales='free') +
+    theme_bw()
+  
+  if (write_plots) {
+    ggsave(filename = file.path(out_dir, 'scatter_area_meanrichness.png'),
+           plot = plot_area_rich,
+           width = 12,
+           height = 8,
+           units='in',
+           dpi=600
+    )
+    
+    ggsave(filename = file.path(out_dir, 'scatter_qsim_meanrichness.png'),
+           plot = plot_qsim_rich,
+           width = 12,
+           height = 8,
+           units='in',
+           dpi=600
+    )
+  }
+  
+  return(list(
+    area = plot_area_rich,
+    qsim = plot_qsim_rich
+  ))
+}
+
 #------ plot_cor_hydrowindow  --------------------------------------------------
 #For hydrological variables check by time window
 
@@ -5242,7 +5312,7 @@ plot_cor_hydrowindow <-  function(in_cor_dt, temporal_var_substr, response_var_l
 }
 
 #------ plot_scatter_lm --------------------------------------------------
-# hydrovar_list <- c('DurD', 'PDurD', 'FreD', 'PFreD', 
+# hydrovar_list <- c('DurD', 'PDurD', 'FreD', 'PFreD',
 #                    'uQ90', 'oQ10', 'maxPQ', 'PmeanQ',
 #                    'STcon.*_directed', 'STcon.*_undirected')
 # temporal_var_substr <- 'DurD'
@@ -5250,20 +5320,43 @@ plot_cor_hydrowindow <-  function(in_cor_dt, temporal_var_substr, response_var_l
 # response_var = 'richness' #c('richness', 'invsimpson','Jtm1'),
 # colors_list = drn_dt$color
 # plot=T
-# out_dir = resdir
+# out_dir = figdir
+# in_organism_dt <- tar_read(organism_dt)
+# plot_name_suffix = ''
+# 
+# in_allvars_merged=tar_read(allvars_merged)
+# temporal_var_substr='DurD'
+# response_var='richness'
+# in_organism_dt = tar_read(organism_dt)
+# colors_list=drn_dt$color
+# write_plots=T
+# plot_name_suffix=""
+# out_dir=figdir
 
-plot_scatter_lm <-  function(in_allvars_merged, temporal_var_substr, response_var,
-                             colors_list, save_plot=T, plot_name_suffix="", out_dir) {
+plot_scatter_lm <-  function(in_allvars_merged, 
+                             in_organism_dt,
+                             temporal_var_substr, 
+                             response_var,
+                             colors_list, 
+                             write_plots=T,
+                             plot_name_suffix="", 
+                             out_dir) {
   
   dt <- in_allvars_merged$dt
   x_cols <- grep(paste0('^', temporal_var_substr), names(dt), value=T) %>%
     .[seq(1, length(.), 2)]
   
   dt_melt <- melt(dt, 
-                  id.vars=c(in_allvars_merged$cols$group_cols, response_var), 
-                  measure.vars=x_cols)
+                  id.vars=intersect(
+                    c(in_allvars_merged$cols$group_cols, response_var), 
+                    names(dt)
+                  ),
+                  measure.vars=x_cols) 
+  dt_melt[, country := factor(
+    country,
+    levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ))]
   
-  p_lm <- ggplot(dt_melt, 
+  p_lm <- ggplot(dt_melt[organism %in% in_organism_dt$organism,], 
                  aes_string(x='value', y=response_var, color='country')) +
     geom_point(alpha=0.5) +
     geom_smooth(method='lm', se=F) +
@@ -5272,11 +5365,11 @@ plot_scatter_lm <-  function(in_allvars_merged, temporal_var_substr, response_va
     facet_grid(organism~variable, scales='free') +
     theme_bw()
   
-  if (save_plot) {
+  if (write_plots) {
     out_path <- file.path(out_dir, paste0('plot_lm_', temporal_var_substr, '_',
                                           response_var, plot_name_suffix, '.png'))
     ggsave(out_path, plot = p_lm, 
-           height = 15, width = 15, units='in', dpi = 300)
+           height = 12, width = 12, units='in', dpi = 300)
   }
   
   return(p_lm)
@@ -5328,7 +5421,7 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
           estmethod = estmethod
         )
       }
-
+      
       fit$fit_status <- "ok"
       return(fit)
       
@@ -5391,10 +5484,13 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
   #                   names(in_ssn[[organism]]$ssn$obs), 
   #                   value=T)
   
-  full_formula <- paste0(response_var, ' ~ ', hydro_var, ' + ',
-                         hydro_var, ':country +', formula_root)
-  
-  
+  if (!is.null(hydro_var)) {
+    full_formula <- paste0(response_var, ' ~ ', hydro_var, ' + ',
+                           hydro_var, ':country +', formula_root)
+  } else {
+    full_formula <- paste0(response_var, ' ~ ', formula_root)
+  }
+
   ssn_list <- quick_ssn(in_ssn = in_ssn[[organism]]$ssn, 
                         in_formula = as.formula(full_formula),
                         family = family,
@@ -5468,7 +5564,7 @@ plot_hydro_comparison <- function(in_cor_dt, color_list) {
 select_ssn_covariance <- function(in_ssnmodels) {
   #Rank covariance structures by average delta_AICc by organism
   ssn_glance_bind <- lapply(in_ssnmodels, `[[`, "ssn_glance") %>%
-    rbindlist
+    rbindlist(fill=T)
   
   ssn_glance_bind[, delta_AICc := (AICc - min(AICc)),
                   by=.(hydro_var, organism)] %>%
@@ -5513,6 +5609,10 @@ select_ssn_covariance <- function(in_ssnmodels) {
 # 
 # in_organism <- 'miv_nopools'
 
+# ssn_model_names <- do.call(rbind, ssn_richness_models_to_run)[,1:2] %>%
+#   as.data.table
+# in_ssnmodels <- cbind(ssn_model_names, in_ssnmodels)
+# setnames(in_ssnmodels, 'in_ssnmodels', 'ssn_richness_hydrowindow')
 
 format_ssn_hydrowindow <- function(in_ssnmodels, 
                                    in_organism, 
@@ -5530,8 +5630,9 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
         by='covtypes'
       )
     }) %>% 
-    do.call(rbind, .) %>%
-    .[covtypes==org_covtype,]
+    rbindlist(fill=T) %>%
+    .[covtypes==org_covtype,] %>%
+    .[is.na(hydro_var), hydro_var := 'null']
   remove(in_ssnmodels)
   
   #Identify covariance structure with the lowest AICc across all time windows 
@@ -5541,25 +5642,76 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
     .[, window_d := str_extract(hydro_var, '([0-9]+(?=past))|((?<=m)[0-9]+)')] %>%
     .[, window_d := factor(window_d, levels=sort(unique(as.integer(window_d))))]
   
+  #Variable labels
+  hydro_labels <- c(
+    "Null model",
+    "Proportion of no-flow days",
+    "Number of no-flow periods",
+    "Spatio-temporal connectivity - upstream",
+    "Spatio-temporal connectivity - undirected",
+    "Mean distance to the nearest flowing site - upstream",
+    "Mean distance to the nearest flowing site - undirected")
+  
+  
+  labels_dt = data.table(
+    hydro_var_root = c('null', "DurD", "FreD", 
+                       "STcon_directed", "STcon_undirected",
+                       "Fdist_mean_directed", "Fdist_mean-undirected"),
+    hydro_var_root_label = factor(hydro_labels, levels=hydro_labels, ordered=T)
+  )
+  
+  ssn_hydrowindow_perf_allvars <- merge(ssn_hydrowindow_perf_allvars,
+                                        labels_dt,
+                                        by='hydro_var_root')
+  
   #Get variance decomposition estimated by model
+  varcomp_labels <- c('Remaining variance (nugget)', 
+                      'Spatially dependent variance - euclidean',
+                      'Spatially dependent variance - taildown',
+                      'Spatially dependent variance - tailup',
+                      'Random intercept - country',
+                      'Fixed effects pseudo-R2'
+                      )
+  
   ssn_hydrowindow_varcomp <- ssn_hydrowindow_perf_allvars[
     , SSN2::varcomp(mod[[1]]), 
-    by=.(hydro_var, covtypes, hydro_var_root, window_d)] 
+    by=.(hydro_var, covtypes, hydro_var_root_label, window_d)
+  ] %>%
+    merge(data.table(
+      varcomp=c(
+        "nugget",
+        "euclid_de", "taildown_de", "tailup_de",         
+        "1 | country", "Covariates (PR-sq)"),
+      varcomp_label = factor(varcomp_labels, 
+                             levels=varcomp_labels, 
+                             ordered=T),
+      varcomp_color = c('lightgrey', '#b2df8a', '#a6cee3',
+                        '#1f78b4', '#f1b6da','#feb24c')
+    ),
+    by='varcomp')
   
   #Plot variance decomposition
   plot_ssn_hydrowindow_varcomp <- ggplot(
     ssn_hydrowindow_varcomp[proportion > 0, ],
-    aes(x = window_d, y = proportion, fill = varcomp)
+    aes(x = window_d, y = proportion, fill = varcomp_label)
   ) +
-    geom_bar(stat = "identity", position = "stack") +
+    geom_bar(stat = "identity", position = "stack", alpha=0.75) +
     geom_text(
       aes(label = round(100 * proportion)),
       position = position_stack(vjust = 0.5),
       colour = "black") +
-    facet_wrap(~hydro_var_root, scales = "free") +
+    scale_fill_manual(
+      name = 'Variance components',
+      values=ssn_hydrowindow_varcomp[
+        proportion > 0,][order(varcomp_label), unique(varcomp_color)]) +
+    scale_x_discrete('Temporal window of aggregation (days)') + 
+    scale_y_continuous('Percentage of variance', 
+                       breaks=c(0, 0.5, 1),
+                       labels = scales::label_percent()) +
+    facet_wrap(~hydro_var_root_label, scales = "free") +
     coord_cartesian(expand = FALSE) +
     theme_bw()
-  
+    
   #Plot best model for each variable for single window
   ssn_hydrowindow_best <- ssn_hydrowindow_perf_allvars[
     , .SD[which.min(AICc),], 
@@ -5692,6 +5844,47 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
     plot_x_preds = x_preds_plot,
     plot_marginal = marginal_plot
   ))
+}
+
+#------ save_ssn_richness_hydrowindow_plots ------------------------------------
+# in_ssn_richness_hydrowindow_formatted = tar_read(ssn_richness_hydrowindow_formatted)
+# out_dir = figdir
+
+save_ssn_richness_hydrowindow_plots <- function(
+    in_ssn_richness_hydrowindow_formatted,
+    out_dir) {
+  
+  lapply(names(in_ssn_richness_hydrowindow_formatted), function(in_organism) {
+    
+    fwrite(in_ssn_richness_hydrowindow_formatted[[in_organism]]$dt[, -c('mod'), with=F], 
+           file.path(out_dir, 
+                     paste0('ssn_richness_hydrowindow_perftable_', 
+                            in_organism, '.csv'))
+    )
+    
+    plot_names <- list('plot_varcomp', 'plot_obs_preds', 
+                    'plot_x_preds', 'plot_marginal')
+    
+    lapply(plot_names, function(pname) {
+      out_path <- file.path(out_dir, 
+                            paste0('ssn_richness_hydrowindow_', 
+                                   in_organism, '_',
+                                   pname, '.png'))
+      message(paste0('Saving ', out_path))
+      
+      ggsave(
+        filename = out_path,
+        plot = in_ssn_richness_hydrowindow_formatted[[in_organism]][[pname]],
+        width = 9,
+        height = 9,
+        units='in',
+        dpi=600
+      )
+      
+      return(out_path)
+    })
+  })
+  
 }
 
 #------ model_miv_t ------------------------------------------------------------
@@ -6280,7 +6473,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
       facet_wrap(~variable, scales='free_x') +
       theme_bw()
   }
-
+  
   #Settle on a basic covariance structure to start  with -----
   #Check correlation
   topcors_overall <- in_cor_matrices$div[
@@ -6330,7 +6523,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
       random_formula = NULL,
       estmethod='ml'
     )
-  
+    
     ssn_nbin_ini <- model_ssn_hydrowindow(
       in_ssn = in_ssn_eu_summarized,
       family = "nbinomial",
@@ -6370,7 +6563,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     loocv(ssn_nbin_cov$ssn_list$none_epa_none)
     loocv(ssn_nbin_cov$ssn_list$none_linear_none)
   }
-
+  
   #Set basic model structure
   quick_miv_ssn <- function(in_formula, in_random=NULL, estmethod='ml') {
     ssn_glm(
@@ -6392,16 +6585,16 @@ model_miv_yr <- function(in_ssn_eu_summarized,
   
   #Null model
   miv_rich_modlist [['null']] <- quick_miv_ssn(mean_richness ~ 1)
-
+  
   #Initial model
   miv_rich_modlist [['mod1']] <- quick_miv_ssn(mean_richness ~ sqrt(basin_area_km2))
-
+  
   miv_rich_modlist [['mod2']] <- quick_miv_ssn(mean_richness ~ country*sqrt(basin_area_km2))
-
+  
   miv_rich_modlist [['mod3']] <- quick_miv_ssn(mean_richness ~ basin_area_km2 + country:sqrt(basin_area_km2))
   
   miv_rich_modlist [['mod4']] <- quick_miv_ssn(mean_richness ~ DurD3650past + sqrt(basin_area_km2) + country:sqrt(basin_area_km2))
-
+  
   miv_rich_modlist [['mod5']] <- quick_miv_ssn(mean_richness ~ DurD3650past + country:DurD3650past + sqrt(basin_area_km2))
   
   miv_rich_modlist[['mod6']] <- quick_miv_ssn(mean_richness ~ DurD3650past + country:DurD3650past + sqrt(basin_area_km2))
@@ -6423,7 +6616,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
   miv_rich_modlist[['mod14']] <- quick_miv_ssn(mean_richness ~ STcon_m10_undirected_avg_samp + country:STcon_m10_undirected_avg_samp + sqrt(basin_area_km2))
   
   miv_rich_modlist[['mod15']] <- quick_miv_ssn(mean_richness ~ sqrt(qsim_avg_samp) + country:sqrt(qsim_avg_samp) + sqrt(basin_area_km2))
-
+  
   miv_rich_modlist[['mod16']] <- quick_miv_ssn(mean_richness ~ DurD3650past + DurD_samp + country:DurD_samp + sqrt(basin_area_km2))
   
   miv_rich_modlist[['mod17']] <- quick_miv_ssn(mean_richness ~ DurD3650past + country:DurD3650past + DurD_samp + country:DurD_samp + sqrt(basin_area_km2))
@@ -6489,10 +6682,10 @@ model_miv_yr <- function(in_ssn_eu_summarized,
           glance(x), 
           ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
           loocv(x))
-    }) %>% 
+  }) %>% 
     rbindlist %>%
     .[, mod := names(miv_rich_modlist)]
- 
+  
   if (interactive) {
     summary( miv_rich_modlist[['mod31']])
     varcomp(miv_rich_modlist[['mod31']])
@@ -6531,12 +6724,6 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     SSN2::varcomp(ssn_miv_best_final)
     plot(ssn_miv_best_final)
     
-    #Check predictions
-    ggplot(data=ssn_miv_best_preds, aes(x=.fitted, y=mean_richness)) +
-      geom_point(aes(color=stream_type)) +
-      geom_smooth(method='lm') +
-      geom_abline() +
-      facet_wrap(~country)
   }
   
   #------ For prediction model -------------------------------------------------
@@ -6624,7 +6811,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     summary(ssn_miv_pred_final)
     plot(ssn_miv_best_final)
     SSN2::varcomp(ssn_miv_pred_final)
-  
+    
     #Check predictions
     ggplot(data=ssn_miv_mod_preds, aes(x=.fitted, y=mean_richness)) +
       geom_point(aes(color=stream_type)) +
@@ -6633,6 +6820,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
       facet_wrap(~country)
   }
   
+  #------ Write out results ----------------------------------------------------
   return(list(
     model_selection_table = mod_perf_tab,
     ssn_mod_fit = ssn_miv_pred_final, #Prediction model fit with REML
@@ -6642,12 +6830,90 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     ssn_pred_best = ssn_miv_best_preds #Augmented data for "best" model
   ))
 }
-  
+
 #------ diagnose_ssn_mod -----------------------------------------------------
+# in_ssn_mods <- tar_read(ssn_mods_miv_yr)
+# write_plots=T
+# out_dir = figdir
+
+diagnose_ssn_mod <- function(in_ssn_mods,
+                             write_plots=T,
+                             out_dir) {
+  
+  #Check predictions for best model
+  predobs_plot_best <- setDT(in_ssn_mods$ssn_pred_best) %>%
+    .[, country := factor(
+      country, 
+      levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ),
+      ordered=T)
+    ] %>% 
+    ggplot(aes(x=.fitted, y=mean_richness)) +
+    geom_point(aes(color=stream_type)) +
+    geom_smooth(method = 'lm',
+                color = 'black', se = FALSE) +
+    geom_abline(linetype='dashed') +
+    scale_x_continuous(name='Predicted mean taxonomic richness') +
+    scale_y_continuous(name='Observed mean taxonomic richness') +
+    scale_color_manual(
+      name = 'Stream type',
+      labels = c('Perennial', 'Non-perennial'),
+      values=c('#2b8cbe', '#feb24c')) +
+    coord_fixed() +
+    facet_wrap(~country) +
+    theme_classic() 
+  
+  #Check predictions for final model
+  predobs_plot_final <- setDT(in_ssn_mods$ssn_pred_final)[, country := factor(
+    country, 
+    levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ),
+    ordered=T)
+  ] %>% 
+    ggplot(aes(x=.fitted, y=mean_richness)) +
+    geom_point(aes(color=stream_type)) +
+    geom_smooth(method = 'lm',
+                color = 'black', se = FALSE) +
+    geom_abline(linetype='dashed') +
+    scale_x_continuous(name='Predicted mean taxonomic richness') +
+    scale_y_continuous(name='Observed mean taxonomic richness') +
+    scale_color_manual(
+      name = 'Stream type',
+      labels = c('Perennial', 'Non-perennial'),
+      values=c('#2b8cbe', '#feb24c')) +
+    coord_fixed() +
+    facet_wrap(~country) +
+    theme_classic()
+  
+  if (write_plots) {
+    ggsave(
+      filename = file.path(out_dir, 'miv_predobs_plot_best.png'),
+      plot = predobs_plot_best,
+      width = 8,
+      height = 6,
+      units='in',
+      dpi=600
+    )
+    
+    ggsave(
+      filename = file.path(out_dir, 'miv_predobs_plot_final.png'),
+      plot = predobs_plot_final,
+      width = 8,
+      height = 6,
+      units='in',
+      dpi=600
+    )
+  }
+  
+  return(list(
+    varcomp_best = SSN2::varcomp(in_ssn_mods$ssn_mod_fit_best),
+    varcomp_final = SSN2::varcomp((in_ssn_mods$ssn_mod_fit))
+  )
+  )
+}
+
 # #Plot the "marginal" effect of each hydrological variable while
 # #keeping surface area at global mean and global intercept
 # plot_ssn2_marginal_effects <- function(
-#     in_mod,                # fitted SSN2 model
+    #     in_mod,                # fitted SSN2 model
 #     hydro_var,          # the covariate you want to VARY
 #     fixed_var,          # the covariate you want to FIX at mean
 #     fixed_var_mean,
@@ -6723,10 +6989,10 @@ model_miv_yr <- function(in_ssn_eu_summarized,
 predict_ssn_mod <- function(in_ssn_mods, proj_years = NULL) {
   #Historical predictions ------------------------------------------------------
   preds_hist_dt <- augment(in_ssn_mods$ssn_mod_fit 
-                            , newdata = 'preds_hist'
-                            , drop = FALSE
-                            , type = 'response',
-                            , interval = 'prediction'
+                           , newdata = 'preds_hist'
+                           , drop = FALSE
+                           , type = 'response',
+                           , interval = 'prediction'
   ) %>% 
     .[, c('rid', 'country', '.fitted', '.lower', '.upper')] %>%
     st_drop_geometry %>%
@@ -6777,7 +7043,7 @@ predict_ssn_mod <- function(in_ssn_mods, proj_years = NULL) {
   ) %>%
     rbindlist %>%
     merge(durd_proj_col_dt,
-        by='colname')
+          by='colname')
   
   #Compute future statistics
   preds_decade_mean <- preds_proj_dt %>%
@@ -6789,12 +7055,12 @@ predict_ssn_mod <- function(in_ssn_mods, proj_years = NULL) {
     merge(y=preds_hist_dt[, .(rid, country, .fitted)],
           by=c('rid', 'country')) %>%
     .[, preds_diff := fitted_mean_decade - .fitted]
-
+  
   return(list(
     hist = preds_hist_dt,
     proj = preds_proj_dt,
     proj_stats = preds_decade_mean
-    )
+  )
   )
 }
 
@@ -6806,7 +7072,7 @@ predict_ssn_mod <- function(in_ssn_mods, proj_years = NULL) {
 map_ssn_mod <- function(in_ssn,
                         in_ssn_mods,
                         in_ssn_preds) {
-
+  
   #------------- Makes maps ----------------------------------------------------
   #Make map of 2021 (historical) richness -------------
   ssn_preds_hist <- in_ssn_mods$ssn_mod_fit$ssn.object
@@ -6816,15 +7082,28 @@ map_ssn_mod <- function(in_ssn,
     by = c('country', 'rid'), all.x=T)
   
   map_hist <- map_ssn_facets(in_ssn=ssn_preds_hist, 
-                 facet_col='country',
-                 linewidth_col='qsim_avg',                                
-                 linecolor_col='.fitted', 
-                 page_title='Macroinvertebrate richness - Historical'
+                             facet_col='country',
+                             linewidth_col='qsim_avg',                                
+                             linecolor_col='.fitted', 
+                             page_title='Macroinvertebrate richness - Historical'
   )
   
+  #SHOULD REPLACE THIS WITH LOOCV - BUT DOESN't EXIST YET
+  ssn_preds_hist$obs <- ssn_preds_hist$obs %>%
+    merge(in_ssn_preds$hist[, c('rid', '.fitted', 'country'), with=F], 
+          by=c('rid', 'country')) %>%
+    mutate(pred_error = `.fitted`-mean_richness)
   
-  # Makes maps of specific projection scenario/year ----------------------------
+  map_error <- map_ssn_facets(in_ssn=ssn_preds_hist, 
+                              in_pts='obs',
+                              facet_col='country',
+                              ptcolor_col = 'pred_error',
+                              shape_col = 'stream_type',
+                              linewidth_col='qsim_avg',                                
+                              page_title='Macroinvertebrate richness - Error (predicted - observed)'
+  )
   
+  # Makes maps of projections  ----------------------------
   ssn_preds_proj <- in_ssn_mods$ssn_mod_fit$ssn.object
   
   #For a given scenario and gcm
@@ -6834,18 +7113,34 @@ map_ssn_mod <- function(in_ssn,
     by = c('country', 'rid'), all.x=T)
   
   map_diff_indiv <- map_ssn_facets(in_ssn=ssn_preds_proj, 
-                 facet_col='country',
-                 linewidth_col='qsim_avg',                                
-                 linecolor_col='preds_diff', 
-                 page_title=unique( ssn_preds_proj$edges$colname)
+                                   facet_col='country',
+                                   linewidth_col='qsim_avg',                                
+                                   linecolor_col='preds_diff', 
+                                   page_title=unique( ssn_preds_proj$edges$colname)
   )
   
+  
+  #Average by 30-year period
+  in_ssn_preds$proj_stats <- merge(
+    in_ssn_preds$proj_stats,
+    data.table(
+      decade = seq(2040, 2090, 10),
+      period = c(rep('2040-2069', 3), rep('2070-2099', 3))
+    ),
+    by='decade')
+  
+  ################################"""
+  ##################################
+  #TO CONITNUE
+
   #Mean and SNR across gcms
-  proj_stats_gcm <- in_ssn_preds$proj_stats[, list(
-    preds_diff_gcm_avg = mean(preds_diff, na.rm=T),
-    preds_diff_gcm_snr = mean(preds_diff, na.rm=T)/diff(range(preds_diff, na.rm=T))
-  ), by = c('country', 'rid', 'decade', 'scenario')] %>%
-    .[is.na(preds_diff_gcm_snr), preds_diff_gcm_snr := 0]
+  # proj_stats_gcm <- in_ssn_preds$proj_stats[, list(
+  #   preds_diff_period_avg = mean(preds_diff, na.rm=T),
+  #   by = c('country', 'rid', 'period', 'gcm', 'scenario')] 
+  #   
+  #   preds_diff_gcm_snr = mean(preds_diff, na.rm=T)/diff(range(preds_diff, na.rm=T))
+  # ), by = c('country', 'rid', 'period', 'scenario')] %>%
+  #   .[is.na(preds_diff_gcm_snr), preds_diff_gcm_snr := 0]
   
   ssn_preds_proj$edges <- merge(
     in_ssn_mods$ssn_mod_fit$ssn.object$edges,
@@ -6853,11 +7148,12 @@ map_ssn_mod <- function(in_ssn,
     by = c('country', 'rid'), all.x=T)
   
   map_diff_avg <- map_ssn_facets(in_ssn=ssn_preds_proj, 
-                             facet_col='country',
-                             linewidth_col='qsim_avg',                                
-                             linecolor_col='preds_diff_gcm_avg', 
-                             page_title=unique( ssn_preds_proj$edges$colname)
+                                 facet_col='country',
+                                 linewidth_col='qsim_avg',                                
+                                 linecolor_col='preds_diff_gcm_avg', 
+                                 page_title=unique( ssn_preds_proj$edges$colname)
   )
+  
   
   
   # Makes maps of specific projection scenario/year ----------------------------
@@ -6869,10 +7165,10 @@ map_ssn_mod <- function(in_ssn,
     by = c('country', 'rid'), all.x=T)
   
   map_proj <- map_ssn_facets(in_ssn=ssn_preds_proj, 
-                 facet_col='country',
-                 linewidth_col='qsim_avg',                                
-                 linecolor_col='.fitted', 
-                 page_title=in_colname
+                             facet_col='country',
+                             linewidth_col='qsim_avg',                                
+                             linecolor_col='.fitted', 
+                             page_title=in_colname
   )
 }
 
