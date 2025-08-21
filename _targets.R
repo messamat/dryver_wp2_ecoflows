@@ -1092,13 +1092,19 @@ analysis_targets <- list(
   tar_target(
     ssn_preds,
     predict_ssn_mod(in_ssn_mods = ssn_mods_miv_yr,
-                    proj_years = seq(2020, 2099))
-  )
+                    proj_years = c(seq(1990,2020), seq(2040, 2099))
+    )
+  ),
   
+  tar_target(
+    ssn_proj_maps,
+    map_ssn_mod(in_ssn = ssn_eu_summarized,
+                in_ssn_mods = ssn_mods_miv_yr,
+                in_ssn_preds = ssn_preds,
+                out_dir = figdir)
+  )
 )
 
-
-#Run for other diversity indices
 list(preformatting_targets, mapped_hydrotargets, 
      combined_hydrotargets, analysis_targets) %>%
   unlist(recursive = FALSE)
