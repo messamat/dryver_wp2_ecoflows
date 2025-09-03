@@ -7659,7 +7659,6 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     summary(ssn_miv_best_final)
     SSN2::varcomp(ssn_miv_best_final)
     plot(ssn_miv_best_final)
-    
   }
   
   #------ For prediction model -------------------------------------------------
@@ -7681,50 +7680,49 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     )
     
     selected_glance_qsim <- ssn_mod_predictions_covtypes$ssn_glance
-    
   }
   
-  #Test covariance structures again, this time with REML 
-  ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
-    in_ssn = in_ssn_eu_summarized,
-    family = 'nbinomial',
-    organism = c('miv_nopools'),
-    formula_root = 'sqrt(basin_area_km2) + country:sqrt(basin_area_km2)',
-    hydro_var = 'DurD_samp',
-    response_var = 'mean_richness',
-    ssn_covtypes = ssn_covtypes,
-    partition_formula = as.formula('~ country'),
-    random_formula = NULL,
-    estmethod='reml'
-  )
-  
-  selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
-  #Turns out area is better than the qsim
-  
-  #Check Torgegram
-  tg_selected <- SSN2::Torgegram(
-    formula = ssn_mod_predictions_covtypes$ssn_list$linear_none_none$formula,
-    ssn.object = ssn_miv,
-    type = c("flowcon", "flowuncon", "euclid"),
-    partition_factor = as.formula('~ country'),
-    bins = 15
-  ) %>%
-    rbindlist(idcol='dist_type')
-  
-  tg_plot <- ggplot(tg_selected, 
-                    aes(x=dist, y=gamma, color = dist_type)) +
-    geom_point(aes(size=np)) +
-    geom_smooth(method='lm', size=2, se=F) +
-    scale_size_continuous(range=c(0.5, 7)) +
-    scale_x_sqrt(breaks=c(1000, 5000, 10000, 20000)) +
-    theme_classic() +
-    facet_wrap(~dist_type)
-  
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
-  
-  summary(ssn_mod_predictions_covtypes$ssn_list$linear_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$linear_none_none)
+    #Test covariance structures again, this time with REML 
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'nbinomial',
+      organism = c('miv_nopools'),
+      formula_root = 'sqrt(basin_area_km2) + country:sqrt(basin_area_km2)',
+      hydro_var = 'DurD_samp',
+      response_var = 'mean_richness',
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
+    )
+    
+    selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
+    #Turns out area is better than the qsim
+    
+    #Check Torgegram
+    tg_selected <- SSN2::Torgegram(
+      formula = ssn_mod_predictions_covtypes$ssn_list$linear_none_none$formula,
+      ssn.object = ssn_miv,
+      type = c("flowcon", "flowuncon", "euclid"),
+      partition_factor = as.formula('~ country'),
+      bins = 15
+    ) %>%
+      rbindlist(idcol='dist_type')
+    
+    tg_plot <- ggplot(tg_selected, 
+                      aes(x=dist, y=gamma, color = dist_type)) +
+      geom_point(aes(size=np)) +
+      geom_smooth(method='lm', size=2, se=F) +
+      scale_size_continuous(range=c(0.5, 7)) +
+      scale_x_sqrt(breaks=c(1000, 5000, 10000, 20000)) +
+      theme_classic() +
+      facet_wrap(~dist_type)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$linear_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$linear_none_none)
   
   #Re-fit final model with REML
   ssn_miv_pred_final <- ssn_glm(
@@ -7867,6 +7865,12 @@ diagnose_ssn_mod <- function(in_ssn_mods,
   )
 }
 
+#------ plot_ssn2_marginal_effects ---------------------------------------------
+# in_ssn_mods <- tar_read(ssn_mods_miv_yr)
+# write_plots=T
+# out_dir = figdir
+# in_mod <- ssn_mods_miv_yr$ssn_mod_fit_best
+
 # #Plot the "marginal" effect of each hydrological variable while
 # #keeping surface area at global mean and global intercept
 #' Plot Marginal Effects of Variables from a Fitted SSN2 Model
@@ -7888,75 +7892,197 @@ diagnose_ssn_mod <- function(in_ssn_mods,
 #'   prediction grid. Defaults to 100.
 #'
 #' @return A ggplot object visualizing the marginal effects.
-# plot_ssn2_marginal_effects <- function(
-    #     in_mod,                # fitted SSN2 model
-#     hydro_var,          # the covariate you want to VARY
-#     fixed_var,          # the covariate you want to FIX at mean
-#     fixed_var_mean,
-#     group_var = "country",
-#     n_points = 100
-# ) {
-#   # Get fixed effects
-#   fixef_dt <- SSN2::tidy(in_mod) %>% as.data.table()
-#   
-#   # Identify base terms
-#   intercept <- fixef_dt[term == "(Intercept)", estimate]
-#   b_hydro   <- fixef_dt[term == hydro_var, estimate]
-#   b_fixed   <- fixef_dt[term == fixed_var, estimate]
-#   
-#   # Find interaction slopes for hydro
-#   interaction_pattern <- paste0(group_var, ".*:", hydro_var)
-#   hydro_interactions <- fixef_dt[grepl(interaction_pattern, term)]
-#   hydro_interactions[, group := sub(paste0(group_var, "(.*):.*"), "\\1", term)]
-#   hydro_interactions <- hydro_interactions[, .(group = group, b_hydro_group = estimate)]
-#   
-#   # Find interaction slopes for fixed covariate
-#   fixed_pattern <- paste0(fixed_var, ":", group_var)
-#   fixed_interactions <- fixef_dt[str_starts(term, fixed(fixed_pattern)),]
-#   fixed_interactions[, group := sub(paste0(fixed_var, ":.*", group_var, "(.*)"), "\\1", term)]
-#   fixed_interactions <- fixed_interactions[, .(group = group, b_fixed_group = estimate)]
-#   
-#   # Get observed data to build range & mean
-#   mod_obs <- in_mod$ssn.object$obs %>% as.data.table()
-#   
-#   # Build new data grid: hydro varies, fixed stays constant
-#   grid_hydro <- mod_obs[, .(
-#     hydro = seq(min(get(hydro_var), na.rm = TRUE),
-#                 max(get(hydro_var), na.rm = TRUE),
-#                 length.out = n_points)
-#   ), by = group_var]
-#   
-#   newdata_dt <- copy(grid_hydro)
-#   setnames(newdata_dt, old = group_var, new = "group")
-#   newdata_dt[, fixed := fixed_var_mean]
-#   
-#   # Merge interactions
-#   newdata_dt <- merge(newdata_dt, hydro_interactions, by = "group", all.x = TRUE)
-#   newdata_dt <- merge(newdata_dt, fixed_interactions, by = "group", all.x = TRUE)
-#   
-#   # Fill NA with 0 if no interaction
-#   newdata_dt[is.na(b_hydro_group), b_hydro_group := 0]
-#   newdata_dt[is.na(b_fixed_group), b_fixed_group := 0]
-#   
-#   # Calculate predicted
-#   newdata_dt[, predicted :=
-#                intercept +
-#                (b_hydro + b_hydro_group) * hydro +
-#                (b_fixed + b_fixed_group) * fixed
-#   ]
-#   
-#   # Plot
-#   out_plot <- ggplot(newdata_dt, aes(x = hydro, y = predicted, color = group)) +
-#     geom_line(linewidth = 1) +
-#     labs(
-#       x = hydro_var,
-#       y = "Predicted",
-#       color = group_var
-#     ) +
-#     theme_bw()
-#   
-#   return(out_plot)
-# }
+plot_ssn2_marginal_effects <- function(
+    in_mod,                # fitted SSN2 model
+    hydro_var,          # the covariate you want to VARY
+    fixed_var,          # the covariate you want to FIX at mean
+    fixed_var_mean,
+    group_var = "country",
+    n_points = 100
+) {
+  
+  in_mod_best <- ssn_mods_miv_yr$ssn_mod_fit_best
+  
+  emm_best_stream_type <- emmeans(in_mod_best, 
+                                  data=in_mod_best$ssn.object$obs, 
+                                  specs=~stream_type|country,
+                                  type = "response") %>%
+    data.frame %>%
+    ggplot(aes(x=country, y=prob, color=stream_type)) +
+    geom_point(size=2) +
+    geom_segment(aes(y=asymp.LCL, yend=asymp.UCL), linewidth=2, alpha=0.5) +
+    scale_color_manual(
+      name = 'Stream type',
+      labels = c('Perennial', 'Non-perennial'),
+      values=c('#2b8cbe', '#feb24c')) +
+    scale_y_continuous(name='Estimated marginal mean: mean richness') +
+    # coord_flip() +
+    theme_classic() 
+  
+  
+  ggsave(
+    filename = file.path(resdir,
+                         'figures',
+                         'emm_miv_yr_best_stream_type.png'),
+    plot = emm_best_stream_type, 
+    width=5, height=5)
+  
+  
+  # Define a grid of basin areas
+  newdat_area <- data.frame(
+    basin_area_km2 = seq(round(100*min(ssn_miv$obs$basin_area_km2, na.rm = TRUE)),
+                         round(100*max(ssn_miv$obs$basin_area_km2, na.rm = TRUE)),
+                         length.out = 50)/100
+  )
+  
+  emm_best_areas <- emmeans(in_mod_best, 
+                 data=ssn_miv$obs,
+                 ~ sqrt(basin_area_km2) | country, 
+                 at = list(basin_area_km2 = newdat_area$basin_area_km2),
+                 type='response') %>%
+    data.frame() %>%
+    setDT %>%
+    ggplot(aes(x=basin_area_km2, fill=country)) +
+    geom_line(aes(y=prob, color=country), size=2) +
+    geom_ribbon(aes(ymin=asymp.LCL, ymax=asymp.UCL), alpha=0.1) +
+    scale_x_continuous(name=expression('Basin area -'~km^2)) +
+    scale_y_continuous(name='Estimated marginal mean: mean richness') +
+    theme_bw()
+    
+  ggsave(
+    filename = file.path(resdir,
+                         'figures',
+                         'emm_miv_yr_best_area.png'),
+    plot =emm_best_areas, 
+    width=5, height=5)
+  
+  
+  #################################################################
+  in_mod_predict <- ssn_mods_miv_yr$ssn_mod_fit
+  
+  # 
+  newdat_durd <- data.frame(
+    DurD_samp = seq(0, 0.75, 0.01)
+  )
+  
+  emm_predict_durd <- emmeans(in_mod_predict, 
+                               data=ssn_miv$obs,
+                               ~ DurD_samp | country, 
+                               at = list(DurD_samp = newdat_durd$DurD_samp),
+                               type='response') %>%
+    data.frame() %>%
+    setDT %>%
+    ggplot(aes(x=DurD_samp, fill=country)) +
+    geom_line(aes(y=prob, color=country), size=2) +
+    geom_ribbon(aes(ymin=asymp.LCL, ymax=asymp.UCL), alpha=0.1) +
+    scale_x_continuous(name='Drying duration during sampling period') +
+    scale_y_continuous(name='Estimated marginal mean: mean richness') +
+    theme_bw()
+  
+  ggsave(
+    filename = file.path(resdir,
+                         'figures',
+                         'emm_miv_yr_final_durd_samp.png'),
+    plot = emm_predict_durd, 
+    width=5, height=5)
+  
+  # Define a grid of basin areas
+  newdat_area <- data.frame(
+    basin_area_km2 = seq(round(100*min(ssn_miv$obs$basin_area_km2, na.rm = TRUE)),
+                         round(100*max(ssn_miv$obs$basin_area_km2, na.rm = TRUE)),
+                         length.out = 50)/100
+  )
+  
+  emm_predict_areas <- emmeans(in_mod_predict, 
+                            data=ssn_miv$obs,
+                            ~ sqrt(basin_area_km2) | country, 
+                            at = list(basin_area_km2 = newdat$basin_area_km2),
+                            type='response') %>%
+    data.frame() %>%
+    setDT %>%
+    ggplot(aes(x=basin_area_km2, fill=country)) +
+    geom_line(aes(y=prob, color=country), size=2) +
+    geom_ribbon(aes(ymin=asymp.LCL, ymax=asymp.UCL), alpha=0.1) +
+    scale_x_continuous(name=expression('Basin area -'~km^2)) +
+    scale_y_continuous(name='Estimated marginal mean: mean richness') +
+    theme_bw()
+  
+  ggsave(
+    filename = file.path(resdir,
+                         'figures',
+                         'emm_miv_yr_best_area.png'),
+    plot =emm_best_areas, 
+    width=5, height=5)
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  # Get fixed effects
+  fixef_dt <- SSN2::tidy(in_mod) %>% as.data.table()
+  
+  # Identify base terms
+  intercept <- fixef_dt[term == "(Intercept)", estimate]
+  b_hydro   <- fixef_dt[term == hydro_var, estimate]
+  b_fixed   <- fixef_dt[term == fixed_var, estimate]
+  
+  # Find interaction slopes for hydro
+  interaction_pattern <- paste0(group_var, ".*:", hydro_var)
+  hydro_interactions <- fixef_dt[grepl(interaction_pattern, term)]
+  hydro_interactions[, group := sub(paste0(group_var, "(.*):.*"), "\\1", term)]
+  hydro_interactions <- hydro_interactions[, .(group = group, b_hydro_group = estimate)]
+  
+  # Find interaction slopes for fixed covariate
+  fixed_pattern <- paste0(fixed_var, ":", group_var)
+  fixed_interactions <- fixef_dt[str_starts(term, fixed(fixed_pattern)),]
+  fixed_interactions[, group := sub(paste0(fixed_var, ":.*", group_var, "(.*)"), "\\1", term)]
+  fixed_interactions <- fixed_interactions[, .(group = group, b_fixed_group = estimate)]
+  
+  # Get observed data to build range & mean
+  mod_obs <- in_mod$ssn.object$obs %>% as.data.table()
+  
+  # Build new data grid: hydro varies, fixed stays constant
+  grid_hydro <- mod_obs[, .(
+    hydro = seq(min(get(hydro_var), na.rm = TRUE),
+                max(get(hydro_var), na.rm = TRUE),
+                length.out = n_points)
+  ), by = group_var]
+  
+  newdata_dt <- copy(grid_hydro)
+  setnames(newdata_dt, old = group_var, new = "group")
+  newdata_dt[, fixed := fixed_var_mean]
+  
+  # Merge interactions
+  newdata_dt <- merge(newdata_dt, hydro_interactions, by = "group", all.x = TRUE)
+  newdata_dt <- merge(newdata_dt, fixed_interactions, by = "group", all.x = TRUE)
+  
+  # Fill NA with 0 if no interaction
+  newdata_dt[is.na(b_hydro_group), b_hydro_group := 0]
+  newdata_dt[is.na(b_fixed_group), b_fixed_group := 0]
+  
+  # Calculate predicted
+  newdata_dt[, predicted :=
+               intercept +
+               (b_hydro + b_hydro_group) * hydro +
+               (b_fixed + b_fixed_group) * fixed
+  ]
+  
+  # Plot
+  out_plot <- ggplot(newdata_dt, aes(x = hydro, y = predicted, color = group)) +
+    geom_line(linewidth = 1) +
+    labs(
+      x = hydro_var,
+      y = "Predicted",
+      color = group_var
+    ) +
+    theme_bw()
+  
+  return(out_plot)
+}
 
 #------ predict_ssn_mod -------------------------------------------------------
 # in_ssn_mods = tar_read(ssn_mods_miv_yr)
@@ -7986,7 +8112,7 @@ diagnose_ssn_mod <- function(in_ssn_mods,
 #'       GCM and scenario information.
 #'   }
 predict_ssn_mod <- function(in_ssn_mods, proj_years = NULL) {
-  #Historical predictions ------------------------------------------------------
+  #Contemporary predictions ------------------------------------------------------
   # For the year 2021.
   
   preds_hist_dt <- augment(in_ssn_mods$ssn_mod_fit 

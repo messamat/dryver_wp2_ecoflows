@@ -890,13 +890,13 @@ analysis_targets <- list(
   )
   ,
 
-  #Define all hydrological variables: 16 (max ~73)
+  #Define all hydrological variables: 62
   tar_target(
     hydro_vars_forssn,
     {
       hydrovar_grid <- expand.grid(
-        c('DurD', 'FreD'), #'PDurD', 'FreD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'
-        paste0(c(30, 60, 90, 365, 3650), 'past')
+        c('DurD', 'FreD', 'PDurD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'),
+        paste0(c(30, 60, 90, 180, 365, 3650), 'past')
       )
       stcon_grid <- expand.grid(paste0('STcon_m', c(30, 60, 90, 180, 365)),
                                 c('_directed', '_undirected'))
@@ -1086,6 +1086,16 @@ analysis_targets <- list(
     diagnose_ssn_mod(in_ssn_mods=ssn_mods_miv_yr,
                      write_plots=T,
                      out_dir=figdir)
+  ),
+  
+  tar_target(
+    model_selection_table_path,
+    fwrite(ssn_mods_miv_yr$model_selection_table,
+           file.path(resdir, paste0('ssn_mods_miv_yr_model_selection_table_',
+                                    format(Sys.Date(), '%Y%m%d'),
+                                    '.csv')
+           )
+    )
   ),
 
   #Compute statistics for two horizons: 2041-2070 and 2071-2100

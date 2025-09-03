@@ -6,6 +6,7 @@ pkg_vec <- list(
   'crew',
   'dbscan',
   'dplyr',
+  'emmeans',
   'forecast',
   'future.apply',
   'ggcorrplot',
