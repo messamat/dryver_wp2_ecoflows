@@ -747,7 +747,10 @@ analysis_targets <- list(
   tar_target(
     organism_list,
     c('miv_nopools', 'miv_nopools_flying', 'miv_nopools_nonflying', 
-      'fun', 'dia', 'bac')
+      'fun_sedi_nopools', 'fun_biof_nopools',
+      'dia_sedi_nopools', 'dia_biof_nopools',
+      'bac_sedi_nopools', 'bac_biof_nopools'
+    )
   )
   ,
   
@@ -756,24 +759,33 @@ analysis_targets <- list(
     data.table(
       organism = organism_list,
       organism_label = c('Macroinvertebrates',
-               'Macroinvertebrates - flying',
-               'Macroinvertebrates - non-flying',
-               'Fungi',
-               'Diatoms',
-               'Bacteria')
+                         'Macroinvertebrates - flying',
+                         'Macroinvertebrates - non-flying',
+                         'Fungi - sediment', 'Fungi - biofilm',
+                         'Diatoms - sediment', 'Diatoms - biofilm',
+                         'Bacteria - sediment', 'Bacteria - biofilm')
     )
   )
   ,
   
+  tar_target(
+    alpha_var_list,
+    c('richness', 'expshannon', 'invsimpson')
+  )
+  ,
+
   #Visualize percentage of flowing sites by DRN over time
   tar_target(
-    hydrorichness_bydrn_plot,
-    plot_drn_hydrorichness(in_hydrocon_compiled = hydrocon_sites_compiled, 
-                           in_sites_dt = sites_dt,
-                           in_allvars_dt = allvars_merged$dt,
-                           in_organism_dt = organism_dt,
-                           write_plots=T,
-                           out_dir=figdir) 
+    hydrodiv_bydrn_plot,
+    lapply(alpha_var_list, function(in_var) {
+      plot_drn_hydrodiv(in_hydrocon_compiled = hydrocon_sites_compiled, 
+                        in_sites_dt = sites_dt,
+                        in_allvars_dt = allvars_merged$dt,
+                        in_organism_dt = organism_dt,
+                        alpha_var = in_var,
+                        write_plots=T,
+                        out_dir=figdir) 
+    }) %>% setNames(alpha_var_list)
   )
   ,
   
@@ -781,7 +793,7 @@ analysis_targets <- list(
     hydrowindow_lm_scatter,
     plot_scatter_lm(in_allvars_merged=allvars_merged, 
                     temporal_var_substr='DurD', 
-                    response_var='richness',
+                    response_var=alpha_var_list,
                     in_organism_dt = organism_dt,
                     colors_list=drn_dt$color,
                     write_plots=T, 
@@ -845,7 +857,7 @@ analysis_targets <- list(
   )
   ,
   
-  #Check whether richness is related to habitat volumne (for miv and biofilm)
+  #Check whether diversity is related to habitat volumne (for miv and biofilm)
   #-> No, good
   tar_target(
     corplots_div_habvol,
@@ -920,13 +932,13 @@ analysis_targets <- list(
   # Run a first SSN with a single hydrological variable for each organism
   # to determine the top spatial covariance types
   tar_target(
-    ssn_richness_covtype,
+    ssn_div_covtype,
     model_ssn_hydrowindow(
       in_ssn = ssn_eu,
       organism = organism_list,
       formula_root = 'log10(basin_area_km2) + log10(basin_area_km2):country',
       hydro_var = 'DurD365past',
-      response_var = 'richness',
+      response_var = alpha_var_list,
       ssn_covtypes = ssn_covtypes
     ),
     pattern = map(organism_list),
@@ -937,10 +949,10 @@ analysis_targets <- list(
   #Select the top 5 covariance structures for each organism based on AIC and
   #structure the models to run
   tar_target(
-    ssn_richness_models_to_run,
+    ssn_div_models_to_run,
     {
       #Get top 5 covtypes by organism
-      selected_covtypes <- lapply(ssn_richness_covtype, `[[`, "ssn_glance") %>%
+      selected_covtypes <- lapply(ssn_div_covtype, `[[`, "ssn_glance") %>%
         rbindlist %>%
         .[, .SD[order(AIC)][1:5, .(covtypes)], by = organism]
 
@@ -955,21 +967,25 @@ analysis_targets <- list(
 
       #Attach covtypes to each setup
       model_setup_list <- list()
-      for (org in unique(covtypes_by_organism$organism)) {
-        #Add 'null' model (without the hydrovar)
-        model_setup_list[[length(model_setup_list) + 1]] <- list(
-          organism = org,
-          hydro_var = NULL,
-          covtypes = covtypes_by_organism[organism==org,]$covtypes[[1]]
-        )
-        
-        #Add all hydrovars
-        for (hv in hydro_vars_forssn) {
+      for (div_index in alpha_var_list) {
+        for (org in unique(covtypes_by_organism$organism)) {
+          #Add 'null' model (without the hydrovar)
           model_setup_list[[length(model_setup_list) + 1]] <- list(
             organism = org,
-            hydro_var = hv,
+            div_var = div_index,
+            hydro_var = NULL,
             covtypes = covtypes_by_organism[organism==org,]$covtypes[[1]]
           )
+          
+          #Add all hydrovars
+          for (hv in hydro_vars_forssn) {
+            model_setup_list[[length(model_setup_list) + 1]] <- list(
+              organism = org,
+              div_var = div_index,
+              hydro_var = hv,
+              covtypes = covtypes_by_organism[organism==org,]$covtypes[[1]]
+            )
+          }
         }
       }
 
@@ -980,9 +996,9 @@ analysis_targets <- list(
 
   #Run SSN for each chosen variable and time window
   tar_target(
-    ssn_richness_hydrowindow,
+    ssn_div_hydrowindow,
     future_lapply(
-      ssn_richness_models_to_run,
+      ssn_div_models_to_run,
       function(model_setup) {
         print(model_setup)
         model_ssn_hydrowindow(
@@ -990,7 +1006,7 @@ analysis_targets <- list(
           organism = model_setup$organism,
           formula_root = 'log10(basin_area_km2) + log10(basin_area_km2):country',
           hydro_var = model_setup$hydro_var,
-          response_var = 'richness',
+          response_var = model_setup$div_var,
           ssn_covtypes = ssn_covtypes[label %in% model_setup$covtypes, ]
         )
       })
@@ -999,24 +1015,24 @@ analysis_targets <- list(
 
   tar_target(
     ssn_covtype_selected,
-    select_ssn_covariance(in_ssnmodels=ssn_richness_hydrowindow)
+    select_ssn_covariance(in_ssnmodels=ssn_div_hydrowindow)
   )
   ,
 
   tar_target(
-    ssn_richness_hydrowindow_formatted,
+    ssn_div_hydrowindow_formatted,
     {
-      ssn_model_names <- do.call(rbind, ssn_richness_models_to_run)[,1:2] %>%
+      ssn_model_names <- do.call(rbind, ssn_div_models_to_run)[,1:2] %>%
         as.data.table
-      ssnmodels <- cbind(ssn_model_names, ssn_richness_hydrowindow)
+      ssnmodels <- cbind(ssn_model_names, ssn_div_hydrowindow)
 
-      out_list <- lapply(organism_list, function(in_organism) {
+      out_list <- lapply(organism_dt$organism, function(in_organism) {
         print(in_organism)
         format_ssn_hydrowindow(in_ssnmodels = ssnmodels,
                                in_organism = in_organism,
                                in_covtype_selected = ssn_covtype_selected)
       })
-      names(out_list) <- organism_list
+      names(out_list) <- organism_dt$organism
 
       return(out_list)
     }
@@ -1024,9 +1040,9 @@ analysis_targets <- list(
   ,
   
   tar_target(
-    ssn_richness_hydrowindow_plots_paths,
-    save_ssn_richness_hydrowindow_plots(
-      in_ssn_richness_hydrowindow_formatted = ssn_richness_hydrowindow_formatted,
+    ssn_div_hydrowindow_plots_paths,
+    save_ssn_div_hydrowindow_plots(
+      in_ssn_div_hydrowindow_formatted = ssn_div_hydrowindow_formatted,
       out_dir = figdir
     )
   )

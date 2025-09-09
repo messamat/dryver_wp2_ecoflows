@@ -1560,9 +1560,10 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
   dt_list$dia_biof[
     ,
     date := in_metadata_edna[sample_type=='biofilm', .(running_id, date)][
-      .SD, on='running_id', x.date]] 
+      .SD, on='running_id', x.date]
+  ] 
   
-  #Add Campaign and Site to bacteria data, then remove pool sites
+  #Add Campaign and Site to bacteria data
   dt_list$bac_sedi[, c('site', 'campaign') := tstrsplit(v1, '_')] %>%
     setnames('v1', 'running_id') %>%
     .[, campaign := as.integer(campaign)] 
@@ -1580,38 +1581,43 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
   #   .[, country := new] %>%
   #   .[, `:=`(new = NULL)]
   
-  #Remove bacteria in pools
-  dt_list$bac_sedi <- merge(dt_list$bac_sedi, 
-                            in_metadata_edna[sample_type=='sediment', 
-                                             .(running_id, date, habitat, country)],
-                            by='running_id') %>%
-    .[country == 'Czech Republic', country := 'Czech']
-  
-  dt_list$bac_biof <- merge(dt_list$bac_biof,
-                            in_metadata_edna[sample_type=='biofilm',
-                                             .(running_id, date, habitat, country)],
-                            by='running_id') %>%
-    .[country == 'Czech Republic', country := 'Czech']
-  
-  dt_list$bac_biof_nopools <- dt_list$bac_biof %>%
-    .[habitat!='pool',] %>%
-    .[, `:=`(habitat = NULL,
-             organism = 'bac_biof_nopools')]
-  dt_list$bac_biof[, habitat := NULL]
-  
-  
-  dt_list$bac_sedi_nopools <- dt_list$bac_sedi %>%
-    .[habitat!='pool',] %>%
-    .[, `:=`(habitat = NULL,
-             organism = 'bac_sedi_nopools')]
-  dt_list$bac_sedi[, habitat := NULL]
-  
-  #Correct typo in date for fungi  
-  dt_list$fun_sedi[date == as.Date("2012-02-25"), 
-                   date := as.Date("2021-02-25")]
-  
-  dt_list$fun_biof[date == as.Date("2012-02-25"), 
-                   date := as.Date("2021-02-25")]
+  #Remove pools
+  for(org_medium in c('dia_sedi', 'dia_biof', 'fun_sedi', 
+                      'fun_biof', 'bac_sedi', 'bac_biof') 
+  ){
+    print(paste('Removing pools from', org_medium))
+    nsplit <- str_split(org_medium, '_')[[1]]
+    org <- nsplit[1]
+    medium <- ifelse(nsplit[2]=='sedi', 'sediment', 'biofilm')
+    new_org_medium <- paste0(org_medium, '_nopools')
+    
+    if (org=='bac') {
+      metacols_toget <- c('running_id', 'date', 'habitat', 'country')
+    } else {
+      metacols_toget <- c('running_id', 'habitat')
+    }
+    
+    dt_list[[org_medium]] <- merge(dt_list[[org_medium]], 
+                                   in_metadata_edna[sample_type==medium, 
+                                                    metacols_toget, with=F],
+                                   by='running_id') 
+    if (org=='bac') {
+      dt_list[[org_medium]][country == 'Czech Republic', 
+                            country := 'Czech']
+    }
+    
+    if (org=='fun') {
+      print('Correcting fungi dates')
+      dt_list[[org_medium]][date == as.Date("2012-02-25"), 
+                            date := as.Date("2021-02-25")]
+    }
+    
+    dt_list[[new_org_medium]] <- dt_list[[org_medium]] %>%
+      .[habitat!='pool',] %>%
+      .[, `:=`(habitat = NULL,
+               organism = new_org_medium)]
+    dt_list[[org_medium]][, habitat := NULL]
+  } %>% invisible
   
   if (!include_bacteria) {
     dt_list <- dt_list[!grepl('bac_', names(dt_list))]
@@ -1657,8 +1663,8 @@ comp_richrepl_inner <- function(dt, spcols, beta_div_coef, quant) {
 
 #' Calculate 'species' (taxonomic) diversity metrics
 #'
-#' Computes diversity metrics (richness, Shannon, Simpson) and partitions 
-#' beta-diversity into turnover and nestedness at either the local or 
+#' Computes diversity metrics (richness, exponential Shannon, inverse Simpson) 
+#' and partitions beta-diversity into turnover and nestedness at either the local or 
 #' regional level.
 #'
 #' @param in_biodt A biodiversity `data.table` (species × samples).
@@ -1701,14 +1707,14 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
     
     #Keep only sites x campaigns with species
     biodt_copy <- merge(in_biodt, 
-                        biodt_div[richness>0, .(site, campaign)],
+                        biodt_div[mean_richness>0, .(site, campaign)],
                         by=c('site', 'campaign'),
                         all.x = F
     )
     
-    #Fourth-root transform data
-    biodt_copy[, (spcols) := lapply(.SD, function(x) x^(1/4)), 
-               .SDcols = spcols]
+    #Fourth-root transform data - DO NOT TRANSFORM DATA IN THE END
+    # biodt_copy[, (spcols) := lapply(.SD, function(x) x^(1/4)), 
+    #            .SDcols = spcols]
     
     # ggplot(biodt_melt, aes(x=(value^(1/4)))) +
     #   geom_histogram() +
@@ -1724,15 +1730,20 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
     sha_simp <- biodt_copy[, list(
       campaign = campaign,
       site = site,
-      shannon = vegan::diversity(as.matrix(.SD), index = "shannon"),
+      expshannon = exp(vegan::diversity(as.matrix(.SD), index = "shannon")),
       invsimpson = vegan::diversity(as.matrix(.SD), index = "invsimpson")
-    ), .SDcols = spcols]
+    ), .SDcols = spcols] %>%
+      .[is.infinite(invsimpson), invsimpson := 0]  %>%
+      .[, `:=`(
+        mean_expshannon = mean(expshannon),
+        mean_invsimpson = mean(invsimpson)
+        ), by=site]
     
     #Compute nestedness and turnover based on temporal beta diversity
     multicampaign_sites <- biodt_copy[, .N, by=site][N>1, site]
-    J_richrepl <- biodt_copy[site %in% multicampaign_sites, 
+    J_richrepl <- biodt_copy[site %in% multicampaign_sites,
                              comp_richrepl_inner(dt = .SD, spcols = spcols,
-                                                 beta_div_coef = 'J', quant=F), 
+                                                 beta_div_coef = 'J', quant=F),
                              by=site]
     R_richrepl <- biodt_copy[site %in% multicampaign_sites,
                              comp_richrepl_inner(dt = .SD, spcols = spcols,
@@ -4402,7 +4413,7 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
     div = setdiff(names(spdiv), 
                   c(group_cols, exclude_cols,
                     names(in_hydrocon_compiled), names(in_env_dt))),
-    div_summarized = c("mean_richness",
+    div_summarized = c("mean_richness", "mean_expshannon", "mean_invsimpson",
                        "JBDtotal", "JRepl", "JRichDif", "JRepl/BDtotal", "JRichDif/BDtotal",
                        "RBDtotal", "RRepl", "RRichDif", "RRepl/BDtotal", "RRichDif/BDtotal",
                        "Gamma", "Beta", "mAlpha"), 
@@ -4438,15 +4449,15 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
   )
   
   #Compute average metric between sediment and biofilm for eDNA
-  avg_spdiv_edna <- spdiv[
-    organism_class %in% c('dia', 'fun', 'bac'), 
-    lapply(.SD, function(x) mean(x, na.rm=T)), 
-    by = eval(names(spdiv)[names(spdiv) %in% 
-                             setdiff(dtcols$group_cols, 'organism')]),
-    .SDcols = setdiff(dtcols$div, 
-                      c(dtcols$group_cols, dtcols$exclude_cols))
-  ] %>%
-    .[, organism := organism_class]
+  # avg_spdiv_edna <- spdiv[
+  #   organism_class %in% c('dia', 'fun', 'bac'), 
+  #   lapply(.SD, function(x) mean(x, na.rm=T)), 
+  #   by = eval(names(spdiv)[names(spdiv) %in% 
+  #                            setdiff(dtcols$group_cols, 'organism')]),
+  #   .SDcols = setdiff(dtcols$div, 
+  #                     c(dtcols$group_cols, dtcols$exclude_cols))
+  # ] %>%
+  #   .[, organism := organism_class]
   
   # bind the averaged eDNA data with the original biodiversity data
   spdiv <- rbind(spdiv, avg_spdiv_edna, use.names=T, fill=T)
@@ -4471,7 +4482,7 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
                             intersect(names(spdiv), 
                                       c(group_cols, dtcols$div_summarized)), 
                             with=F] %>%
-    .[, mean_richness := as.integer(round(mean_richness))]
+    .[, `:=`(mean_richness = as.integer(round(mean_richness)))]
   
   all_vars_summarized <- merge(
     spdiv_summarized,
@@ -4492,7 +4503,7 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
 }
 
 #------ plot_edna_biof_vs_sedi -------------------------------------------------
-#in_allvars_merged <- tar_read(allvars_merged)$dt
+# in_allvars_merged <- tar_read(allvars_merged)
 
 #' @title Plot eDNA biofilm vs sediment
 #' @description This function creates two plots comparing richness and Gamma 
@@ -4504,32 +4515,48 @@ plot_edna_biof_vs_sedi <- function(in_allvars_merged) {
   allvars_edna <- setDT(in_allvars_merged$dt)[organism_class %in% c('dia', 'fun', 'bac'),] 
   allvars_edna[, edna_source := gsub('^[a-z]+_', '', organism)]
   
-  #Compare richness by source of edna (biofilm vs sediment), organism and country
-  rich_cast <- dcast(allvars_edna, 
-                     country+site+date+organism_class~edna_source, 
-                     value.var = 'richness')
-  p_richness <- ggplot(rich_cast, aes(x=biof, y=sedi)) + 
-    geom_point() + 
-    geom_abline() + 
-    coord_fixed() +
-    facet_grid(organism_class~country)
+  #Compare diversity metric by source of edna (biofilm vs sediment), organism and country
+  alpha_index_list <- c('richness', 'expshannon', 'invsimpson')
+  alpha_cast <- 
+    melt(allvars_edna, 
+         id.vars=c('country', 'site', 'date', 'organism', 'organism_class', 'edna_source'),
+         measure.vars=alpha_index_list,
+         variable.name='diversity_index') %>%
+    dcast(allvars_edna, 
+          country+site+date+organism_class+diversity_index~edna_source, 
+          value.var = 'value')
+  
+  p_alpha_list <- lapply(alpha_index_list, function(index) {
+    ggplot(alpha_cast[diversity_index==index,], aes(x=biof, y=sedi)) + 
+      geom_point() + 
+      geom_abline() + 
+      ggtitle(label = index) +
+      facet_wrap(organism_class~country, scales='free', nrow=3)
+  }) %>% setNames(alpha_index_list)
   
   #Compare gamma by source of edna (biofilm vs sediment), organism and country
-  site_gamma_cast <- dcast(allvars_edna, 
-                           country+site+date+organism_class~edna_source, 
-                           value.var = 'Gamma')
-  p_site_gamma <- ggplot(site_gamma_cast, aes(x=biof, y=sedi)) + 
-    geom_point() + 
-    geom_abline() + 
-    coord_fixed() +
-    facet_grid(organism_class~country)
+  malpha_index_list <- paste0('mean_', alpha_index_list)
+  malpha_cast <- 
+    melt(allvars_edna, 
+         id.vars=c('country', 'site', 'date', 'organism', 'organism_class', 'edna_source'),
+         measure.vars=malpha_index_list,
+         variable.name='diversity_index') %>%
+    dcast(allvars_edna, 
+          country+site+date+organism_class+diversity_index~edna_source, 
+          value.var = 'value')
+  
+  p_malpha_list <- lapply(malpha_index_list, function(index) {
+    ggplot(malpha_cast[diversity_index==index,], aes(x=biof, y=sedi)) + 
+      geom_point() + 
+      geom_abline() + 
+      ggtitle(label = index) +
+      facet_wrap(organism_class~country, scales='free', nrow=3)
+  }) %>% setNames(malpha_index_list)
   
   return(list(
-    richness=p_richness,
-    site_gamma=p_site_gamma
+    alpha=p_alpha_list,
+    mean_alpha=p_malpha_list
   ))
-  
-  
 }
 
 #------ compute_cor_matrix -----------------------------------------------------
@@ -4704,10 +4731,7 @@ plot_cor_heatmaps <- function(in_cor_matrices,
   
   # get lists of unique organisms and countries for iteration
   org_list <- unique(in_cor_matrices$div$organism) %>%
-    setdiff(c('miv', 
-              'bac_biof', 'bac_sedi',  "bac_biof_nopools",  "bac_sedi_nopools",
-              "dia_biof", "dia_sedi", "fun_biof", "fun_sedi")
-    )
+    setdiff(c('miv','bac_biof', 'bac_sedi')) #Use no_pools instead
   country_list <- unique(in_cor_matrices$hydroenv_bydrn$country)
   
   # # --- 1. Hydro Correlation ---
@@ -4932,9 +4956,9 @@ ordinate_local_env <- function(in_allvars_dt) {
   #                                           num_pca_axes = 4)
   
   #2. Compute PCA for eDNA data ------------------------------------------------
-  edna_orglist <- c('dia_sedi', 'dia_biof', 'dia', 
-                    'fun_sedi', 'fun_biof',  'fun',
-                    'bac_sedi_nopools', 'bac_biof_nopools', 'bac')
+  edna_orglist <- c('dia_sedi_nopools', 'dia_biof_nopools', 
+                    'fun_sedi_nopools', 'fun_biof_nopools',
+                    'bac_sedi_nopools', 'bac_biof_nopools')
   
   env_cols_edna <- c('filamentous_algae', 'incrusted_algae', 
                      'macrophyte_cover', 'leaf_litter_cover','moss_cover', 
@@ -5714,234 +5738,242 @@ save_ssn_summarized_maps <- function(in_ssn_summarized_maps,
   })
 }
 
-#------ plot_drn_hydrorichness ------------------------------------------------------
+#------ plot_drn_hydrodiv ------------------------------------------------------
 # in_sites_dt <- tar_read(sites_dt)
 # in_hydrocon_compiled <- tar_read(hydrocon_sites_compiled)
 # in_allvars_dt <- tar_read(allvars_merged)$dt
 # in_drn_dt = drn_dt
 # out_dir = file.path(resdir, 'figures')
 
-#' @title Plot stream intermittence and richness
+#' @title Plot stream intermittence and alpha diversity
 #' @description Creates plots visualizing the relationship between the proportion
-#' of flowing network length and taxonomic richness over time, faceted by country.
-#' @param in_hydrocon_compiled A data table of compiled hydrological and connectivity data.
-#' @param in_sites_dt A data table with site information.
-#' @param in_allvars_dt A data table of all merged variables, including diversity and environmental data.
-#' @param in_organism_dt A data table mapping organism codes to their labels.
-#' @param write_plots A logical value to save the plots as PNG files.
-#' @param out_dir The output directory for the saved plots.
-#' @return A list of ggplot objects: a hydrograph, a hydrograph with sampling dates,
-#'  and richness plots for each organism.
-plot_drn_hydrorichness <- function(in_hydrocon_compiled,
-                                   in_sites_dt,
-                                   in_allvars_dt,
-                                   in_organism_dt,
-                                   write_plots=F,
-                                   out_dir) {
-  hydrocon_compiled_country <- merge(in_hydrocon_compiled, 
-                                     in_sites_dt[, .(site, country)], by='site')
+#' of flowing network length and alpha diversity over time, faceted by country.
+#' @param in_hydrocon_compiled A data.table of compiled hydrological and connectivity data.
+#' @param in_sites_dt A data.table with site information.
+#' @param in_allvars_dt A data.table of all merged variables, including diversity and environmental data.
+#' @param in_organism_dt A data.table mapping organism codes to their labels.
+#' @param alpha_var Character string: name of the alpha diversity column to plot (e.g., "richness", "shannon").
+#' @param write_plots Logical: whether to save the plots as PNG files.
+#' @param out_dir Output directory for saved plots.
+#' @return A list of ggplot objects: hydrograph, hydrograph with sampling dates, and alpha diversity plots per organism.
+plot_drn_hydrodiv <- function(in_hydrocon_compiled,
+                              in_sites_dt,
+                              in_allvars_dt,
+                              in_organism_dt,
+                              alpha_var = "richness",
+                              write_plots = FALSE,
+                              out_dir) {
+  hydrocon_compiled_country <- merge(
+    in_hydrocon_compiled, 
+    in_sites_dt[, .(site, country)], 
+    by = 'site'
+  )
   
-  sampling_date_lims <-in_allvars_dt[, list(
-    max_date = max(date, na.rm=T),
-    min_date = min(date, na.rm=T)), by=country]
+  sampling_date_lims <- in_allvars_dt[, .(
+    max_date = max(date, na.rm = TRUE),
+    min_date = min(date, na.rm = TRUE)
+  ), by = country]
   
   hydrocon_compiled_country[, country := factor(
     country,
-    levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ),
-    ordered=T)]
+    levels = c("Finland", "France", "Hungary", "Czech", "Croatia", "Spain"),
+    ordered = TRUE
+  )]
   
-  hydrocon_compiled_country[, relD90past := 1-relF90past]
-  relF_melt <- hydrocon_compiled_country[!duplicated(paste(country ,date)),] %>%
-    melt(id.vars=c('country', 'date'), measure.vars = c('relF90past', 'relD90past'))
+  hydrocon_compiled_country[, relD90past := 1 - relF90past]
+  relF_melt <- hydrocon_compiled_country[!duplicated(paste(country, date)), ] %>%
+    melt(id.vars = c('country', 'date'), measure.vars = c('relF90past', 'relD90past'))
   
-  # 1. Plot mean proportion of flowing river network length in the past 90 days
-  #    over time
+  # 1. Plot mean proportion of flowing river network length over time
   plot_relF90past <- ggplot(relF_melt) +
-    geom_area(aes(x=date, y=value, fill=variable), alpha=0.7) +
+    geom_area(aes(x = date, y = value, fill = variable), alpha = 0.7) +
     scale_fill_manual(
       name = 'Flow status',
-      values=c('#2b8cbe', '#feb24c'),
-      labels=c('Flowing', 'Non-flowing')) +
-    geom_rect(data=sampling_date_lims, 
-              aes(ymin=0, ymax=1, 
-                  xmin=max_date, xmax=max(sampling_date_lims$max_date)),
-              fill = 'white', alpha=0.8) +
-    geom_rect(data=sampling_date_lims, 
-              aes(ymin=0, ymax=1, 
-                  xmin=min(sampling_date_lims$min_date), xmax=min_date),
-              fill = 'white', alpha=0.8) +
+      values = c('#2b8cbe', '#feb24c'),
+      labels = c('Flowing', 'Non-flowing')
+    ) +
+    geom_rect(data = sampling_date_lims, 
+              aes(ymin = 0, ymax = 1, 
+                  xmin = max_date, xmax = max(sampling_date_lims$max_date)),
+              fill = 'white', alpha = 0.8) +
+    geom_rect(data = sampling_date_lims, 
+              aes(ymin = 0, ymax = 1, 
+                  xmin = min(sampling_date_lims$min_date), xmax = min_date),
+              fill = 'white', alpha = 0.8) +
     coord_cartesian(expand = FALSE) +
     scale_x_date(name = 'Date') +
-    scale_y_continuous(name=str_wrap(
-      'Mean % of network flowing/non-flowing over previous 90 days',
-      40),
-      labels = scales::label_percent()) +
+    scale_y_continuous(
+      name = str_wrap('Mean % of network flowing/non-flowing over previous 90 days', 40),
+      labels = scales::label_percent()
+    ) +
     facet_wrap(~as.factor(country)) +
-    theme_classic()  +
+    theme_classic() +
     theme(
       legend.position = "right",
-      legend.justification = c(0, 1),     # Top-left corner of legend box
-      legend.box.just = "top",            # Align legend at the top of its box
+      legend.justification = c(0, 1),
+      legend.box.just = "top",
       legend.box.margin = margin(10, 10, 10, 10),
-      plot.margin = margin(10, 50, 10, 10) # Add space on the right
+      plot.margin = margin(10, 50, 10, 10)
     )
   
-  #2. Plot sampling campaigns on top of relF -----------------------------------
+  # 2. Plot sampling campaigns on top
   plot_relF90past_sampling <- plot_relF90past +
-    geom_vline(data=in_allvars_dt, aes(xintercept=date, color=campaign), 
-               linewidth=1) +
-    scale_color_gradient(name='Campaign', low='black', high='grey') 
+    geom_vline(data = in_allvars_dt, aes(xintercept = date, color = campaign), linewidth = 1) +
+    scale_color_gradient(name = 'Campaign', low = 'black', high = 'grey') 
   
-  #3. Plot diversity over time -----------------------------------------------------
+  # 3. Plot alpha diversity over time
   in_allvars_dt <- in_allvars_dt %>%
     setorderv(c('organism', 'country', 'site', 'date')) %>%
-    .[, #Compute change in richness in individual sites over time scaled to 1
-      richness_tstandard := richness - .SD[1, richness], 
+    .[, paste0(alpha_var, "_tstandard") := get(alpha_var) - .SD[1, get(alpha_var)], 
       by = c('organism', 'country', 'site')] %>%
-    .[, #COmpute mean campaign date for boxplot representation
-      mean_campaign_date := mean(date, na.rm=T),
-      by = c('organism', 'country', 'campaign')] %>%
-    .[,`:=`(richness_tstandard_scaled = scales::rescale(richness_tstandard),
-            richness_scaled = scales::rescale(richness)),
-      by = c('organism')] %>% 
-    merge(in_organism_dt, by='organism')
+    .[, mean_campaign_date := mean(date, na.rm = TRUE), by = c('organism', 'country', 'campaign')] %>%
+    .[, c(paste0(alpha_var, "_tstandard_scaled"), paste0(alpha_var, "_scaled")) := 
+        .(scales::rescale(get(paste0(alpha_var, "_tstandard"))),
+          scales::rescale(get(alpha_var))),
+      by = 'organism'] %>%
+    merge(in_organism_dt, by = 'organism')
   
-  richness_plot_list <- lapply(
-    unique(in_allvars_dt$organism_label), function(in_organism) {
-      dt_sub <- in_allvars_dt[organism_label==in_organism,]
-      
-      campaign_color_scale <- dt_sub[, uniqueN(campaign)] %>%
-        seq(0, 1, length.out=.) %>%
-        scales::pal_seq_gradient("black", "black")(.)
-      
-      rich_range <- range(dt_sub[, richness])
-      
-      plot_richness <- plot_relF90past + 
-        new_scale('fill') +
-        geom_boxplot(data=dt_sub,
-                     aes(x=mean_campaign_date, y=richness_scaled,
-                         color = factor(campaign), fill = stream_type),
-                     outliers=T,
-                     width = 20,
-                     position = position_dodge(preserve = "single")) +
-        scale_colour_manual(name='Campaign', 
-                            values=campaign_color_scale,
-                            guide='none') +
-        scale_fill_manual(name = 'Stream type',
-                          values=c('#2b8cbe', '#feb24c'),
-                          labels = c('Perennial', 'Non-perennial')) +
-        scale_y_continuous(
-          name = "Mean % of network flowing/non-flowing (background)",
-          labels = scales::label_percent(),
-          sec.axis = sec_axis(
-            transform = ~ . * (rich_range[[2]] - rich_range[[1]]) + rich_range[[1]],  # reverse the scaling transformation
-            name = "Taxa richness (boxplots)"
-          )
-        ) +
-        ggtitle(label = in_organism)
-      return(plot_richness)
-    }) %>% setNames(unique(in_allvars_dt$organism_label))
+  alpha_plot_list <- lapply(unique(in_allvars_dt$organism_label), function(in_organism) {
+    dt_sub <- in_allvars_dt[organism_label == in_organism, ]
+    
+    campaign_color_scale <- dt_sub[, uniqueN(campaign)] %>%
+      seq(0, 1, length.out = .) %>%
+      scales::pal_seq_gradient("black", "black")(.)
+    
+    alpha_range <- range(dt_sub[[alpha_var]])
+    
+    plot_alpha <- plot_relF90past + 
+      ggnewscale::new_scale('fill') +
+      geom_boxplot(data = dt_sub,
+                   aes(
+                     x = mean_campaign_date,
+                     y = get(paste0(alpha_var, "_scaled")),
+                     color = factor(campaign),
+                     fill = stream_type
+                   ),
+                   outliers = TRUE,
+                   width = 20,
+                   position = position_dodge(preserve = "single")) +
+      scale_colour_manual(name = 'Campaign', values = campaign_color_scale, guide = 'none') +
+      scale_fill_manual(name = 'Stream type',
+                        values = c('#2b8cbe', '#feb24c'),
+                        labels = c('Perennial', 'Non-perennial')) +
+      scale_y_continuous(
+        name = "Mean % of network flowing/non-flowing (background)",
+        labels = scales::label_percent(),
+        sec.axis = sec_axis(
+          transform = ~ . * (alpha_range[[2]] - alpha_range[[1]]) + alpha_range[[1]],
+          name = paste0(alpha_var, " (boxplots)")
+        )
+      ) +
+      ggtitle(label = in_organism)
+    
+    return(plot_alpha)
+  }) %>% setNames(unique(in_allvars_dt$organism_label))
   
-  #Write plots ----------------------------------------------------------------
+  # Write plots
   if (write_plots) {
-    ggsave(filename = file.path(out_dir, 'relF90past_drn.png'),
-           plot = plot_relF90past,
-           width = 10,
-           height = 6,
-           units='in',
-           dpi=600
-    )
+    ggsave(file.path(out_dir, 'relF90past_drn.png'), 
+           plot = plot_relF90past, 
+           width = 10, height = 6, 
+           units = 'in', dpi = 600)
+    ggsave(file.path(out_dir, 'relF90past_drn_sampling.png'), 
+           plot = plot_relF90past_sampling, 
+           width = 10, height = 6, 
+           units = 'in', dpi = 600)
     
-    ggsave(filename = file.path(out_dir, 'relF90past_drn_sampling.png'),
-           plot = plot_relF90past_sampling,
-           width = 10,
-           height = 6,
-           units='in',
-           dpi=600
-    )
-    
-    lapply(names(richness_plot_list), function(in_organism_label) {
-      ggsave(filename = file.path(out_dir, 
-                                  paste0('relF90past_drn_richness_',
-                                         in_organism_label,
-                                         '.png')
-      ),
-      plot = richness_plot_list[[in_organism_label]],
-      width = 10,
-      height = 6,
-      units='in',
-      dpi=600
-      )
+    lapply(names(alpha_plot_list), function(in_organism_label) {
+      ggsave(file.path(out_dir, 
+                       paste0('relF90past_drn_', alpha_var, '_',
+                              in_organism_label, '.png')),
+             plot = alpha_plot_list[[in_organism_label]],
+             width = 10, height = 6, units = 'in', dpi = 600)
     })
   }
   
   return(list(
     hydro = plot_relF90past,
-    hydro_sampling =  plot_relF90past_sampling,
-    richness_list = richness_plot_list
-  )
-  )
+    hydro_sampling = plot_relF90past_sampling,
+    alpha_list = alpha_plot_list
+  ))
 }
-
 #------ check_diversity_dependence_on_habitat_volume ---------------------------
 #n_allvars_merged <- tar_read(allvars_merged)
 
-#' @title Check correlation between miv diversity and habitat volume
+#' @title Check correlation between alpha diversity and habitat volume
 #' @description Creates diagnostic scatter plots to examine the relationship 
-#'     between taxonomic richness and local habitat volume metrics (e.g., depth, width, velocity),
-#'    faceted by country.
-#' @param in_allvars_merged A list containing a data table of all merged variables.
+#'     between alpha diversity and local habitat volume metrics (e.g., depth, width, velocity),
+#'     faceted by country.
+#' @param in_allvars_merged A list containing a data.table of all merged variables.
+#' @param alpha_var Character string: name of the alpha diversity column to use (e.g., "richness", "shannon").
 #' @return A list of ggplot objects showing the relationships for different organism groups.
-check_cor_div_habvol <- function(in_allvars_merged) {
-  #names(in_allvars_merged$dt)
-  in_allvars_merged$dt[, avg_vol_miv := avg_depth_macroinvertebrates*average_wetted_width_m]
-  in_allvars_merged$dt[, mean_avg_vol_miv := mean(avg_vol_miv), by=site]
-  in_allvars_merged$dt[, mean_velo_miv := mean(avg_velocity_macroinvertebrates), by=site]
+check_cor_div_habvol <- function(in_allvars_merged, alpha_var = "richness") {
   
-  p_miv_vol <- ggplot(in_allvars_merged$dt[organism=='miv',], 
-                      aes(x=avg_vol_miv/mean_avg_vol_miv, 
-                          y=richness/mean_richness)) +
+  dt <- copy(in_allvars_merged$dt)
+  
+  # Compute scaled habitat metrics
+  dt[, avg_vol_miv := avg_depth_macroinvertebrates * average_wetted_width_m]
+  dt[, mean_avg_vol_miv := mean(avg_vol_miv), by = site]
+  dt[, mean_velo_miv := mean(avg_velocity_macroinvertebrates), by = site]
+  dt[, mean_alpha := mean(get(alpha_var)), by = site]  # scaled alpha diversity
+  
+  # 1. MIV: volume vs alpha
+  p_miv_vol <- ggplot(dt[organism == 'miv', ],
+                      aes(x = avg_vol_miv / mean_avg_vol_miv,
+                          y = get(alpha_var) / mean_alpha)) +
     geom_point() +
-    geom_smooth(aes(color=site), method='lm', se=F) +
+    geom_smooth(aes(color = site), method = 'lm', se = FALSE) +
     facet_wrap(~country) +
     theme(legend.position = 'none')
   
-  p_miv_vel <- ggplot(in_allvars_merged$dt[organism=='miv_nopools' & 
-                                             avg_velocity_macroinvertebrates<5,], 
-                      aes(x=avg_velocity_macroinvertebrates, 
-                          y=richness/mean_richness)) +
+  # 2. MIV: velocity vs alpha
+  p_miv_vel <- ggplot(dt[organism == 'miv_nopools' & avg_velocity_macroinvertebrates < 5, ],
+                      aes(x = avg_velocity_macroinvertebrates,
+                          y = get(alpha_var) / mean_alpha)) +
     geom_point() +
-    geom_smooth(aes(color=site), method='lm', se=F) +
-    geom_smooth(color='black', method='lm', linewidth=1.2) +
+    geom_smooth(aes(color = site), method = 'lm', se = FALSE) +
+    geom_smooth(color = 'black', method = 'lm', linewidth = 1.2) +
     facet_wrap(~country) +
     theme(legend.position = 'none')
   
-  p_dia_biof_vol <- ggplot(in_allvars_merged$dt[organism=='dia_biof',], 
-                           aes(x=volume_biofilm, 
-                               y=richness/mean_richness)) +
+  # 3. Diatoms biofilm: volume vs alpha
+  p_dia_biof_vol <- ggplot(dt[organism_class == 'dia_biof', ],
+                           aes(x = volume_biofilm,
+                               y = get(alpha_var) / mean_alpha)) +
     geom_point() +
-    geom_smooth(aes(color=site), method='lm', se=F) +
+    geom_smooth(aes(color = site), method = 'lm', se = FALSE) +
+    facet_wrap(organism~country) +
+    theme(legend.position = 'none')
+  
+  # 4. Diatoms biofilm: m2 vs alpha
+  p_dia_biof_m2 <- ggplot(dt[organism == 'dia_biof', ],
+                          aes(x = m2_biofilm,
+                              y = get(alpha_var) / mean_alpha)) +
+    geom_point() +
+    geom_smooth(aes(color = site), method = 'lm', se = FALSE) +
     facet_wrap(~country) +
     theme(legend.position = 'none')
   
-  p_dia_biof_m2 <- ggplot(in_allvars_merged$dt[organism=='dia_biof',], 
-                          aes(x=m2_biofilm, 
-                              y=richness/mean_richness)) +
+  # 5. Fungi biofilm: m2 vs alpha
+  p_fun_biof_m2 <- ggplot(dt[organism == 'fun_biof', ],
+                          aes(x = m2_biofilm,
+                              y = get(alpha_var) / mean_alpha)) +
     geom_point() +
-    geom_smooth(aes(color=site), method='lm', se=F) +
+    geom_smooth(aes(color = site), method = 'lm', se = FALSE) +
     facet_wrap(~country) +
     theme(legend.position = 'none')
   
-  p_fun_biof_m2 <- ggplot(in_allvars_merged$dt[organism=='fun_biof',], 
-                          aes(x=m2_biofilm, 
-                              y=richness/mean_richness)) +
+  # 6. BActeria biofilm: m2 vs alpha
+  p_bac_biof_m2 <- ggplot(dt[organism == 'bac_biof', ],
+                          aes(x = m2_biofilm,
+                              y = get(alpha_var) / mean_alpha)) +
     geom_point() +
-    geom_smooth(aes(color=site), method='lm', se=F) +
+    geom_smooth(aes(color = site), method = 'lm', se = FALSE) +
     facet_wrap(~country) +
     theme(legend.position = 'none')
   
   return(list(
-    miv_vol= p_miv_vol,
+    miv_vol = p_miv_vol,
     miv_vel = p_miv_vel,
     dia_biof_vol = p_dia_biof_vol,
     dia_biof_m2 = p_dia_biof_m2,
@@ -5956,79 +5988,80 @@ check_cor_div_habvol <- function(in_allvars_merged) {
 # save_plots=T
 # out_dir = figdir
 
-#' @title Plot scatter of richness vs. basin area and discharge
+#' @title Plot scatter of alpha diversity vs. basin area and discharge
 #' @description Creates scatter plots to visualize the relationship between 
-#'      taxonomic richness and upstream basin area or simulated discharge. 
+#'      alpha diversity and upstream basin area or simulated discharge. 
 #'      The plots are faceted by organism and country.
-#' @param in_dt A data table of summarized variables.
-#' @param in_organism_dt A data table mapping organism codes to their labels.
-#' @param write_plots A logical value to save the plots as PNG files.
-#' @param out_dir The output directory for the saved plots.
+#' @param in_dt A data.table of summarized variables.
+#' @param in_organism_dt A data.table mapping organism codes to their labels.
+#' @param alpha_var Character string: name of the alpha diversity column to plot (e.g., "mean_richness", "mean_shannon").
+#' @param write_plots Logical: whether to save the plots as PNG files.
+#' @param out_dir Output directory for saved plots.
 #' @return A list of ggplot objects: one for basin area and one for discharge.
 plot_areadiv_scatter <- function(in_dt,
                                  in_organism_dt,
-                                 write_plots=T,
-                                 out_dir=NULL) {
+                                 alpha_var = "mean_richness",
+                                 write_plots = TRUE,
+                                 out_dir = NULL) {
+  
   # prepare data and order countries for consistent faceting
   in_dt_labels <- merge(in_dt,
                         in_organism_dt,
-                        by='organism', all.x=F) %>%
+                        by = 'organism', all.x = FALSE) %>%
     .[, country := factor(
       country, 
-      levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ),
-      ordered=T)] %>%
-    .[organism != c('miv_nopools_flying', 'miv_nopools_noflying')]
+      levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain"),
+      ordered = TRUE)] %>%
+    .[!(organism %in% c('miv_nopools_flying', 'miv_nopools_noflying'))]
   
-  # 1. Plot mean richness vs. basin area
-  plot_area_rich <- ggplot(in_dt_labels, 
-                           aes(x=basin_area_km2, y=mean_richness)) +
-    geom_point(aes(color=stream_type)) +
-    geom_smooth(aes(color=stream_type), method='gam', se=F) +
-    geom_smooth(method='gam', color='black', se=F) +
-    scale_x_log10(name=expression('Basin area'~km^2))  +
-    scale_y_continuous(name='Mean site taxonomic richness') +
+  # 1. Plot alpha diversity vs. basin area
+  plot_area <- ggplot(in_dt_labels, 
+                      aes(x = basin_area_km2, y = get(alpha_var))) +
+    geom_point(aes(color = stream_type)) +
+    geom_smooth(aes(color = stream_type), method = 'gam', se = FALSE) +
+    geom_smooth(method = 'gam', color = 'black', se = FALSE) +
+    scale_x_log10(name = expression('Basin area' ~ km^2)) +
+    scale_y_continuous(name = alpha_var) +
     scale_color_manual(name = 'Stream type',
-                       values=c('#2b8cbe', '#feb24c'),
+                       values = c('#2b8cbe', '#feb24c'),
                        labels = c('Perennial', 'Non-perennial')) +
-    facet_grid(organism_label~country, scales='free') +
+    facet_grid(organism_label ~ country, scales = 'free') +
     theme_bw()
   
-  # 2. Plot mean richness vs. simulated discharge
-  plot_qsim_rich <- ggplot(in_dt_labels, 
-                           aes(x=qsim_avg_samp, y=mean_richness)) +
-    geom_point(aes(color=stream_type)) +
-    geom_smooth(aes(color=stream_type), method='lm', se=F) +
-    geom_smooth(method='gam', color='black', se=F) +
-    scale_x_log10(name=expression('Mean simulated discharge during sampling period'~m^3~s^-1))  +
-    scale_y_continuous(name='Mean site taxonomic richness') +
+  # 2. Plot alpha diversity vs. simulated discharge
+  plot_qsim <- ggplot(in_dt_labels, 
+                      aes(x = qsim_avg_samp, y = get(alpha_var))) +
+    geom_point(aes(color = stream_type)) +
+    geom_smooth(aes(color = stream_type), method = 'lm', se = FALSE) +
+    geom_smooth(method = 'gam', color = 'black', se = FALSE) +
+    scale_x_log10(name = expression('Mean simulated discharge during sampling period' ~ m^3 ~ s^-1)) +
+    scale_y_continuous(name = alpha_var) +
     scale_color_manual(name = 'Stream type',
-                       values=c('#2b8cbe', '#feb24c'),
+                       values = c('#2b8cbe', '#feb24c'),
                        labels = c('Perennial', 'Non-perennial')) +
-    facet_grid(organism_label~country, scales='free') +
+    facet_grid(organism_label ~ country, scales = 'free') +
     theme_bw()
   
-  # 3. save plots if requested
+  # 3. Save plots if requested
   if (write_plots) {
-    ggsave(filename = file.path(out_dir, 'scatter_area_meanrichness.png'),
-           plot = plot_area_rich,
+    ggsave(filename = file.path(out_dir, paste0('scatter_area_', alpha_var, '.png')),
+           plot = plot_area,
            width = 12,
            height = 8,
-           units='in',
-           dpi=600
-    )
+           units = 'in',
+           dpi = 600)
     
-    ggsave(filename = file.path(out_dir, 'scatter_qsim_meanrichness.png'),
-           plot = plot_qsim_rich,
+    ggsave(filename = file.path(out_dir, paste0('scatter_qsim_', alpha_var, '.png')),
+           plot = plot_qsim,
            width = 12,
            height = 8,
-           units='in',
-           dpi=600
-    )
+           units = 'in',
+           dpi = 600)
   }
   
   return(list(
-    area = plot_area_rich,
-    qsim = plot_qsim_rich
+    area = plot_area,
+    qsim = plot_qsim
   ))
 }
 
@@ -6478,7 +6511,7 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
   
   # Combine model glance tables and attach the full model objects
   ssn_hydrowindow_perf_allvars <- lapply(
-    in_ssnmodels[organism==in_organism, ssn_richness_hydrowindow],
+    in_ssnmodels[organism==in_organism, ssn_div_hydrowindow],
     function(x) {
       merge(
         x[['ssn_glance']],
@@ -6536,7 +6569,7 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
   
   ssn_hydrowindow_varcomp <- ssn_hydrowindow_perf_allvars[
     , SSN2::varcomp(mod[[1]]), 
-    by=.(hydro_var, covtypes, hydro_var_root_label, window_d)
+    by=.(response_var, hydro_var, covtypes, hydro_var_root_label, window_d)
   ] %>%
     merge(data.table(
       varcomp=c(
@@ -6578,21 +6611,25 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
     , .SD[which.min(AICc),], 
     by = hydro_var_root]
   
+  
   #Get model predictions from the best models
   mod_preds <- lapply(seq(nrow(ssn_hydrowindow_best)), function(i) {
     # Subset the data.table to get the current row
     aug_data <- SSN2::augment(ssn_hydrowindow_best[i, mod[[1]]], 
                               drop=FALSE) %>%
-      cbind(ssn_hydrowindow_best[i, .(hydro_var, covtypes, hydro_var_root, window_d)])
+      cbind(ssn_hydrowindow_best[i, .(hydro_var, response_var, covtypes,
+                                      hydro_var_root, window_d)])
     return(aug_data)
   }) %>% rbindlist
   
   #Plot observation vs predictions for the best models
+  resp_var <- ssn_hydrowindow_best$response_var[[1]]
   obs_preds_plot <- ggplot(mod_preds, 
-                           aes(x=.fitted, y=richness, color=country)) +
+                           aes(x=.fitted, y=get(resp_var), color=country)) +
     geom_abline() +
     geom_point() +
     geom_smooth(method='lm') +
+    scale_y_continuous(name=resp_var) +
     facet_grid(country~hydro_var) +
     theme_bw()
   
@@ -6710,26 +6747,26 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
   ))
 }
 
-#------ save_ssn_richness_hydrowindow_plots ------------------------------------
-# in_ssn_richness_hydrowindow_formatted = tar_read(ssn_richness_hydrowindow_formatted)
+#------ save_ssn_div_hydrowindow_plots ------------------------------------
+# in_ssn_div_hydrowindow_formatted = tar_read(ssn_div_hydrowindow_formatted)
 # out_dir = figdir
 
-#' @title Save SSN richness hydro-window plots
+#' @title Save SSN div hydro-window plots
 #' @description This function is a utility to save the plots and data tables generated by `format_ssn_hydrowindow` to a specified output directory. It iterates through the results and saves each plot as a PNG and the performance table as a CSV.
-#' @param in_ssn_richness_hydrowindow_formatted The formatted list of results from `format_ssn_hydrowindow`.
+#' @param in_ssn_div_hydrowindow_formatted The formatted list of results from `format_ssn_hydrowindow`.
 #' @param out_dir The output directory where files will be saved.
 #' @return A list of file paths to the saved plots.
-save_ssn_richness_hydrowindow_plots <- function(
-    in_ssn_richness_hydrowindow_formatted,
+save_ssn_div_hydrowindow_plots <- function(
+    in_ssn_div_hydrowindow_formatted,
     out_dir) {
   
-  lapply(names(in_ssn_richness_hydrowindow_formatted), function(in_organism) {
+  lapply(names(in_ssn_div_hydrowindow_formatted), function(in_organism) {
     
     # Save the formatted performance data table as a CSV file. 
     #The 'mod' column is excluded to prevent saving large objects.
-    fwrite(in_ssn_richness_hydrowindow_formatted[[in_organism]]$dt[, -c('mod'), with=F], 
+    fwrite(in_ssn_div_hydrowindow_formatted[[in_organism]]$dt[, -c('mod'), with=F], 
            file.path(out_dir, 
-                     paste0('ssn_richness_hydrowindow_perftable_', 
+                     paste0('ssn_div_hydrowindow_perftable_', 
                             in_organism, '.csv'))
     )
     
@@ -6740,14 +6777,14 @@ save_ssn_richness_hydrowindow_plots <- function(
     # Loop through each plot and save it as a PNG file
     lapply(plot_names, function(pname) {
       out_path <- file.path(out_dir, 
-                            paste0('ssn_richness_hydrowindow_', 
+                            paste0('ssn_div_hydrowindow_', 
                                    in_organism, '_',
                                    pname, '.png'))
       message(paste0('Saving ', out_path))
       
       ggsave(
         filename = out_path,
-        plot = in_ssn_richness_hydrowindow_formatted[[in_organism]][[pname]],
+        plot = in_ssn_div_hydrowindow_formatted[[in_organism]][[pname]],
         width = 9,
         height = 9,
         units='in',
@@ -7305,13 +7342,13 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
 
 #' Macroinvertebrate model for annual data
 #'
-#' This function models macroinvertebrate richness averaged across all samplig dates. 
+#' This function models macroinvertebrate alpha diversity averaged across all samplig dates. 
 #' It performs data preparation, conducts exploratory data analysis (if `interactive` is TRUE),
 #' tests various model structures using a streamlined SSN generalized linear
 #' modeling approach, and provides a summary of model performance.
 #'
 #' The function's primary goal is to identify the best-fitting spatial stream
-#' network (SSN) model for predicting macroinvertebrate richness based on
+#' network (SSN) model for predicting macroinvertebrate alpha diversity based on
 #' hydrological, environmental, and spatial variables.
 #'
 #' @param in_ssn_eu_summarized A list containing the summarized SSN object for
@@ -7319,7 +7356,7 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
 #' @param in_allvars_merged A list containing merged environmental and hydrological
 #'   variables. This is used to define the list of candidate variables.
 #' @param in_cor_matrices A list of correlation matrices, used to check for
-#'   relationships between variables and richness.
+#'   relationships between variables and alpha diversity.
 #' @param ssn_covtypes A data frame or list specifying SSN covariance types.
 #'   This is used to systematically test different spatial covariance structures.
 #' @param scale_predictors A logical value. If TRUE, all candidate hydrological 
@@ -7368,37 +7405,38 @@ model_miv_yr <- function(in_ssn_eu_summarized,
                                      function(x) base::scale(x, center=T, scale=T)),
       .SDcols = hydro_candidates]
   }
-
+  
+  alpha_var <- 'mean_richness'
   
   #Exploratory plots-------
   if (interactive) {
-    ggplot(ssn_miv$obs, aes(x=country, y=mean_richness)) +
+    ggplot(ssn_miv$obs, aes(x=country, y=get(alpha_var))) +
       geom_boxplot()
     
-    ggplot(ssn_miv$obs, aes(x=country, y=mean_richness, fill=stream_type)) +
+    ggplot(ssn_miv$obs, aes(x=country, y=get(alpha_var), fill=stream_type)) +
       geom_boxplot()
     
-    ggplot(ssn_miv$obs, aes(x=basin_area_km2, y=mean_richness, color=stream_type)) +
+    ggplot(ssn_miv$obs, aes(x=basin_area_km2, y=get(alpha_var), color=stream_type)) +
       geom_point() +
       geom_smooth(method='lm') +
       scale_x_log10() +
       facet_wrap(~country)
     
-    ggplot(ssn_miv$obs, aes(x=DurD_samp, y=mean_richness)) +
+    ggplot(ssn_miv$obs, aes(x=DurD_samp, y=get(alpha_var))) +
       geom_point(aes(color=country)) +
       geom_smooth(aes(color=country), method='lm', se=F) +
       geom_smooth(method='lm') 
     
-    ggplot(ssn_miv$obs, aes(x=DurD3650past, y=mean_richness)) +
+    ggplot(ssn_miv$obs, aes(x=DurD3650past, y=get(alpha_var))) +
       geom_point(aes(color=country)) +
       geom_smooth(aes(color=country), method='lm', se=F) +
       geom_smooth(method='lm') 
     
     data.table::melt(ssn_miv$obs, 
-                     id.vars=c('site', 'country', 'mean_richness'), 
+                     id.vars=c('site', 'country', alpha_var), 
                      measure.vars=hydro_candidates
     ) %>%
-      ggplot(aes(x=value, y=mean_richness)) +
+      ggplot(aes(x=value, y=get(alpha_var))) +
       geom_point(aes(color=country)) +
       geom_smooth(aes(color=country), method='lm', se=F) +
       geom_smooth(method='lm', se=F, color='black') +
@@ -7409,14 +7447,14 @@ model_miv_yr <- function(in_ssn_eu_summarized,
   #Settle on a basic covariance structure to start  with -----
   #Check correlation
   topcors_overall <- in_cor_matrices$div[
-    variable1 == 'mean_richness' & organism == 'miv_nopools' 
+    variable1 == alpha_var & organism == 'miv_nopools' 
     # & variable2 %in% hydro_candidates 
     & !is.na(correlation),] %>%
     .[, abs_cor := abs(correlation)] %>%
     setorder(-abs_cor)
   
   topcors_bydrn <- in_cor_matrices$div_bydrn[
-    variable1 == 'mean_richness' & organism == 'miv_nopools' &
+    variable1 == alpha_var & organism == 'miv_nopools' &
       variable2 %in% hydro_candidates & !is.na(correlation),] %>%
     .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
              var_label = paste(variable2, round(correlation, 2))
@@ -7424,7 +7462,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     dcast(cor_order~country, value.var = 'var_label', fill=NA)
   
   topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
-    variable1 == 'mean_richness' & organism == 'miv_nopools' &
+    variable1 == alpha_var & organism == 'miv_nopools' &
       variable2 %in% hydro_candidates & !is.na(correlation),] %>%
     .[, mean(correlation), by=variable2] %>%
     .[order(V1),]
@@ -7436,7 +7474,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
       organism = c('miv_nopools'),
       formula_root = ' sqrt(basin_area_km2)',
       hydro_var = 'DurD3650past',
-      response_var = 'mean_richness',
+      response_var = alpha_var,
       ssn_covtypes = ssn_covtypes,
       partition_formula = as.formula('~ country'),
       random_formula = NULL,
@@ -7449,7 +7487,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
       organism = c('miv_nopools'),
       formula_root = ' sqrt(basin_area_km2)',
       hydro_var = 'DurD3650past',
-      response_var = 'mean_richness',
+      response_var = alpha_var,
       ssn_covtypes = ssn_covtypes,
       partition_formula = as.formula('~ country'),
       random_formula = NULL,
@@ -7462,7 +7500,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
       organism = c('miv_nopools'),
       formula_root = ' sqrt(basin_area_km2)',
       hydro_var = 'DurD3650past',
-      response_var = 'mean_richness',
+      response_var = alpha_var,
       ssn_covtypes = ssn_covtypes,
       partition_formula = as.formula('~ country'),
       random_formula = NULL,
@@ -7482,7 +7520,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
       organism = c('miv_nopools'),
       formula_root = ' sqrt(basin_area_km2)',
       hydro_var = 'DurD3650past',
-      response_var = 'mean_richness',
+      response_var = alpha_var,
       ssn_covtypes = ssn_covtypes,
       partition_formula = as.formula('~ country'),
       random_formula = NULL,
@@ -7519,95 +7557,95 @@ model_miv_yr <- function(in_ssn_eu_summarized,
   miv_rich_modlist <- list()
   
   #Null model
-  miv_rich_modlist [['null']] <- quick_miv_ssn(mean_richness ~ 1)
+  miv_rich_modlist [['null']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ 1')))
   
   #Initial model
-  miv_rich_modlist [['mod1']] <- quick_miv_ssn(mean_richness ~ sqrt(basin_area_km2))
+  miv_rich_modlist [['mod1']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2)')))
   
-  miv_rich_modlist [['mod2']] <- quick_miv_ssn(mean_richness ~ country*sqrt(basin_area_km2))
+  miv_rich_modlist [['mod2']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ country*sqrt(basin_area_km2)')))
   
-  miv_rich_modlist [['mod3']] <- quick_miv_ssn(mean_richness ~ basin_area_km2 + country:sqrt(basin_area_km2))
+  miv_rich_modlist [['mod3']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ basin_area_km2 + country:sqrt(basin_area_km2)')))
   
-  miv_rich_modlist [['mod4']] <- quick_miv_ssn(mean_richness ~ DurD3650past + sqrt(basin_area_km2) + country:sqrt(basin_area_km2))
+  miv_rich_modlist [['mod4']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
   
-  miv_rich_modlist [['mod5']] <- quick_miv_ssn(mean_richness ~ DurD3650past + country:DurD3650past + sqrt(basin_area_km2))
+  miv_rich_modlist [['mod5']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + sqrt(basin_area_km2)')))
   
-  miv_rich_modlist[['mod6']] <- quick_miv_ssn(mean_richness ~ DurD3650past + country:DurD3650past + sqrt(basin_area_km2))
+  miv_rich_modlist[['mod6']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + sqrt(basin_area_km2)')))
   
-  miv_rich_modlist[['mod7']] <- quick_miv_ssn(mean_richness ~ FreD3650past + country:FreD3650past + sqrt(basin_area_km2))
+  miv_rich_modlist[['mod7']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ FreD3650past + country:FreD3650past + sqrt(basin_area_km2)')))
   
-  miv_rich_modlist[['mod8']] <- quick_miv_ssn(mean_richness ~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2))
+  miv_rich_modlist[['mod8']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2)')))
   
-  miv_rich_modlist[['mod9']] <- quick_miv_ssn(mean_richness ~ DurD_avg_samp + country:DurD_avg_samp + sqrt(basin_area_km2))
+  miv_rich_modlist[['mod9']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_avg_samp + country:DurD_avg_samp + sqrt(basin_area_km2)')))
   
-  miv_rich_modlist[['mod10']] <- quick_miv_ssn(mean_richness ~ FreD_samp + country:FreD_samp + sqrt(basin_area_km2))
+  miv_rich_modlist[['mod10']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ FreD_samp + country:FreD_samp + sqrt(basin_area_km2)')))
   
-  miv_rich_modlist[['mod11']] <- quick_miv_ssn(mean_richness ~ PDurD365past + country:PDurD365past + sqrt(basin_area_km2))
+  miv_rich_modlist[['mod11']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ PDurD365past + country:PDurD365past + sqrt(basin_area_km2)')))
   
-  miv_rich_modlist[['mod12']] <- quick_miv_ssn(mean_richness ~ Fdist_mean_10past_undirected_avg_samp + country:Fdist_mean_10past_undirected_avg_samp + sqrt(basin_area_km2))
+  miv_rich_modlist[['mod12']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ Fdist_mean_10past_undirected_avg_samp + country:Fdist_mean_10past_undirected_avg_samp + sqrt(basin_area_km2)')))
   
-  miv_rich_modlist[['mod13']] <- quick_miv_ssn(mean_richness ~ PFreD365past + country:PFreD365past + sqrt(basin_area_km2))
+  miv_rich_modlist[['mod13']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ PFreD365past + country:PFreD365past + sqrt(basin_area_km2)')))
   
-  miv_rich_modlist[['mod14']] <- quick_miv_ssn(mean_richness ~ STcon_m10_undirected_avg_samp + country:STcon_m10_undirected_avg_samp + sqrt(basin_area_km2))
+  miv_rich_modlist[['mod14']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ STcon_m10_undirected_avg_samp + country:STcon_m10_undirected_avg_samp + sqrt(basin_area_km2)')))
   
-  miv_rich_modlist[['mod15']] <- quick_miv_ssn(mean_richness ~ sqrt(qsim_avg_samp) + country:sqrt(qsim_avg_samp) + sqrt(basin_area_km2))
+  miv_rich_modlist[['mod15']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ sqrt(qsim_avg_samp) + country:sqrt(qsim_avg_samp) + sqrt(basin_area_km2)')))
   
-  miv_rich_modlist[['mod16']] <- quick_miv_ssn(mean_richness ~ DurD3650past + DurD_samp + country:DurD_samp + sqrt(basin_area_km2))
+  miv_rich_modlist[['mod16']] <- quick_miv_ssn(as.formula(paste(alpha_var, '~ DurD3650past + DurD_samp + country:DurD_samp + sqrt(basin_area_km2)')))
   
-  miv_rich_modlist[['mod17']] <- quick_miv_ssn(mean_richness ~ DurD3650past + country:DurD3650past + DurD_samp + country:DurD_samp + sqrt(basin_area_km2))
+  miv_rich_modlist[['mod17']] <- quick_miv_ssn(as.formula(paste(alpha_var, '~ DurD3650past + country:DurD3650past + DurD_samp + country:DurD_samp + sqrt(basin_area_km2)')))
   
-  miv_rich_modlist[['mod18']] <- quick_miv_ssn(mean_richness ~ FreD3650past + country:FreD3650past + DurD_samp + country:DurD_samp + sqrt(basin_area_km2))
+  miv_rich_modlist[['mod18']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ FreD3650past + country:FreD3650past + DurD_samp + country:DurD_samp + sqrt(basin_area_km2)')))
   
-  miv_rich_modlist[['mod19']] <- quick_miv_ssn(mean_richness ~ DurD3650past + country:DurD3650past + FreD_samp + country:FreD_samp + sqrt(basin_area_km2))
+  miv_rich_modlist[['mod19']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + FreD_samp + country:FreD_samp + sqrt(basin_area_km2)')))
   
-  miv_rich_modlist[['mod20']] <- quick_miv_ssn(mean_richness ~ DurD3650past + country:DurD3650past + PFreD365past + country:PFreD365past + sqrt(basin_area_km2))
+  miv_rich_modlist[['mod20']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + PFreD365past + country:PFreD365past + sqrt(basin_area_km2)')))
   
-  miv_rich_modlist[['mod21']] <- quick_miv_ssn(mean_richness ~ Fdist_mean_10past_undirected_avg_samp + DurD_samp + country:DurD_samp + sqrt(basin_area_km2))
+  miv_rich_modlist[['mod21']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ Fdist_mean_10past_undirected_avg_samp + DurD_samp + country:DurD_samp + sqrt(basin_area_km2)')))
   
-  miv_rich_modlist[['mod22']] <- quick_miv_ssn(mean_richness ~ STcon_m10_undirected_avg_samp + DurD_samp + country:DurD_samp + sqrt(basin_area_km2))
+  miv_rich_modlist[['mod22']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ STcon_m10_undirected_avg_samp + DurD_samp + country:DurD_samp + sqrt(basin_area_km2)')))
   
   ###########TRY ADDING ENVIRONMENTAL VARIABLES
-  miv_rich_modlist[['mod23']] <- quick_miv_ssn(mean_richness ~ DurD3650past + DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + env_PC1)
+  miv_rich_modlist[['mod23']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + env_PC1')))
   
-  miv_rich_modlist[['mod24']] <- quick_miv_ssn(mean_richness ~ DurD3650past + DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + env_PC1 + env_PC2)
+  miv_rich_modlist[['mod24']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + env_PC1 + env_PC2')))
   
-  miv_rich_modlist[['mod25']] <- quick_miv_ssn(mean_richness ~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + env_PC1 + env_PC2)
+  miv_rich_modlist[['mod25']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + env_PC1 + env_PC2')))
   
-  miv_rich_modlist[['mod26']] <- quick_miv_ssn(mean_richness ~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + env_PC2)
+  miv_rich_modlist[['mod26']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + env_PC2')))
   
-  miv_rich_modlist[['mod27']] <- quick_miv_ssn(mean_richness ~ DurD3650past + DurD_samp + country:DurD_samp + sqrt(qsim_avg_samp) + env_PC1 + env_PC2)
+  miv_rich_modlist[['mod27']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + DurD_samp + country:DurD_samp + sqrt(qsim_avg_samp) + env_PC1 + env_PC2')))
   
-  miv_rich_modlist[['mod28']] <- quick_miv_ssn(mean_richness ~ DurD3650past + DurD_samp + country:DurD_samp + sqrt(qsim_avg_samp) + env_PC1 + env_PC2)
+  miv_rich_modlist[['mod28']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + DurD_samp + country:DurD_samp + sqrt(qsim_avg_samp) + env_PC1 + env_PC2')))
   
-  miv_rich_modlist[['mod29']] <- quick_miv_ssn(mean_richness ~ DurD_samp + country:DurD_samp + sqrt(qsim_avg_samp) + env_PC2)
+  miv_rich_modlist[['mod29']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(qsim_avg_samp) + env_PC2')))
   
-  miv_rich_modlist[['mod30']] <- quick_miv_ssn(mean_richness ~  DurD3650past + DurD_samp + country:DurD_samp + sqrt(qsim_avg_samp))
+  miv_rich_modlist[['mod30']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~  DurD3650past + DurD_samp + country:DurD_samp + sqrt(qsim_avg_samp)')))
   
-  miv_rich_modlist[['mod31']] <- quick_miv_ssn(mean_richness ~  DurD3650past + DurD_samp + country:DurD_samp + sqrt(qsim_avg_samp) + country:sqrt(qsim_avg_samp))
+  miv_rich_modlist[['mod31']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~  DurD3650past + DurD_samp + country:DurD_samp + sqrt(qsim_avg_samp) + country:sqrt(qsim_avg_samp)')))
   
-  miv_rich_modlist[['mod32']] <- quick_miv_ssn(mean_richness ~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + country:sqrt(basin_area_km2) + env_PC1 + env_PC2)
+  miv_rich_modlist[['mod32']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + country:sqrt(basin_area_km2) + env_PC1 + env_PC2')))
   
-  miv_rich_modlist[['mod33']] <- quick_miv_ssn(mean_richness ~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + country:sqrt(basin_area_km2) + env_PC2)
+  miv_rich_modlist[['mod33']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + country:sqrt(basin_area_km2) + env_PC2')))
   
-  miv_rich_modlist[['mod34']] <- quick_miv_ssn(mean_richness ~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + country:sqrt(basin_area_km2))
+  miv_rich_modlist[['mod34']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
   
-  miv_rich_modlist[['mod35']] <- quick_miv_ssn(mean_richness ~ DurD_samp + country:DurD_samp + sqrt(qsim_avg_samp) + country:sqrt(qsim_avg_samp) + env_PC2)
+  miv_rich_modlist[['mod35']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(qsim_avg_samp) + country:sqrt(qsim_avg_samp) + env_PC2')))
   
-  miv_rich_modlist[['mod36']] <- quick_miv_ssn(mean_richness ~ DurD_samp + country:DurD_samp + sqrt(qsim_avg_samp) + country:sqrt(qsim_avg_samp))
+  miv_rich_modlist[['mod36']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(qsim_avg_samp) + country:sqrt(qsim_avg_samp)')))
   
-  miv_rich_modlist[['mod37']] <- quick_miv_ssn(mean_richness ~ DurD3650past + country:DurD3650past + sqrt(basin_area_km2) + country:sqrt(basin_area_km2) + env_PC2)
+  miv_rich_modlist[['mod37']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + sqrt(basin_area_km2) + country:sqrt(basin_area_km2) + env_PC2')))
   
-  miv_rich_modlist[['mod38']] <- quick_miv_ssn(mean_richness ~ stream_type + country:stream_type + sqrt(basin_area_km2) + country:sqrt(basin_area_km2) + env_PC2)
+  miv_rich_modlist[['mod38']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ stream_type + country:stream_type + sqrt(basin_area_km2) + country:sqrt(basin_area_km2) + env_PC2')))
   
-  miv_rich_modlist[['mod39']] <- quick_miv_ssn(mean_richness ~ stream_type + country:stream_type + sqrt(qsim_avg_samp) + country:sqrt(qsim_avg_samp) + env_PC2)
+  miv_rich_modlist[['mod39']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ stream_type + country:stream_type + sqrt(qsim_avg_samp) + country:sqrt(qsim_avg_samp) + env_PC2')))
   
-  miv_rich_modlist[['mod40']] <- quick_miv_ssn(mean_richness ~ stream_type + country:stream_type + sqrt(qsim_avg_samp) + country:sqrt(qsim_avg_samp))
+  miv_rich_modlist[['mod40']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ stream_type + country:stream_type + sqrt(qsim_avg_samp) + country:sqrt(qsim_avg_samp)')))
   
-  miv_rich_modlist[['mod41']] <- quick_miv_ssn(mean_richness ~ DurD_samp + stream_type + country:stream_type + sqrt(basin_area_km2) + country:sqrt(basin_area_km2) + env_PC2) 
+  miv_rich_modlist[['mod41']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + stream_type + country:stream_type + sqrt(basin_area_km2) + country:sqrt(basin_area_km2) + env_PC2'))) 
   
-  miv_rich_modlist[['mod42']] <- quick_miv_ssn(mean_richness ~ DurD3650past + stream_type + country:stream_type + sqrt(basin_area_km2) + country:sqrt(basin_area_km2) + env_PC2) 
+  miv_rich_modlist[['mod42']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + stream_type + country:stream_type + sqrt(basin_area_km2) + country:sqrt(basin_area_km2) + env_PC2'))) 
   
-  miv_rich_modlist[['mod43']] <- quick_miv_ssn(mean_richness ~ DurD3650past + stream_type + country:stream_type + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)) 
+  miv_rich_modlist[['mod43']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + stream_type + country:stream_type + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)'))) 
   
   # miv_rich_modlist[['mod44']] <- quick_miv_ssn(mean_richness ~ DurD_samp*Fdist_mean_10past_undirected_avg_samp + country:DurD_samp + sqrt(basin_area_km2) + country:sqrt(basin_area_km2))
   
@@ -7648,8 +7686,8 @@ model_miv_yr <- function(in_ssn_eu_summarized,
   #------ For "best" model -------------------------------------------------
   # Refits the selected "best" model using the REML method for better variance estimation.
   ssn_miv_best_final <- quick_miv_ssn(
-    mean_richness ~ DurD3650past + stream_type + country:stream_type + 
-      sqrt(basin_area_km2) + country:sqrt(basin_area_km2),
+    as.formula(paste(alpha_var, '~ DurD3650past + stream_type + country:stream_type + 
+      sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')),
     estmethod = 'reml'
   )
   ssn_miv_best_preds <- augment(ssn_miv_best_final,
@@ -7672,7 +7710,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
       organism = c('miv_nopools'),
       formula_root = 'sqrt(qsim_avg_samp) + country:sqrt(qsim_avg_samp)',
       hydro_var = 'DurD_samp',
-      response_var = 'mean_richness',
+      response_var = alpha_var,
       ssn_covtypes = ssn_covtypes,
       partition_formula = as.formula('~ country'),
       random_formula = NULL,
@@ -7689,7 +7727,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
       organism = c('miv_nopools'),
       formula_root = 'sqrt(basin_area_km2) + country:sqrt(basin_area_km2)',
       hydro_var = 'DurD_samp',
-      response_var = 'mean_richness',
+      response_var = alpha_var,
       ssn_covtypes = ssn_covtypes,
       partition_formula = as.formula('~ country'),
       random_formula = NULL,
@@ -7748,7 +7786,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     SSN2::varcomp(ssn_miv_pred_final)
     
     #Check predictions
-    ggplot(data=ssn_miv_mod_preds, aes(x=.fitted, y=mean_richness)) +
+    ggplot(data=ssn_miv_mod_preds, aes(x=.fitted, y=alpha_var)) +
       geom_point(aes(color=stream_type)) +
       geom_smooth(method='lm') +
       geom_abline() +
@@ -7793,8 +7831,12 @@ model_miv_yr <- function(in_ssn_eu_summarized,
 #'   }
 diagnose_ssn_mod <- function(in_ssn_mods,
                              write_plots=T,
+                             response_var_label,
+                             plot_path_prefix='miv_predobs_plot_',
                              out_dir) {
   
+  alpha_var <- all.vars(in_ssn_mods$ssn_mod_fit_best$formula)[[1]]
+
   #Check predictions for best model
   predobs_plot_best <- setDT(in_ssn_mods$ssn_pred_best) %>%
     .[, country := factor(
@@ -7802,13 +7844,13 @@ diagnose_ssn_mod <- function(in_ssn_mods,
       levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ),
       ordered=T)
     ] %>% 
-    ggplot(aes(x=.fitted, y=mean_richness)) +
+    ggplot(aes(x=.fitted, y=get(alpha_var))) +
     geom_point(aes(color=stream_type)) +
     geom_smooth(method = 'lm',
                 color = 'black', se = FALSE) +
     geom_abline(linetype='dashed') +
-    scale_x_continuous(name='Predicted mean taxonomic richness') +
-    scale_y_continuous(name='Observed mean taxonomic richness') +
+    scale_x_continuous(name=paste('Predicted', response_var_label)) +
+    scale_y_continuous(name=paste('Observed', response_var_label)) +
     scale_color_manual(
       name = 'Stream type',
       labels = c('Perennial', 'Non-perennial'),
@@ -7828,8 +7870,8 @@ diagnose_ssn_mod <- function(in_ssn_mods,
     geom_smooth(method = 'lm',
                 color = 'black', se = FALSE) +
     geom_abline(linetype='dashed') +
-    scale_x_continuous(name='Predicted mean taxonomic richness') +
-    scale_y_continuous(name='Observed mean taxonomic richness') +
+    scale_x_continuous(name=paste('Predicted', response_var_label)) +
+    scale_y_continuous(name=paste('Observed', response_var_label)) +
     scale_color_manual(
       name = 'Stream type',
       labels = c('Perennial', 'Non-perennial'),
@@ -7840,7 +7882,9 @@ diagnose_ssn_mod <- function(in_ssn_mods,
   
   if (write_plots) {
     ggsave(
-      filename = file.path(out_dir, 'miv_predobs_plot_best.png'),
+      filename = file.path(
+        out_dir, 
+        paste0(plot_path_prefix, '_', alpha_var, '_best.png')),
       plot = predobs_plot_best,
       width = 8,
       height = 6,
@@ -7849,7 +7893,9 @@ diagnose_ssn_mod <- function(in_ssn_mods,
     )
     
     ggsave(
-      filename = file.path(out_dir, 'miv_predobs_plot_final.png'),
+      filename = file.path(
+        out_dir, 
+        paste0(plot_path_prefix, '_', alpha_var, '_final.png')),
       plot = predobs_plot_final,
       width = 8,
       height = 6,
@@ -8278,6 +8324,7 @@ map_ssn_mod <- function(in_ssn,
   #------------- Makes maps ----------------------------------------------------
   # Make map of 2021 (historical) richness -------------
   ssn_preds_hist <- in_ssn_mods$ssn_mod_fit$ssn.object
+  response_var <- all.vars(in_ssn_mods$ssn_mod_fit$ssn.object$formula)[[1]]
   ssn_preds_hist$edges <- merge(
     in_ssn_mods$ssn_mod_fit$ssn.object$edges,
     in_ssn_preds$hist,
@@ -8303,7 +8350,7 @@ map_ssn_mod <- function(in_ssn,
   ssn_preds_hist$obs <- ssn_preds_hist$obs %>%
     merge(in_ssn_preds$hist[, c('rid', '.fitted', 'country'), with=F], 
           by=c('rid', 'country')) %>%
-    mutate(pred_error = `.fitted`-mean_richness)
+    mutate(pred_error = `.fitted`-get(response_var))
   
   map_error <- map_ssn_facets(in_ssn=ssn_preds_hist, 
                               in_pts='obs',
