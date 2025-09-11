@@ -336,6 +336,49 @@ compute_ecdf_multimerge <- function(in_dt, ecdf_columns, grouping_columns,
   return(ecdf_out)
 }
 
+#------ identify_drywet6mo   ------------------------------------------------
+identify_drywet6mo <- function(in_dt, flow_col='isflowing', jday_col = 'doy') {
+  
+  #Add 3 months before and after record to avoid having NAs on the edges
+  fill_dt <- data.table(rep(NA,91)) %>% setnames(flow_col)
+  
+  in_dt <- rbind(fill_dt,
+                 rbind(in_dt, fill_dt, 
+                       fill=T),
+                 fill=T)
+  
+  #Computer total number of no-flow days in the 6-month period centered around
+  #each day in the record
+  in_dt <- in_dt[, noflow_6morollsum := frollsum(
+    isflowing==0,
+    n=183, align='center', hasNA=T, na.rm=T)] %>%
+    .[ 92:(.N-91), ]
+  
+  #Find the Julian day with the most number of no-flow days on interannual average
+  driest_6mocenter <- in_dt[get(jday_col) < 366 #can lead to artefacts if drying was infrequent but occurred during that time
+                            , as.Date(
+                              unique(get(jday_col))[
+                                which.max(.SD[, mean(noflow_6morollsum, na.rm=T),by=jday_col]$V1)],
+                              origin=as.Date("1970-01-01"))
+  ]
+  
+  #Identify the 6-month period centered on that julian day as the dry period
+  driest_6moperiod <- data.table(
+    dry_6mo = T,
+    jday = as.numeric(format(
+      seq(driest_6mocenter-91, driest_6mocenter+91, by='day'), '%j'))
+  )
+  
+  #Identify the other julian days as the wet period
+  in_dt <- merge(in_dt, driest_6moperiod, 
+                 by.x=jday_col, by.y='jday', all.x=T) %>%
+    .[is.na(dry_6mo), dry_6mo := F]
+  
+  in_dt[, noflow_6morollsum := NULL]
+  
+  return(in_dt[order(date),])
+}
+
 #------ compute_hydrostats_intermittence ---------------------------------------
 #' Compute intermittence statistics for hydrological data.
 #'
@@ -346,6 +389,8 @@ compute_ecdf_multimerge <- function(in_dt, ecdf_columns, grouping_columns,
 compute_hydrostats_intermittence <- function(in_hydromod_dt,
                                              in_sites_dt,
                                              scale = 'all') {
+  rollingstep_yr <- c(10, 30)
+  
   # -- Compute network-wide statistics ---------------------------------------
   if (scale %in% c('all', 'drn')) {
     #minimum 7-day and 30-day average over previous year
@@ -357,7 +402,7 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
     #RelFlow: Proportion of network length with flowing conditions (opposite of RelInt)
     relF_dt <- in_hydromod_dt[isflowing == 1,
                               list(relF = sum(reach_length)/total_reach_length)
-                              , by=.(date)] %>%
+                              , by=.(date, hy)] %>%
       setorder(date)
     
     #ggplot(relF_dt, aes(x=date, y=relF)) + geom_line()
@@ -368,13 +413,25 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
       relF30mean = frollmean(x=relF, n=30, align='center', na.rm=T)
     )] %>%
       .[, `:=`(
-        relF7mean_yrmin = frollapply(relF7mean, n=365, FUN=min, align='right'),
-        relF30mean_yrmin = frollapply(relF30mean, n=365, FUN=min, align='right')
-      )]
+        relF7mean_yrmin = min(relF7mean, na.rm=T),
+        relF30mean_yrmin = min(relF30mean, na.rm=T)
+      ), by=hy] 
     
+
     #Compute previous mean over many windows
     meanstep <- c(10, 30, 60, 90, 120, 180, 365, 365*5, 365*10)
     relF_dt[, paste0("relF", meanstep, "past") := frollmean(relF, meanstep, na.rm=T)]
+    
+    
+    relF_dt_yr <- relF_dt[!duplicated(hy), .(relF7mean_yrmin, hy)] %>%
+      .[, paste0("relF7mean_yrmin_cv", rollingstep_yr, "yrpast") :=  
+         frollapply(relF7mean_yrmin, n=rollingstep_yr, 
+                    FUN=function(x) sd(x, na.rm=T)/mean(x, na.rm=T), 
+                    align='right')
+      ] %>% 
+      .[, relF7mean_yrmin := NULL]
+
+    relF_dt <- merge(relF_dt, relF_dt_yr, by='hy')
   }
   
   # -- Compute statistics for specific reaches -------------------------------
@@ -438,6 +495,16 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
                       , by = .(reach_id)
     ]
     
+    # hydromod_dt_sites[, paste0("MaxConD", rollingstep, "past") :=
+    #                     nafill(
+    #                       frollapply(noflow_period_dur, n=rollingstep,
+    #                                  FUN = function(x) max(x, na.rm=T),
+    #                                  align='right')
+    #                       , fill = 0
+    #                     ),
+    #                   by = .(reach_id)
+    # ]
+    
     #Compute ecdf value by day of year for moving windows
     rolling_column_names_short <- expand.grid(c('DurD', 'FreD'), 
                                               rollingstep_short) %>%
@@ -464,11 +531,102 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
       keep_column = 'date',
       na.rm=TRUE)
     
+    
+    #Compute annual timing and interannual variability
+    hydromod_dt_yr <- hydromod_dt_sites[, list(
+      DurD_yr = sum(isflowing==0)/.N,
+      FreD_yr = length(unique(noflow_period[!is.na(noflow_period)])),
+      FstDrE = .SD[isflowing==0, min(doy, na.rm=T)],
+      meanConD_yr = .SD[!duplicated(noflow_period), mean(noflow_period_dur, na.rm=T)]             
+    ), by=.(reach_id, year = as.integer(format(date, '%Y')))] %>%
+      .[is.infinite(FstDrE), FstDrE := NA]
+    
+    
+    #CV of annual number of no-flow days
+    hydromod_dt_yr[
+      , paste0("DurD_yrCV", rollingstep_yr, "yrpast") :=  
+        frollapply(DurD_yr, n=rollingstep_yr, 
+                   FUN=function(x) fifelse(mean(x, na.rm=T)==0,
+                                          0,
+                                          sd(x, na.rm=T)/mean(x, na.rm=T)
+                                          ), 
+                   align='right')
+      , by=.(reach_id)
+    ] 
+    
+    #CV of annual number of no-flow events
+    hydromod_dt_yr[
+      , paste0("FreD_yrCV", rollingstep_yr, "yrpast") :=  
+        frollapply(FreD_yr, n=rollingstep_yr, 
+                   FUN=function(x) fifelse(mean(x, na.rm=T)==0,
+                                           0,
+                                           sd(x, na.rm=T)/mean(x, na.rm=T)
+                   ), 
+                   align='right')
+      , by=.(reach_id)
+    ] 
+    
+    #CV of average annual event duration
+    hydromod_dt_yr[
+      , paste0("meanConD_yrCV", rollingstep_yr, "yrpast") :=  
+        frollapply(meanConD_yr, n=rollingstep_yr, 
+                   FUN=function(x) fifelse(mean(x, na.rm=T)==0,
+                                           0,
+                                           sd(x, na.rm=T)/mean(x, na.rm=T)
+                   ), 
+                   align='right')
+      , by=.(reach_id)
+    ] 
+    
+    #SD No-flow start date - Julian day of the first drying event
+    hydromod_dt_yr[
+      , paste0("FstDrE_SD", rollingstep_yr, "yrpast") :=  
+        frollapply(FstDrE, n=rollingstep_yr, 
+                   FUN=function(x) sd(x, na.rm=T)
+                   , 
+                   align='right')
+      , by=.(reach_id)
+    ] 
+    
+    #SD6: seasonal predictability of no-flow events (Gallart et al. 2012)
+    #Identify contiguous six months with the most zero-flow days for computing Sd6
+    hydromod_dt_sites <- hydromod_dt_sites[, identify_drywet6mo(in_dt=.SD), 
+                                     by=.(reach_id)]
+    
+    base_dt <- hydromod_dt_sites[, ym := format(date, '%Y%m')] %>%
+      .[, any(!is.na(noflow_period)), 
+        by=.(year = as.integer(format(date, '%Y')), ym, dry_6mo, reach_id)] %>%
+      .[, .(n_months = sum(V1, na.rm=TRUE)), by=.(year, dry_6mo, reach_id)] %>%
+      dcast(year+reach_id~dry_6mo, value.var = 'n_months')
+    
+    rolling_sd6 <- function(dt, k) {
+      colname <- paste0("sd6_", k, "yrpast")
+      
+      dt[, (colname) :=
+           frollapply(year, n = k, align = "right",
+                      FUN = function(yrs) {
+                        subdt <- .SD[year %in% yrs]   # only this reach_id’s rows
+                        val <- 1 - subdt[, (mean(`FALSE`, na.rm=TRUE) / mean(`TRUE`, na.rm=TRUE))]
+                        ifelse(is.na(val) | mean(`TRUE`, na.rm=TRUE) == 0, 1, val)
+                      }),
+         by = reach_id] 
+    }
+    
+    sd6_dt <- copy(base_dt)
+    sd6_dt <- rolling_sd6(sd6_dt, 10)
+    sd6_dt <- rolling_sd6(sd6_dt, 30)
+    
+    #Merge everything
     hydromod_dt_sites <- merge(in_sites_dt[, .(site, reach_id)], 
                                hydromod_dt_sites, 
                                by = 'reach_id', all.x = T, all.y = F,
                                allow.cartesian = T) %>%
+      .[, year := as.integer(format(date, '%Y'))] %>%
+      merge(hydromod_dt_yr, by=c('reach_id', 'year')) %>%
+      merge(sd6_dt, by=c('reach_id', 'year')) %>%
+      .[, `:=`(ym=NULL, dry_6mo=NULL, `FALSE`=NULL, `TRUE`=NULL)] %>%
       setorderv(c('reach_id', 'date'))
+
   }
   
   # Output -----------------------------
@@ -1542,25 +1700,29 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
   #Remove spaces in running id
   in_metadata_edna[, running_id := gsub(' ', '', running_id)]
   
-  #Fill NAs in dates with eDNA metadata if possible
+  #Fill NAs in dates with eDNA metadata if possible - remove pools
   dt_list$dia_sedi[
     is.na(date),
-    date := in_metadata_edna[sample_type=='sediment', .(running_id, date)][
-      .SD, on='running_id', x.date]]
+    date := in_metadata_edna[sample_type=='sediment' & habitat != 'pool', 
+                             .(running_id, date)][
+                               .SD, on='running_id', x.date]]
   dt_list$fun_sedi[
     is.na(date),
-    date := in_metadata_edna[sample_type=='sediment', .(running_id, date)][
-      .SD, on='running_id', x.date]] 
+    date := in_metadata_edna[sample_type=='sediment' & habitat != 'pool',
+                             .(running_id, date)][
+                               .SD, on='running_id', x.date]] 
   dt_list$fun_biof[
     is.na(date),
-    date := in_metadata_edna[sample_type=='biofilm', .(running_id, date)][
-      .SD, on='running_id', x.date]] 
+    date := in_metadata_edna[sample_type=='biofilm' & habitat != 'pool',
+                             .(running_id, date)][
+                               .SD, on='running_id', x.date]] 
   
   #Replace dates in dia_biof, which seem erroneous
   dt_list$dia_biof[
     ,
-    date := in_metadata_edna[sample_type=='biofilm', .(running_id, date)][
-      .SD, on='running_id', x.date]
+    date := in_metadata_edna[sample_type=='biofilm' & habitat != 'pool', 
+                             .(running_id, date)][
+                               .SD, on='running_id', x.date]
   ] 
   
   #Add Campaign and Site to bacteria data
@@ -1598,7 +1760,8 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
     }
     
     dt_list[[org_medium]] <- merge(dt_list[[org_medium]], 
-                                   in_metadata_edna[sample_type==medium, 
+                                   in_metadata_edna[sample_type==medium & 
+                                                      habitat != 'pool',
                                                     metacols_toget, with=F],
                                    by='running_id') 
     if (org=='bac') {
@@ -1628,7 +1791,7 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
 
 #------ calc_spdiv -------------------------------------------------------------
 # in_country <- 'Croatia'
-# in_biodt <- tar_read(bio_dt)[['dia_biof']][country == in_country,]
+# in_biodt <- tar_read(bio_dt)[['dia_sedi']][country == in_country,]
 # in_metacols <- metacols
 # level='local'
 
@@ -1737,7 +1900,7 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
       .[, `:=`(
         mean_expshannon = mean(expshannon),
         mean_invsimpson = mean(invsimpson)
-        ), by=site]
+      ), by=site]
     
     #Compute nestedness and turnover based on temporal beta diversity
     multicampaign_sites <- biodt_copy[, .N, by=site][N>1, site]
@@ -2971,7 +3134,7 @@ reassign_netids <- function(rivnet_path, strahler_dt,
 # in_sites_dt <- tar_read(sites_dt)[country == in_drn,]
 # in_network_path <- tar_read(network_ssnready_gpkg_list)[[in_drn]]
 # in_hydromod_drn <- tar_read_raw((paste0('hydromod_dt_', in_drn, '_', varname)))
-# in_network_idcol = 'cat'
+# in_network_idcol = 'cat_cor'
 
 #' @title Compute hydrological statistics for a DRN
 #' @description This function computes hydrological statistics of intermittence 
@@ -4129,6 +4292,17 @@ summarize_sites_hydrocon <- function(in_hydrocon_compiled
   return(hydrocon_summmarized)
 }
 
+#Summarized----
+#Annual DurCV
+#Annual FreCV
+#Mean event duration 
+#CV of event duration
+#Average No-flow start date - Julian day of the first drying event
+#SD No-flow start date - Julian day of the first drying event
+#SD6 (Gallart et al. 2012)
+#CV RelF
+#CV mean distance
+
 #------ summarize_network_hydrostats -------------------------------------------
 # in_country = 'Croatia'
 # in_hydromod = tar_read(hydromod_comb_hist)
@@ -4460,7 +4634,7 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
   #   .[, organism := organism_class]
   
   # bind the averaged eDNA data with the original biodiversity data
-  spdiv <- rbind(spdiv, avg_spdiv_edna, use.names=T, fill=T)
+  # spdiv <- rbind(spdiv, avg_spdiv_edna, use.names=T, fill=T)
   
   
   #------------ Create data.table for individual site and campaigns ------------
@@ -4473,7 +4647,10 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
   all_vars_merged <- merge(spdiv_hydro_con, 
                            in_env_dt[, c(dtcols$env, 'site', 'campaign'), with=F],
                            by=c('site', 'campaign'), all.x=T) %>%
-    .[!(site %in% dry_only_sites), ] #Remove sites that never flowed
+    .[!(site %in% dry_only_sites), ] %>% #Remove sites that never flowed 
+    .[, country := factor(
+      country,
+      levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ))]
   
   
   #------------ Create data.table summarized by site across campaigns ---------
@@ -4482,7 +4659,7 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
                             intersect(names(spdiv), 
                                       c(group_cols, dtcols$div_summarized)), 
                             with=F] %>%
-    .[, `:=`(mean_richness = as.integer(round(mean_richness)))]
+    .[, `:=`(mean_richness = as.integer(round(mean_richness)))] #Round mean richness to an integer (for binomial modelling)
   
   all_vars_summarized <- merge(
     spdiv_summarized,
@@ -4493,7 +4670,10 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
     merge(in_env_summarized$dt_nopools[, c(dtcols$env_summarized, 'site'), with=F],
           by='site', all.x=T) %>%
     .[, c('campaign', 'date') := NULL] %>%
-    .[!(site %in% dry_only_sites), ] #Remove sites that never flowed
+    .[!(site %in% dry_only_sites), ] %>% #Remove sites that never flowed 
+    .[, country := factor(
+      country,
+      levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ))]
   
   return(list(
     dt = all_vars_merged,
@@ -4522,8 +4702,7 @@ plot_edna_biof_vs_sedi <- function(in_allvars_merged) {
          id.vars=c('country', 'site', 'date', 'organism', 'organism_class', 'edna_source'),
          measure.vars=alpha_index_list,
          variable.name='diversity_index') %>%
-    dcast(allvars_edna, 
-          country+site+date+organism_class+diversity_index~edna_source, 
+    dcast(country+site+date+organism_class+diversity_index~edna_source, 
           value.var = 'value')
   
   p_alpha_list <- lapply(alpha_index_list, function(index) {
@@ -4541,8 +4720,7 @@ plot_edna_biof_vs_sedi <- function(in_allvars_merged) {
          id.vars=c('country', 'site', 'date', 'organism', 'organism_class', 'edna_source'),
          measure.vars=malpha_index_list,
          variable.name='diversity_index') %>%
-    dcast(allvars_edna, 
-          country+site+date+organism_class+diversity_index~edna_source, 
+    dcast(country+site+date+organism_class+diversity_index~edna_source, 
           value.var = 'value')
   
   p_malpha_list <- lapply(malpha_index_list, function(index) {
@@ -6138,7 +6316,7 @@ plot_cor_hydrowindow <-  function(in_cor_dt, temporal_var_substr, response_var_l
 # 
 # in_allvars_merged=tar_read(allvars_merged)
 # temporal_var_substr='DurD'
-# response_var='richness'
+# response_var=alpha_var_list
 # in_organism_dt = tar_read(organism_dt)
 # colors_list=drn_dt$color
 # write_plots=T
@@ -6152,7 +6330,7 @@ plot_cor_hydrowindow <-  function(in_cor_dt, temporal_var_substr, response_var_l
 #' @param in_allvars_merged A list containing a data table of all merged variables.
 #' @param in_organism_dt A data table mapping organism codes to their labels.
 #' @param temporal_var_substr A string to filter for specific hydrological variables (e.g., 'DurD').
-#' @param response_var A string specifying the biological response variable (e.g., 'richness').
+#' @param response_var A list containing strings specifying the biological response variables (e.g., 'richness').
 #' @param colors_list A named character vector of colors for each country.
 #' @param write_plots A logical value to save the plot as a PNG file.
 #' @param plot_name_suffix A string to append to the output filename.
@@ -6177,27 +6355,28 @@ plot_scatter_lm <-  function(in_allvars_merged,
                     names(dt)
                   ),
                   measure.vars=x_cols) 
-  dt_melt[, country := factor(
-    country,
-    levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ))]
   
-  p_lm <- ggplot(dt_melt[organism %in% in_organism_dt$organism,], 
-                 aes_string(x='value', y=response_var, color='country')) +
-    geom_point(alpha=0.5) +
-    geom_smooth(method='lm', se=F) +
-    scale_color_manual(values=colors_list) +
-    scale_y_sqrt() +
-    facet_grid(organism~variable, scales='free') +
-    theme_bw()
+  p_list <- lapply(response_var, function(in_var) {
+    p_lm <- ggplot(dt_melt[organism %in% in_organism_dt$organism,], 
+                   aes_string(x='value', y=in_var, color='country')) +
+      geom_point(alpha=0.5) +
+      geom_smooth(method='lm', se=F) +
+      scale_color_manual(values=colors_list) +
+      scale_y_sqrt() +
+      facet_grid(organism~variable, scales='free') +
+      theme_bw()
+    
+    if (write_plots) {
+      out_path <- file.path(out_dir, paste0('plot_lm_', temporal_var_substr, '_',
+                                            in_var, plot_name_suffix, '.png'))
+      ggsave(out_path, plot = p_lm, 
+             height = 12, width = 12, units='in', dpi = 300)
+    }
+    return(p_lm)
+  }) %>% setNames(response_var)
   
-  if (write_plots) {
-    out_path <- file.path(out_dir, paste0('plot_lm_', temporal_var_substr, '_',
-                                          response_var, plot_name_suffix, '.png'))
-    ggsave(out_path, plot = p_lm, 
-           height = 12, width = 12, units='in', dpi = 300)
-  }
+  return(p_list)
   
-  return(p_lm)
 }
 
 
@@ -6300,12 +6479,12 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
 # response_var = 'richness'
 # tar_load(ssn_covtypes)
 
-# in_ssn = in_ssn_eu_summarized
-# family = "poisson"  #Gamma(link = "log")
-# organism = c('miv_nopools')
+# tar_load(ssn_covtypes)
+# in_ssn = tar_read(ssn_eu_summarized)
+# organism = c('bac_biof_nopools')
 # formula_root = ' sqrt(basin_area_km2)'
 # hydro_var = 'DurD3650past'
-# response_var = 'mean_richness'
+# response_var = 'mean_expshannon'
 # ssn_covtypes = ssn_covtypes[1:10,]
 # partition_formula = as.formula('~ country')
 # random_formula = NULL
@@ -6345,7 +6524,7 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
   } else {
     full_formula <- paste0(response_var, ' ~ ', formula_root)
   }
-
+  
   # 2. Fit SSN models using quick_ssn
   ssn_list <- quick_ssn(in_ssn = in_ssn[[organism]]$ssn, 
                         in_formula = as.formula(full_formula),
@@ -6565,7 +6744,7 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
                       'Spatially dependent variance - tailup',
                       'Random intercept - country',
                       'Fixed effects pseudo-R2'
-                      )
+  )
   
   ssn_hydrowindow_varcomp <- ssn_hydrowindow_perf_allvars[
     , SSN2::varcomp(mod[[1]]), 
@@ -6605,7 +6784,7 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
     facet_wrap(~hydro_var_root_label, scales = "free") +
     coord_cartesian(expand = FALSE) +
     theme_bw()
-    
+  
   #Plot best model for each variable for single window for each hydrological variable
   ssn_hydrowindow_best <- ssn_hydrowindow_perf_allvars[
     , .SD[which.min(AICc),], 
@@ -6636,7 +6815,7 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
   # Reshape data for plotting predictor vs. predictions
   mod_preds_melt <- mod_preds[, 
                               c(setdiff(ssn_hydrowindow_best$hydro_var, 'null'),
-                              'country',  'basin_area_km2', '.fitted'), 
+                                'country',  'basin_area_km2', '.fitted'), 
                               with=F] %>%
     melt(id.vars=c('country', 'basin_area_km2', '.fitted'))
   
@@ -6772,7 +6951,7 @@ save_ssn_div_hydrowindow_plots <- function(
     
     # Define a list of plot names to save
     plot_names <- list('plot_varcomp', 'plot_obs_preds', 
-                    'plot_x_preds', 'plot_marginal')
+                       'plot_x_preds', 'plot_marginal')
     
     # Loop through each plot and save it as a PNG file
     lapply(plot_names, function(pname) {
@@ -7533,7 +7712,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     loocv(ssn_nbin_cov$ssn_list$none_epa_none)
     loocv(ssn_nbin_cov$ssn_list$none_linear_none)
   }
-   
+  
   #Set a quick helper function to train an SSN GLM model with a basic model structure
   
   quick_miv_ssn <- function(in_formula, in_random=NULL, estmethod='ml') {
@@ -7720,47 +7899,47 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     selected_glance_qsim <- ssn_mod_predictions_covtypes$ssn_glance
   }
   
-    #Test covariance structures again, this time with REML 
-    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
-      in_ssn = in_ssn_eu_summarized,
-      family = 'nbinomial',
-      organism = c('miv_nopools'),
-      formula_root = 'sqrt(basin_area_km2) + country:sqrt(basin_area_km2)',
-      hydro_var = 'DurD_samp',
-      response_var = alpha_var,
-      ssn_covtypes = ssn_covtypes,
-      partition_formula = as.formula('~ country'),
-      random_formula = NULL,
-      estmethod='reml'
-    )
-    
-    selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
-    #Turns out area is better than the qsim
-    
-    #Check Torgegram
-    tg_selected <- SSN2::Torgegram(
-      formula = ssn_mod_predictions_covtypes$ssn_list$linear_none_none$formula,
-      ssn.object = ssn_miv,
-      type = c("flowcon", "flowuncon", "euclid"),
-      partition_factor = as.formula('~ country'),
-      bins = 15
-    ) %>%
-      rbindlist(idcol='dist_type')
-    
-    tg_plot <- ggplot(tg_selected, 
-                      aes(x=dist, y=gamma, color = dist_type)) +
-      geom_point(aes(size=np)) +
-      geom_smooth(method='lm', size=2, se=F) +
-      scale_size_continuous(range=c(0.5, 7)) +
-      scale_x_sqrt(breaks=c(1000, 5000, 10000, 20000)) +
-      theme_classic() +
-      facet_wrap(~dist_type)
-    
-    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
-    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
-    
-    summary(ssn_mod_predictions_covtypes$ssn_list$linear_none_none)
-    varcomp(ssn_mod_predictions_covtypes$ssn_list$linear_none_none)
+  #Test covariance structures again, this time with REML 
+  ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+    in_ssn = in_ssn_eu_summarized,
+    family = 'nbinomial',
+    organism = c('miv_nopools'),
+    formula_root = 'sqrt(basin_area_km2) + country:sqrt(basin_area_km2)',
+    hydro_var = 'DurD_samp',
+    response_var = alpha_var,
+    ssn_covtypes = ssn_covtypes,
+    partition_formula = as.formula('~ country'),
+    random_formula = NULL,
+    estmethod='reml'
+  )
+  
+  selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
+  #Turns out area is better than the qsim
+  
+  #Check Torgegram
+  tg_selected <- SSN2::Torgegram(
+    formula = ssn_mod_predictions_covtypes$ssn_list$linear_none_none$formula,
+    ssn.object = ssn_miv,
+    type = c("flowcon", "flowuncon", "euclid"),
+    partition_factor = as.formula('~ country'),
+    bins = 15
+  ) %>%
+    rbindlist(idcol='dist_type')
+  
+  tg_plot <- ggplot(tg_selected, 
+                    aes(x=dist, y=gamma, color = dist_type)) +
+    geom_point(aes(size=np)) +
+    geom_smooth(method='lm', size=2, se=F) +
+    scale_size_continuous(range=c(0.5, 7)) +
+    scale_x_sqrt(breaks=c(1000, 5000, 10000, 20000)) +
+    theme_classic() +
+    facet_wrap(~dist_type)
+  
+  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
+  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
+  
+  summary(ssn_mod_predictions_covtypes$ssn_list$linear_none_none)
+  varcomp(ssn_mod_predictions_covtypes$ssn_list$linear_none_none)
   
   #Re-fit final model with REML
   ssn_miv_pred_final <- ssn_glm(
@@ -7836,7 +8015,7 @@ diagnose_ssn_mod <- function(in_ssn_mods,
                              out_dir) {
   
   alpha_var <- all.vars(in_ssn_mods$ssn_mod_fit_best$formula)[[1]]
-
+  
   #Check predictions for best model
   predobs_plot_best <- setDT(in_ssn_mods$ssn_pred_best) %>%
     .[, country := factor(
@@ -7982,10 +8161,10 @@ plot_ssn2_marginal_effects <- function(
   )
   
   emm_best_areas <- emmeans(in_mod_best, 
-                 data=ssn_miv$obs,
-                 ~ sqrt(basin_area_km2) | country, 
-                 at = list(basin_area_km2 = newdat_area$basin_area_km2),
-                 type='response') %>%
+                            data=ssn_miv$obs,
+                            ~ sqrt(basin_area_km2) | country, 
+                            at = list(basin_area_km2 = newdat_area$basin_area_km2),
+                            type='response') %>%
     data.frame() %>%
     setDT %>%
     ggplot(aes(x=basin_area_km2, fill=country)) +
@@ -7994,7 +8173,7 @@ plot_ssn2_marginal_effects <- function(
     scale_x_continuous(name=expression('Basin area -'~km^2)) +
     scale_y_continuous(name='Estimated marginal mean: mean richness') +
     theme_bw()
-    
+  
   ggsave(
     filename = file.path(resdir,
                          'figures',
@@ -8012,10 +8191,10 @@ plot_ssn2_marginal_effects <- function(
   )
   
   emm_predict_durd <- emmeans(in_mod_predict, 
-                               data=ssn_miv$obs,
-                               ~ DurD_samp | country, 
-                               at = list(DurD_samp = newdat_durd$DurD_samp),
-                               type='response') %>%
+                              data=ssn_miv$obs,
+                              ~ DurD_samp | country, 
+                              at = list(DurD_samp = newdat_durd$DurD_samp),
+                              type='response') %>%
     data.frame() %>%
     setDT %>%
     ggplot(aes(x=DurD_samp, fill=country)) +
@@ -8040,10 +8219,10 @@ plot_ssn2_marginal_effects <- function(
   )
   
   emm_predict_areas <- emmeans(in_mod_predict, 
-                            data=ssn_miv$obs,
-                            ~ sqrt(basin_area_km2) | country, 
-                            at = list(basin_area_km2 = newdat$basin_area_km2),
-                            type='response') %>%
+                               data=ssn_miv$obs,
+                               ~ sqrt(basin_area_km2) | country, 
+                               at = list(basin_area_km2 = newdat$basin_area_km2),
+                               type='response') %>%
     data.frame() %>%
     setDT %>%
     ggplot(aes(x=basin_area_km2, fill=country)) +
@@ -8164,7 +8343,7 @@ predict_ssn_mod <- function(in_ssn_mods, proj_years = NULL) {
   preds_hist_dt <- augment(in_ssn_mods$ssn_mod_fit 
                            , newdata = 'preds_hist'
                            , drop = FALSE
-                           , type = 'response',
+                           , type.predict = 'response'
                            , interval = 'prediction'
   ) %>% 
     .[, c('rid', 'country', '.fitted', '.lower', '.upper')] %>%
@@ -8212,7 +8391,7 @@ predict_ssn_mod <- function(in_ssn_mods, proj_years = NULL) {
       preds_proj_pts <- SSN2::augment(ssn_mod_fit_copy  
                                       , newdata = 'preds_proj'
                                       , drop = FALSE
-                                      , type = 'response',
+                                      , type.predict = 'response',
                                       , interval = 'prediction'
       ) %>% 
         .[, c('rid', 'country', '.fitted', '.lower', '.upper')] %>%
@@ -8284,7 +8463,7 @@ map_ssn_mod <- function(in_ssn,
   #Mean and SNR across gcms
   proj_stats_gcm <- preds_period_mean[, list(
     fitted_mean_period=weighted.mean(fitted_mean_decade, nyears, na.rm=T)
-    ), by=c('country', 'rid', 'period', 'gcm', 'scenario')] %>%
+  ), by=c('country', 'rid', 'period', 'gcm', 'scenario')] %>%
     dcast(rid+country+gcm+scenario~period, value.var = 'fitted_mean_period') %>%
     .[, preds_diff_2040_2069 := `2040-2069` - `2015-2020`] %>%
     .[, preds_diff_2070_2099 := `2070-2099` - `2015-2020`] %>%
@@ -8293,16 +8472,16 @@ map_ssn_mod <- function(in_ssn,
     melt(id.vars=c('rid','country','gcm','scenario'))
   
   proj_stats_multigcm <- proj_stats_gcm[, list(
-      multigcm_avg = mean(value, na.rm=T),
-      snr = mean(value, na.rm=T)/diff(range(value, na.rm=T))
-    ), by = c('country', 'rid', 'variable', 'scenario')] %>%
+    multigcm_avg = mean(value, na.rm=T),
+    snr = mean(value, na.rm=T)/diff(range(value, na.rm=T))
+  ), by = c('country', 'rid', 'variable', 'scenario')] %>%
     merge(st_drop_geometry(in_ssn_mods$ssn_mod_fit$ssn.object$obs)[
       , c('rid', 'stream_type')]
       , by='rid')
   
   #------  Make a plot of projections across time periods and countries -----
   ggplot(proj_stats_multigcm[variable %in% c('preds_diff_2040_2099',
-                                      'preds_diff_2070_2099'),],
+                                             'preds_diff_2070_2099'),],
          aes(x=variable, y=multigcm_avg, color=scenario)) +
     geom_boxplot() +
     facet_wrap(~country)
@@ -8314,8 +8493,8 @@ map_ssn_mod <- function(in_ssn,
     geom_hline(yintercept=0) +
     scale_y_continuous(name='Average % change in richness across GCMs compared to 2015-2020',
                        labels=scales::label_percent()) +
-    scale_x_continuous(name='Time Period',
-                       labels=c('2040-2060', '2070-2099')) +
+    scale_x_discrete(name='Time Period',
+                     labels=c('2040-2060', '2070-2099')) +
     geom_boxplot() +
     scale_fill_brewer(palette='YlOrRd') +
     facet_grid(country~stream_type) +
@@ -8324,7 +8503,7 @@ map_ssn_mod <- function(in_ssn,
   #------------- Makes maps ----------------------------------------------------
   # Make map of 2021 (historical) richness -------------
   ssn_preds_hist <- in_ssn_mods$ssn_mod_fit$ssn.object
-  response_var <- all.vars(in_ssn_mods$ssn_mod_fit$ssn.object$formula)[[1]]
+  response_var <- all.vars(in_ssn_mods$ssn_mod_fit$formula)[[1]]
   ssn_preds_hist$edges <- merge(
     in_ssn_mods$ssn_mod_fit$ssn.object$edges,
     in_ssn_preds$hist,
@@ -8364,10 +8543,10 @@ map_ssn_mod <- function(in_ssn,
   # Makes maps of projections  ----------------------------
   ssn_preds_proj <- in_ssn_mods$ssn_mod_fit$ssn.object
   
-  ggplot(proj_stats_gcm, aes(x=period, y=preds_diff_multigcm_avg, fill=scenario)) +
-    geom_boxplot() + 
-    facet_wrap(~country)
-  
+  # ggplot(proj_stats_gcm, aes(x=period, y=preds_diff_multigcm_avg, fill=scenario)) +
+  #   geom_boxplot() + 
+  #   facet_wrap(~country)
+  # 
   
   # Creates a map of a specific projection scenario (2070-2099, ssp585)
   ssn_preds_proj$obs <- ssn_preds_proj$obs %>%
@@ -8411,18 +8590,18 @@ map_ssn_mod <- function(in_ssn,
   # )
   
   # Map the difference for a specific GCM/scenario/year
-  ssn_preds_proj$edges <- merge(
-    in_ssn_mods$ssn_mod_fit$ssn.object$edges,
-    in_ssn_preds$proj_stats[decade==2040 & colname=='gfdl-esm4_ssp585_2040',],
-    by = c('country', 'rid'), all.x=T)
-
-  map_diff_indiv <- map_ssn_facets(in_ssn=ssn_preds_proj,
-                                   facet_col='country',
-                                   linewidth_col='qsim_avg',
-                                   linecolor_col='preds_diff',
-                                   page_title=unique( ssn_preds_proj$edges$colname)
-  )
-
+  # ssn_preds_proj$edges <- merge(
+  #   in_ssn_mods$ssn_mod_fit$ssn.object$edges,
+  #   in_ssn_preds$proj_stats[decade==2040 & colname=='gfdl-esm4_ssp585_2040',],
+  #   by = c('country', 'rid'), all.x=T)
+  # 
+  # map_diff_indiv <- map_ssn_facets(in_ssn=ssn_preds_proj,
+  #                                  facet_col='country',
+  #                                  linewidth_col='qsim_avg',
+  #                                  linecolor_col='preds_diff',
+  #                                  page_title=unique( ssn_preds_proj$edges$colname)
+  # )
+  
 }
 
 #------ plot_ssn_proj ----------------------------------------------------------

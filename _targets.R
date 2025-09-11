@@ -907,18 +907,20 @@ analysis_targets <- list(
     hydro_vars_forssn,
     {
       hydrovar_grid <- expand.grid(
-        c('DurD', 'FreD', 'PDurD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'),
+        c('DurD', 'FreD', 'PDurD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'), #MaxConD
         paste0(c(30, 60, 90, 180, 365, 3650), 'past')
       )
       stcon_grid <- expand.grid(paste0('STcon_m', c(30, 60, 90, 180, 365)),
                                 c('_directed', '_undirected'))
       fdist_grid <- expand.grid(paste0('Fdist_mean_', c(30, 60, 90, 180, 365, 3650), 'past'),
                                 c('_directed', '_undirected'))
+      
       hydro_regex_list <- c(
         paste0(hydrovar_grid$Var1,'.*', hydrovar_grid$Var2),
         paste0(stcon_grid$Var1, stcon_grid$Var2),
         paste0(fdist_grid$Var1, fdist_grid$Var2)
       )
+      #Add PrdD
 
       lapply(hydro_regex_list, function(var_str) {
         grep(paste0('^', var_str),
@@ -941,7 +943,7 @@ analysis_targets <- list(
       response_var = alpha_var_list,
       ssn_covtypes = ssn_covtypes
     ),
-    pattern = map(organism_list),
+    pattern = cross(organism_list, alpha_var_list),
     iteration = "list"
   )
   ,
@@ -957,13 +959,14 @@ analysis_targets <- list(
         .[, .SD[order(AIC)][1:5, .(covtypes)], by = organism]
 
       #Convert to named list by organism
-      covtypes_by_organism <- selected_covtypes[, .(covtypes = list(covtypes)), by = organism]
+      covtypes_by_organism <- selected_covtypes[, .(covtypes = list(covtypes)), 
+                                                by = organism]
 
-      #Build a list of model setups (one per organism × hydro_var)
-      model_setups <- CJ(
-        organism = covtypes_by_organism$organism,
-        hydro_var = hydro_vars_forssn
-      )
+      #Build a list of model setups (one per organism × hydro_var x alpha_var)
+      # model_setups <- CJ(
+      #   organism = covtypes_by_organism$organism,
+      #   hydro_var = hydro_vars_forssn
+      # )
 
       #Attach covtypes to each setup
       model_setup_list <- list()
@@ -972,7 +975,7 @@ analysis_targets <- list(
           #Add 'null' model (without the hydrovar)
           model_setup_list[[length(model_setup_list) + 1]] <- list(
             organism = org,
-            div_var = div_index,
+            response_var = div_index,
             hydro_var = NULL,
             covtypes = covtypes_by_organism[organism==org,]$covtypes[[1]]
           )
@@ -981,7 +984,7 @@ analysis_targets <- list(
           for (hv in hydro_vars_forssn) {
             model_setup_list[[length(model_setup_list) + 1]] <- list(
               organism = org,
-              div_var = div_index,
+              response_var = div_index,
               hydro_var = hv,
               covtypes = covtypes_by_organism[organism==org,]$covtypes[[1]]
             )
@@ -997,22 +1000,33 @@ analysis_targets <- list(
   #Run SSN for each chosen variable and time window
   tar_target(
     ssn_div_hydrowindow,
-    future_lapply(
+    lapply(
       ssn_div_models_to_run,
       function(model_setup) {
-        print(model_setup)
-        model_ssn_hydrowindow(
-          in_ssn = ssn_eu,
-          organism = model_setup$organism,
-          formula_root = 'log10(basin_area_km2) + log10(basin_area_km2):country',
-          hydro_var = model_setup$hydro_var,
-          response_var = model_setup$div_var,
-          ssn_covtypes = ssn_covtypes[label %in% model_setup$covtypes, ]
-        )
-      })
+        with(model_setup, print(paste(organism, response_var, hydro_var, sep=' - ')))
+        tryCatch ({
+          model_ssn_hydrowindow(
+            in_ssn = ssn_eu,
+            organism = model_setup$organism,
+            formula_root = 'log10(basin_area_km2) + log10(basin_area_km2):country',
+            hydro_var = model_setup$hydro_var,
+            response_var = model_setup$response_var,
+            ssn_covtypes = ssn_covtypes[label %in% model_setup$covtypes, ]
+          )
+          }, error = function(e) {
+            warning(paste("Model failed for", 
+                          with(model_setup, paste(organism, response_var, hydro_var, sep=' - ')), 
+                          ":", e$message))
+            structure(list(
+              fit_status = "failed",
+              error_message = e$message,
+              label = model_setup
+            ), class = "ssn_mod_failed")
+          })
+        })
   )
   ,
-
+  
   tar_target(
     ssn_covtype_selected,
     select_ssn_covariance(in_ssnmodels=ssn_div_hydrowindow)
@@ -1022,7 +1036,8 @@ analysis_targets <- list(
   tar_target(
     ssn_div_hydrowindow_formatted,
     {
-      ssn_model_names <- do.call(rbind, ssn_div_models_to_run)[,1:2] %>%
+      ssn_model_names <- do.call(
+        rbind, ssn_div_models_to_run)[,c('organism', 'hydro_var', 'response_var')] %>%
         as.data.table
       ssnmodels <- cbind(ssn_model_names, ssn_div_hydrowindow)
 
@@ -1099,9 +1114,10 @@ analysis_targets <- list(
   
   tar_target(
     ssn_mods_miv_yr_diagnose,
-    diagnose_ssn_mod(in_ssn_mods=ssn_mods_miv_yr,
-                     write_plots=T,
-                     out_dir=figdir)
+    diagnose_ssn_mod(in_ssn_mods = ssn_mods_miv_yr,
+                     response_var_label = 'Mean richness',
+                     write_plots = T,
+                     out_dir = figdir)
   ),
   
   tar_target(
