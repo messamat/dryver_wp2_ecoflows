@@ -6663,15 +6663,14 @@ select_ssn_covariance <- function(in_ssnmodels) {
 }
 
 #------ format_ssn_hydrowindow -------------------------------------------------
-# in_ssnmodels <- tar_read(ssn_richness_hydrowindow)
+# in_ssnmodels <- tar_read(ssn_div_hydrowindow)
 # in_covtype_selected <- select_ssn_covariance(in_ssnmodels)
-# tar_load(ssn_richness_models_to_run)
+# tar_load(ssn_div_models_to_run)
 # 
 # in_organism <- 'miv_nopools'
-# ssn_model_names <- do.call(rbind, ssn_richness_models_to_run)[,1:2] %>%
+# ssn_model_names <- do.call(rbind, ssn_div_models_to_run)[,1:2] %>%
 #   as.data.table
 # in_ssnmodels <- cbind(ssn_model_names, in_ssnmodels)
-# setnames(in_ssnmodels, 'in_ssnmodels', 'ssn_richness_hydrowindow')
 
 #' @title Format and plot SSN model results
 #' @description This comprehensive function processes the output of SSN models 
@@ -6684,7 +6683,8 @@ select_ssn_covariance <- function(in_ssnmodels) {
 #' @return A list containing the formatted data table and several ggplot objects.
 format_ssn_hydrowindow <- function(in_ssnmodels, 
                                    in_organism, 
-                                   in_covtype_selected) {
+                                   in_covtype_selected,
+                                   in_hydrovars_dt) {
   # Get the selected covariance type for the specified organism
   org_covtype <- in_covtype_selected$dt_sub[organism==in_organism,][['covtypes']]
   
@@ -6716,26 +6716,10 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
     .[, window_d := factor(window_d, levels=sort(unique(as.integer(window_d))))]
   
   # Define labels for the hydrological variables for plotting
-  hydro_labels <- c(
-    "Null model",
-    "Proportion of no-flow days",
-    "Number of no-flow periods",
-    "Spatio-temporal connectivity - upstream",
-    "Spatio-temporal connectivity - undirected",
-    "Mean distance to the nearest flowing site - upstream",
-    "Mean distance to the nearest flowing site - undirected")
-  
-  
-  labels_dt = data.table(
-    hydro_var_root = c('null', "DurD", "FreD", 
-                       "STcon_directed", "STcon_undirected",
-                       "Fdist_mean_directed", "Fdist_mean-undirected"),
-    hydro_var_root_label = factor(hydro_labels, levels=hydro_labels, ordered=T)
-  )
-  
-  ssn_hydrowindow_perf_allvars <- merge(ssn_hydrowindow_perf_allvars,
-                                        labels_dt,
-                                        by='hydro_var_root')
+  ssn_hydrowindow_perf_allvars <- merge(
+    ssn_hydrowindow_perf_allvars,
+    unique(in_hydrovars_dt, by='hydro_var_root')[, .(hydro_var_root, hydro_label)],
+    by='hydro_var_root')
   
   #Get variance decomposition estimated by model
   varcomp_labels <- c('Remaining variance (nugget)', 
