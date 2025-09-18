@@ -1117,59 +1117,7 @@ analysis_targets <- list(
     )
   )
   ,
-  
-  # tar_target(
-  #   ssn_div_hydrowindow,
-  #   lapply(
-  #     ssn_div_models_to_run[response_var==in_response_var,],
-  #     function(model_setup) {
-  #       with(model_setup, print(paste(organism, in_response_var, hydro_var, sep=' - ')))
-  #       # tryCatch ({
-  #       model_ssn_hydrowindow(
-  #         in_ssn = ssn_eu,
-  #         organism = model_setup$organism,
-  #         formula_root = 'log10(basin_area_km2) + log10(basin_area_km2):country',
-  #         hydro_var = model_setup$hydro_var,
-  #         response_var = in_response_var,
-  #         ssn_covtypes = ssn_covtypes[label %in% model_setup$covtypes, ]
-  #       )
-  #       # }, error = function(e) {
-  #       #   warning(paste("Model failed for", 
-  #       #                 with(model_setup, paste(organism, response_var, hydro_var, sep=' - ')), 
-  #       #                 ":", e$message))
-  #       #   structure(list(
-  #       #     fit_status = "failed",
-  #       #     error_message = e$message,
-  #       #     label = model_setup
-  #       #   ), class = "ssn_mod_failed")
-  #       # })
-  #     })
-  # )
-  # ,
 
-  
-  # tar_target(
-  #   ssn_div_hydrowindow_formatted,
-  #   {
-  #     ssn_model_names <- do.call(
-  #       rbind, ssn_div_models_to_run)[,c('organism', 'hydro_var', 'response_var')] %>%
-  #       as.data.table
-  #     ssnmodels <- cbind(ssn_model_names, ssn_div_hydrowindow)
-  #     
-  #     out_list <- lapply(organism_dt$organism, function(in_organism) {
-  #       print(in_organism)
-  #       format_ssn_hydrowindow(in_ssnmodels = ssnmodels,
-  #                              in_organism = in_organism,
-  #                              in_covtype_selected = ssn_covtype_selected,
-  #                              in_hydrovars_dt = hydro_vars_dt)
-  #     })
-  #     names(out_list) <- organism_dt$organism
-  #     
-  #     return(out_list)
-  #   }
-  # )
-  # ,
-  
   ##############################################################################
   # MODEL SITES SUMMARIZED
   ##############################################################################
