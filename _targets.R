@@ -1048,16 +1048,17 @@ analysis_targets <- list(
   
   #Run SSN for each chosen variable and time window
   tar_map(
-    values = tibble(in_response_var = alpha_var_list),
+    values = tibble(in_response_var = c('invsimpson')),
     names = in_response_var,  # names branches by response_var
     tar_target(
       ssn_div_hydrowindow,
       {
         # Subset the models for this response_var
-        models_subset <- ssn_div_models_to_run[response_var == in_response_var,]
+        models_subset <- keep(ssn_div_models_to_run, 
+                              function(x) x$response_var == in_response_var)
         
         future_lapply(models_subset, function(model_setup) {
-          with(model_setup, print(paste(organism, response_var, hydro_var, sep=' - ')))
+          print(paste(model_setup$organism, in_response_var, model_setup$hydro_var, sep=' - '))
           
           model_ssn_hydrowindow(
             in_ssn = ssn_eu,
@@ -1065,10 +1066,54 @@ analysis_targets <- list(
             formula_root = 'log10(basin_area_km2) + log10(basin_area_km2):country',
             hydro_var = model_setup$hydro_var,
             response_var = in_response_var,
-            ssn_covtypes = ssn_covtypes[label %in% model_setup$covtypes, ]
+            ssn_covtypes = ssn_covtypes[label %in% model_setup$covtypes, ],
+            family = "Gaussian",
+            include_seasonality=F
           )
         })
       }
+    )
+    ,
+    
+    tar_target(
+      ssn_covtype_selected,
+      select_ssn_covariance(in_ssnmodels = ssn_div_hydrowindow)
+    )
+    ,
+    
+    tar_target(
+      ssn_div_hydrowindow_formatted,
+      {
+        # Combine model metadata with results
+        ssn_model_names <- do.call(rbind, ssn_div_models_to_run)[
+          , c('organism', 'hydro_var', 'response_var')] %>%
+          as.data.table() %>%
+          .[response_var == in_response_var,]
+        ssnmodels <- cbind(ssn_model_names, ssn_div_hydrowindow)
+        names(ssnmodels)[ncol(ssnmodels)] <- 'ssn_div_models'
+        
+        # Format per organism
+        out_list <- lapply(unique(ssnmodels$organism), function(in_organism) {
+          print(in_organism)
+          format_ssn_hydrowindow(
+            in_ssnmodels = ssnmodels,
+            in_organism = in_organism,
+            in_covtype_selected = ssn_covtype_selected,
+            in_hydrovars_dt = hydro_vars_dt
+          )
+        })
+        names(out_list) <- unique(ssnmodels$organism)
+        out_list
+      }
+    )
+    ,
+    
+    tar_target(
+      ssn_div_hydrowindow_plots_paths,
+      save_ssn_div_hydrowindow_plots(
+        in_ssn_div_hydrowindow_formatted = ssn_div_hydrowindow_formatted,
+        out_dir = figdir
+      )
     )
   )
   ,
@@ -1101,39 +1146,7 @@ analysis_targets <- list(
   #     })
   # )
   # ,
-  
-  tar_target(
-    ssn_covtype_selected,
-    select_ssn_covariance(in_ssnmodels = ssn_div_hydrowindow),
-    pattern = map(ssn_div_hydrowindow)  # processes one branch at a time
-  )
-  ,
-  
-  tar_target(
-    ssn_div_hydrowindow_formatted,
-    {
-      # Combine model metadata with results
-      ssn_model_names <- do.call(rbind, ssn_div_models_to_run)[
-        , c('organism', 'hydro_var', 'response_var')] %>%
-        as.data.table()
-      ssnmodels <- cbind(ssn_model_names, ssn_div_hydrowindow)
-      
-      # Format per organism
-      out_list <- lapply(organism_dt$organism, function(in_organism) {
-        print(in_organism)
-        format_ssn_hydrowindow(
-          in_ssnmodels = ssnmodels,
-          in_organism = in_organism,
-          in_covtype_selected = ssn_covtype_selected,
-          in_hydrovars_dt = hydro_vars_dt
-        )
-      })
-      names(out_list) <- organism_dt$organism
-      out_list
-    },
-    pattern = map(ssn_covtype_selected)  # still branch-aware
-  )
-  ,
+
   
   # tar_target(
   #   ssn_div_hydrowindow_formatted,
@@ -1157,15 +1170,6 @@ analysis_targets <- list(
   # )
   # ,
   
-  tar_target(
-    ssn_div_hydrowindow_plots_paths,
-    save_ssn_div_hydrowindow_plots(
-      in_ssn_div_hydrowindow_formatted = ssn_div_hydrowindow_formatted,
-      out_dir = figdir
-    ),
-    pattern = map(ssn_div_hydrowindow_formatted)
-  )
-  ,
   ##############################################################################
   # MODEL SITES SUMMARIZED
   ##############################################################################

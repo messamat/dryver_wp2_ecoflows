@@ -417,7 +417,7 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
         relF30mean_yrmin = min(relF30mean, na.rm=T)
       ), by=hy] 
     
-
+    
     #Compute previous mean over many windows
     meanstep <- c(10, 30, 60, 90, 120, 180, 365, 365*5, 365*10)
     relF_dt[, paste0("relF", meanstep, "past") := frollmean(relF, meanstep, na.rm=T)]
@@ -425,12 +425,12 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
     
     relF_dt_yr <- relF_dt[!duplicated(hy), .(relF7mean_yrmin, hy)] %>%
       .[, paste0("relF7mean_yrmin_cv", rollingstep_yr, "yrpast") :=  
-         frollapply(relF7mean_yrmin, n=rollingstep_yr, 
-                    FUN=function(x) sd(x, na.rm=T)/mean(x, na.rm=T), 
-                    align='right')
+          frollapply(relF7mean_yrmin, n=rollingstep_yr, 
+                     FUN=function(x) sd(x, na.rm=T)/mean(x, na.rm=T), 
+                     align='right')
       ] %>% 
       .[, relF7mean_yrmin := NULL]
-
+    
     relF_dt <- merge(relF_dt, relF_dt_yr, by='hy')
   }
   
@@ -544,19 +544,19 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
     
     #CV of annual number of no-flow days
     hydromod_dt_yr[
-      , paste0("DurD_yrCV", rollingstep_yr, "yrpast") :=  
+      , paste0("DurD_CV", rollingstep_yr, "yrpast") :=  
         frollapply(DurD_yr, n=rollingstep_yr, 
                    FUN=function(x) fifelse(mean(x, na.rm=T)==0,
-                                          0,
-                                          sd(x, na.rm=T)/mean(x, na.rm=T)
-                                          ), 
+                                           0,
+                                           sd(x, na.rm=T)/mean(x, na.rm=T)
+                   ), 
                    align='right')
       , by=.(reach_id)
     ] 
     
     #CV of annual number of no-flow events
     hydromod_dt_yr[
-      , paste0("FreD_yrCV", rollingstep_yr, "yrpast") :=  
+      , paste0("FreD_CV", rollingstep_yr, "yrpast") :=  
         frollapply(FreD_yr, n=rollingstep_yr, 
                    FUN=function(x) fifelse(mean(x, na.rm=T)==0,
                                            0,
@@ -568,7 +568,7 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
     
     #CV of average annual event duration
     hydromod_dt_yr[
-      , paste0("meanConD_yrCV", rollingstep_yr, "yrpast") :=  
+      , paste0("meanConD_CV", rollingstep_yr, "yrpast") :=  
         frollapply(meanConD_yr, n=rollingstep_yr, 
                    FUN=function(x) fifelse(mean(x, na.rm=T)==0,
                                            0,
@@ -591,7 +591,7 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
     #SD6: seasonal predictability of no-flow events (Gallart et al. 2012)
     #Identify contiguous six months with the most zero-flow days for computing Sd6
     hydromod_dt_sites <- hydromod_dt_sites[, identify_drywet6mo(in_dt=.SD), 
-                                     by=.(reach_id)]
+                                           by=.(reach_id)]
     
     base_dt <- hydromod_dt_sites[, ym := format(date, '%Y%m')] %>%
       .[, any(!is.na(noflow_period)), 
@@ -626,7 +626,7 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
       merge(sd6_dt, by=c('reach_id', 'year')) %>%
       .[, `:=`(ym=NULL, dry_6mo=NULL, `FALSE`=NULL, `TRUE`=NULL)] %>%
       setorderv(c('reach_id', 'date'))
-
+    
   }
   
   # Output -----------------------------
@@ -3129,7 +3129,7 @@ reassign_netids <- function(rivnet_path, strahler_dt,
   return(out_path)
 }
 #------ compute_hydrostats_drn -------------------------------------------------
-# in_drn <- 'Czech'
+# in_drn <- 'Croatia'
 # varname <-  'isflowing' #qsim
 # in_sites_dt <- tar_read(sites_dt)[country == in_drn,]
 # in_network_path <- tar_read(network_ssnready_gpkg_list)[[in_drn]]
@@ -3222,7 +3222,7 @@ compute_hydrostats_drn <- function(in_network_path,
 }
 
 #------ subset_hydrostats ------------------------------------------------------
-# in_country <- in_drn <- 'Spain'
+# in_country <- in_drn <- 'Czech'
 # hydrostats <- tar_read_raw(paste0("hydrostats_", in_country, '_qsim'))
 # in_bio_dt <- tar_read(bio_dt)
 
@@ -6473,11 +6473,15 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
 # var_substr <- 'STcon.*_directed'
 
 # in_ssn = tar_read(ssn_eu)
-# organism = 'miv_nopools_flying'
+# organism = 'miv_nopools'
 # formula_root = ' log10(basin_area_km2) + log10(basin_area_km2):country'
 # hydro_var = 'DurD365past'
-# response_var = 'richness'
+# response_var = 'expshannon'
 # tar_load(ssn_covtypes)
+# family = "Gaussian"
+# estmethod = "ml"
+# partition_formula = as.formula("~ as.factor(campaign)")
+# random_formula = as.formula("~ country")
 
 # tar_load(ssn_covtypes)
 # in_ssn = tar_read(ssn_eu_summarized)
@@ -6511,7 +6515,8 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
                                   partition_formula = as.formula("~ as.factor(campaign)"),
                                   random_formula = as.formula("~ country"),
                                   family = "Gaussian",
-                                  estmethod = "ml") {
+                                  estmethod = "ml",
+                                  include_seasonality=F) {
   
   # hydro_var <- grep(paste0('^', hydro_var_str), 
   #                   names(in_ssn[[organism]]$ssn$obs), 
@@ -6523,6 +6528,10 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
                            hydro_var, ':country +', formula_root)
   } else {
     full_formula <- paste0(response_var, ' ~ ', formula_root)
+  }
+  
+  if (include_seasonality) {
+    full_formula <- paste(full_formula, '+ doy + I(doy^2)')
   }
   
   # 2. Fit SSN models using quick_ssn
@@ -6542,7 +6551,8 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
       data.table(
         covtypes = label,
         fit_status = "failed",
-        error_message = model$error_message
+        error_message = model$error_message,
+        AICc=NA
       )
     } else {
       out <- SSN2::glance(model) %>%
@@ -6605,7 +6615,7 @@ plot_hydro_comparison <- function(var_substr, in_cor_dt, color_list) {
 }  
 
 #------ select_ssn_covariance -------------------------------------------------
-#in_ssnmodels <- tar_read(ssn_richness_hydrowindow)
+in_ssnmodels <- tar_read(ssn_div_hydrowindow_invsimpson)
 
 #' @title Select the best-performing SSN covariance structure
 #' @description This function takes a list of fitted SSN models and evaluates 
@@ -6622,11 +6632,11 @@ select_ssn_covariance <- function(in_ssnmodels) {
   
   # Calculate delta-AICc for each model, grouped by hydrological variable and organism.
   # delta-AICc is the difference between a model's AICc and the minimum AICc in its group.
-  ssn_glance_bind[, delta_AICc := (AICc - min(AICc)),
+  ssn_glance_bind[, delta_AICc := (AICc - min(AICc, na.rm=T)),
                   by=.(hydro_var, organism)] %>%
     # Calculate the mean and median delta-AICc for each covariance type and organism
-    .[, `:=`(delta_AICc_covtypemean = mean(delta_AICc), 
-             delta_AICc_covtypemedian = median(delta_AICc),
+    .[, `:=`(delta_AICc_covtypemean = mean(delta_AICc, na.rm=T), 
+             delta_AICc_covtypemedian = median(delta_AICc, na.rm=T),
              n = .N), by=.(organism, covtypes)]
   
   # Create a unique data table with the aggregated covariance statistics
@@ -6690,7 +6700,7 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
   
   # Combine model glance tables and attach the full model objects
   ssn_hydrowindow_perf_allvars <- lapply(
-    in_ssnmodels[organism==in_organism, ssn_div_hydrowindow],
+    in_ssnmodels[organism==in_organism, ssn_div_models],
     function(x) {
       merge(
         x[['ssn_glance']],
@@ -6703,6 +6713,7 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
     # Filter for the selected covariance type and handle 'null' hydro_var
     .[covtypes==org_covtype,] %>%
     .[is.na(hydro_var), hydro_var := 'null']
+  
   
   # Remove the large model object to save memory 
   #(the data table `ssn_hydrowindow_perf_allvars` still contains the `mod` column)
@@ -6731,8 +6742,15 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
   )
   
   ssn_hydrowindow_varcomp <- ssn_hydrowindow_perf_allvars[
-    , SSN2::varcomp(mod[[1]]), 
-    by=.(response_var, hydro_var, covtypes, hydro_var_root_label, window_d)
+    ,    {
+      if (inherits(mod[[1]], c("ssn_lm", "ssn_glm"))) {
+        vc <- SSN2::varcomp(mod[[1]])
+        as.data.table(vc)   # multi-row result
+      } else {
+        data.table()        # return empty DT so it skips
+      }
+    }
+    , by=.(response_var, hydro_var, covtypes, hydro_label, window_d)
   ] %>%
     merge(data.table(
       varcomp=c(
@@ -6765,7 +6783,7 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
     scale_y_continuous('Percentage of variance', 
                        breaks=c(0, 0.5, 1),
                        labels = scales::label_percent()) +
-    facet_wrap(~hydro_var_root_label, scales = "free") +
+    facet_wrap(~hydro_label, scales = "free") +
     coord_cartesian(expand = FALSE) +
     theme_bw()
   
