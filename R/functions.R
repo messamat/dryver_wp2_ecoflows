@@ -6673,7 +6673,7 @@ select_ssn_covariance <- function(in_ssnmodels) {
 }
 
 #------ format_ssn_hydrowindow -------------------------------------------------
-# in_ssnmodels <- tar_read(ssn_div_hydrowindow)
+# in_ssnmodels <- tar_read(ssn_div_hydrowindow_richness_miv_nopools)
 # in_covtype_selected <- select_ssn_covariance(in_ssnmodels)
 # tar_load(ssn_div_models_to_run)
 # 
@@ -6722,8 +6722,9 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
   #Identify covariance structure with the lowest AICc across all time windows 
   #for each hydrological variable
   ssn_hydrowindow_perf_allvars[, hydro_var_root := gsub(
-    "(_*[0-9]+past)|(_*m[0-9]+)", "", hydro_var)] %>%
-    .[, window_d := str_extract(hydro_var, '([0-9]+(?=past))|((?<=m)[0-9]+)')] %>%
+    "(_*[0-9]+(yr)*past)|(_*m[0-9]+)", "", hydro_var)] %>%
+    .[, window_d := str_extract(hydro_var,
+                                '([0-9]+(?=yrpast))|([0-9]+(?=past))|((?<=m)[0-9]+)')] %>%
     .[, window_d := factor(window_d, levels=sort(unique(as.integer(window_d))))]
   
   # Define labels for the hydrological variables for plotting
@@ -6939,43 +6940,50 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
 #' @return A list of file paths to the saved plots.
 save_ssn_div_hydrowindow_plots <- function(
     in_ssn_div_hydrowindow_formatted,
+    in_organism,
+    in_response_var,
     out_dir) {
   
-  lapply(names(in_ssn_div_hydrowindow_formatted), function(in_organism) {
+  # Save the formatted performance data table as a CSV file. 
+  #The 'mod' column is excluded to prevent saving large objects.
+  fwrite(in_ssn_div_hydrowindow_formatted$dt, 
+         file.path(out_dir, 
+                   paste0('ssn_div_hydrowindow_perftable_', 
+                          in_organism, '_',
+                          in_response_var, '_',
+                          format(Sys.Date(), '%Y%m%d'),
+                          '.csv'))
+  )
+  
+  # Define a list of plot names to save
+  plot_names <- list('plot_varcomp'
+                     , 'plot_obs_preds'
+                     , 'plot_x_preds'
+                     # , 'plot_marginal'
+                     )
+  
+  # Loop through each plot and save it as a PNG file
+  lapply(plot_names, function(pname) {
+    out_path <- file.path(out_dir, 
+                          paste0('ssn_div_hydrowindow_', 
+                                 in_organism, '_',
+                                 in_response_var, '_',
+                                 pname, '_',
+                                 format(Sys.Date(), '%Y%m%d'),
+                                 '.png'))
+    message(paste0('Saving ', out_path))
     
-    # Save the formatted performance data table as a CSV file. 
-    #The 'mod' column is excluded to prevent saving large objects.
-    fwrite(in_ssn_div_hydrowindow_formatted[[in_organism]]$dt[, -c('mod'), with=F], 
-           file.path(out_dir, 
-                     paste0('ssn_div_hydrowindow_perftable_', 
-                            in_organism, '.csv'))
+    ggsave(
+      filename = out_path,
+      plot = in_ssn_div_hydrowindow_formatted[[pname]],
+      width = 9,
+      height = 9,
+      units='in',
+      dpi=600
     )
     
-    # Define a list of plot names to save
-    plot_names <- list('plot_varcomp', 'plot_obs_preds', 
-                       'plot_x_preds', 'plot_marginal')
-    
-    # Loop through each plot and save it as a PNG file
-    lapply(plot_names, function(pname) {
-      out_path <- file.path(out_dir, 
-                            paste0('ssn_div_hydrowindow_', 
-                                   in_organism, '_',
-                                   pname, '.png'))
-      message(paste0('Saving ', out_path))
-      
-      ggsave(
-        filename = out_path,
-        plot = in_ssn_div_hydrowindow_formatted[[in_organism]][[pname]],
-        width = 9,
-        height = 9,
-        units='in',
-        dpi=600
-      )
-      
-      return(out_path)
-    })
+    return(out_path)
   })
-  
 }
 
 #------ model_miv_t ------------------------------------------------------------

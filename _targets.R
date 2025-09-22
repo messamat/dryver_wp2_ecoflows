@@ -912,7 +912,7 @@ analysis_targets <- list(
       )
       
       hydroyr_grid <- expand.grid(
-        c('DurD_yrCV', "FreD_yrCV", "meanConD_yrCV", "FstDrE_SD", "sd6"),
+        c('DurD_CV', "FreD_CV", "meanConD_CV", "FstDrE_SD", "sd6"),
         paste0(c(10, 30), 'yrpast')
       )
       
@@ -1048,70 +1048,72 @@ analysis_targets <- list(
   
   #Run SSN for each chosen variable and time window
   tar_map(
-    values = tibble(in_response_var = c('invsimpson')),
-    names = in_response_var,  # names branches by response_var
+    values = tidyr::expand_grid(
+      in_response_var = c("invsimpson", "richness"),
+      in_organism = c(
+        "miv_nopools"
+      )
+    ),
+    names = c("in_response_var", "in_organism"),  # branch names will reflect both
     tar_target(
       ssn_div_hydrowindow,
       {
-        # Subset the models for this response_var
-        models_subset <- keep(ssn_div_models_to_run, 
-                              function(x) x$response_var == in_response_var)
+        # Subset the models for this response_var × organism
+        models_subset <- keep(
+          ssn_div_models_to_run,
+          function(x) x$response_var == in_response_var && x$organism == in_organism
+        )
         
         future_lapply(models_subset, function(model_setup) {
-          print(paste(model_setup$organism, in_response_var, model_setup$hydro_var, sep=' - '))
+          print(paste(in_organism, in_response_var, model_setup$hydro_var, sep = " - "))
           
           model_ssn_hydrowindow(
             in_ssn = ssn_eu,
-            organism = model_setup$organism,
-            formula_root = 'log10(basin_area_km2) + log10(basin_area_km2):country',
+            organism = in_organism,
+            formula_root = "log10(basin_area_km2) + log10(basin_area_km2):country",
             hydro_var = model_setup$hydro_var,
             response_var = in_response_var,
             ssn_covtypes = ssn_covtypes[label %in% model_setup$covtypes, ],
             family = "Gaussian",
-            include_seasonality=F
+            include_seasonality = FALSE
           )
         })
       }
-    )
-    ,
+    ),
     
     tar_target(
       ssn_covtype_selected,
       select_ssn_covariance(in_ssnmodels = ssn_div_hydrowindow)
-    )
-    ,
+    ),
     
     tar_target(
       ssn_div_hydrowindow_formatted,
       {
         # Combine model metadata with results
         ssn_model_names <- do.call(rbind, ssn_div_models_to_run)[
-          , c('organism', 'hydro_var', 'response_var')] %>%
+          , c("organism", "hydro_var", "response_var")] %>%
           as.data.table() %>%
-          .[response_var == in_response_var,]
+          .[response_var == in_response_var & organism == in_organism, ]
+        
         ssnmodels <- cbind(ssn_model_names, ssn_div_hydrowindow)
-        names(ssnmodels)[ncol(ssnmodels)] <- 'ssn_div_models'
+        names(ssnmodels)[ncol(ssnmodels)] <- "ssn_div_models"
         
         # Format per organism
-        out_list <- lapply(unique(ssnmodels$organism), function(in_organism) {
-          print(in_organism)
-          format_ssn_hydrowindow(
-            in_ssnmodels = ssnmodels,
-            in_organism = in_organism,
-            in_covtype_selected = ssn_covtype_selected,
-            in_hydrovars_dt = hydro_vars_dt
-          )
-        })
-        names(out_list) <- unique(ssnmodels$organism)
-        out_list
+        format_ssn_hydrowindow(
+          in_ssnmodels = ssnmodels,
+          in_organism = in_organism,
+          in_covtype_selected = ssn_covtype_selected,
+          in_hydrovars_dt = hydro_vars_dt
+        )
       }
-    )
-    ,
+    ),
     
     tar_target(
       ssn_div_hydrowindow_plots_paths,
       save_ssn_div_hydrowindow_plots(
         in_ssn_div_hydrowindow_formatted = ssn_div_hydrowindow_formatted,
+        in_organism = in_organism,
+        in_response_var = in_response_var,
         out_dir = figdir
       )
     )
