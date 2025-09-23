@@ -83,6 +83,15 @@ preformatting_targets <- list(
     format='file'
   ),
   
+  #Path to full/raw information on macroinvertebrate samples
+  tar_target(
+    miv_full_path,
+    file.path(rootdir, 'data', 'wp2', 
+              '01_WP2 final data', '_Macroinvertebrate data', 
+              'DRYvER minv FULL genus data ver10.3.xlsx'),
+    format='file'
+  ),
+  
   #Paths to pre-processed biological sampling data
   tar_target(
     bio_data_paths,
@@ -98,7 +107,7 @@ preformatting_targets <- list(
       miv_nopools_flying = "DRYvER_MIV_data_genus_reduced_taxa_removed_pools_for_traits_flying.csv",
       miv_nopools_nonflying = "DRYvER_MIV_data_genus_reduced_taxa_removed_pools_for_traits_nonflying.csv"
     ) %>%
-      lapply(function(path) file.path(rootdir, 'data', 'data_annika', path))
+      lapply(function(path) file.path(rootdir, 'data', 'data_annika', path)) 
     #, format='file'
   )
   ,
@@ -208,11 +217,18 @@ preformatting_targets <- list(
       .[, date := as.Date(date, "%d.%m.%Y")]
   ),
   
+  #Read full/raw macroinvertebrate sampling data
+  tar_target(
+    miv_full_dt,
+    read_xlsx(miv_full_path, sheet='MINV genus data')
+  )
+  ,
   #Read pre-processed biological sampling data
   tar_target(
     bio_dt,
     read_biodt(path_list = bio_data_paths,
                in_metadata_edna = metadata_edna,
+               in_miv_full_dt = miv_full_dt,
                include_bacteria = T) 
   )
   ,
@@ -746,7 +762,9 @@ analysis_targets <- list(
   #All organisms: max 12
   tar_target(
     organism_list,
-    c('miv_nopools', 'miv_nopools_flying', 'miv_nopools_nonflying', 
+    c('miv_nopools', 
+      'miv_nopools_ept', 'miv_nopools_och', 
+      # 'miv_nopools_flying', 'miv_nopools_nonflying', 
       'fun_sedi_nopools', 'fun_biof_nopools',
       'dia_sedi_nopools', 'dia_biof_nopools',
       'bac_sedi_nopools', 'bac_biof_nopools'
@@ -759,8 +777,10 @@ analysis_targets <- list(
     data.table(
       organism = organism_list,
       organism_label = c('Macroinvertebrates',
-                         'Macroinvertebrates - flying',
-                         'Macroinvertebrates - non-flying',
+                         'Macroinvertebrates - EPT',
+                         'Macroinvertebrates - OCH',
+                         # 'Macroinvertebrates - flying',
+                         # 'Macroinvertebrates - non-flying',
                          'Fungi - sediment', 'Fungi - biofilm',
                          'Diatoms - sediment', 'Diatoms - biofilm',
                          'Bacteria - sediment', 'Bacteria - biofilm')
@@ -946,7 +966,7 @@ analysis_targets <- list(
       
       labels_dt <- data.table(
         hydro_var_root = c('DurD', 'FreD', 'PDurD', "PFreD",
-                           'DurD_yrCV', "FreD_yrCV", "meanConD_yrCV", 
+                           'DurD_CV', "FreD_CV", "meanConD_CV", 
                            "FstDrE_SD", "sd6",
                            "uQ90", "oQ10", "maxPQ", "PmeanQ",
                            "STcon_directed", "STcon_undirected", 
@@ -1051,7 +1071,7 @@ analysis_targets <- list(
     values = tidyr::expand_grid(
       in_response_var = c("invsimpson", "richness"),
       in_organism = c(
-        "miv_nopools"
+        "miv_nopools", "miv_nopools_ept", "miv_nopools_och"
       )
     ),
     names = c("in_response_var", "in_organism"),  # branch names will reflect both

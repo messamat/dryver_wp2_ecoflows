@@ -1673,7 +1673,8 @@ read_envdt <- function(in_env_data_path_annika,
 #' - Removes bacteria pool samples (keeps separate `_nopools` tables).
 #' - Corrects a few known typos in dates (e.g., fungi 2012 → 2021).
 #'
-read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
+read_biodt <- function(path_list, in_metadata_edna, 
+                       in_miv_full_dt, include_bacteria=T) {
   #Read and name all data tables
   dt_list <- mapply(function(in_path, in_name) {
     print(in_path)
@@ -1700,7 +1701,55 @@ read_biodt <- function(path_list, in_metadata_edna, include_bacteria=T) {
   #Remove spaces in running id
   in_metadata_edna[, running_id := gsub(' ', '', running_id)]
   
-  #Fill NAs in dates with eDNA metadata if possible - remove pools
+  #Separate OCH from EPT--------------------------------------------
+  #Prepare reduced data for joining with full/raw data that contains family/taxagroup info
+  miv_melt <- melt(dt_list$miv_nopools, 
+                   id.vars=c('organism', 'running_id', "campaign"
+                             ,"site", "country", "date", "sample.id" ),
+                   variable.name = "taxon_name",
+                   value.name = 'density'
+                   )
+  #Check that can safely clean
+  gsub('[.]', '', gsub('(gen[.])|(sp[.])', '', names(dt_list$miv_nopools))) %>% 
+    duplicated %>% sum
+  #Clean name for joining
+  miv_melt[, taxon_name_format := gsub('[.]|([.]sp)|\\s', '',
+                                       gsub('(sp)[.]', '', taxon_name))
+           ]
+  
+  #Clean raw data
+  taxo_info <- setDT(in_miv_full_dt) %>%
+    .[, taxon_name := tolower(`Genus / Higher taxonomic group`)] %>%
+    .[, taxon_name_format := gsub('[.]|([.]sp)|[//]|\\s', '',
+                           gsub('(sp|lv|ad)[.]', '', taxon_name))
+    ] %>%
+    .[!duplicated(taxon_name_format), 
+      .(taxon_name_format, Taxagroup, Family, Subfamily)] %>%
+    rbind(.[taxon_name_format=='limnephilus',] %>% #Add a missing family-level identified taxon
+            .[, taxon_name_format := 'limnephilinaegen'])
+  
+  #Merge them
+  miv_full <- merge(miv_melt, taxo_info, by='taxon_name_format', all.x=T)
+
+  #check that everything was matched
+  check <- miv_full[is.na(Taxagroup),]
+  check[!duplicated(taxon_name_format), .(taxon_name_format, taxon_name)]
+
+  #Divide OCH and EPT
+  no_ept_taxon_list <- miv_full[
+    !(Taxagroup %in% c('Ephemeroptera', 'Plecoptera', 'Trichoptera')),
+    as.character(unique(taxon_name))]
+  no_och_taxon_list <- miv_full[
+    !(Taxagroup %in% c('Odonata', 'Coleoptera', 'Heteroptera')),
+    as.character(unique(taxon_name))]
+  
+  #Subset original table's columns based on selected taxa
+  dt_list$miv_nopools_ept <- dt_list$miv_nopools[
+    ,.SD, .SDcols = !no_ept_taxon_list]
+  dt_list$miv_nopools_och <- dt_list$miv_nopools[
+    ,.SD, .SDcols = !no_och_taxon_list]
+  
+  #Fill NAs in dates with eDNA metadata if possible - remove pools--------------
   dt_list$dia_sedi[
     is.na(date),
     date := in_metadata_edna[sample_type=='sediment' & habitat != 'pool', 
@@ -6577,6 +6626,8 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
     ssn_glance=ssn_glance
   ))
 }
+
+
 
 #------ plot_hydro_comparison --------------------------------------------------
 #------ compare standard hydro metrics with flow-duration curve-based metrics ---
