@@ -721,24 +721,24 @@ analysis_targets <- list(
   ,
   
   #Compute regional taxonomic diversity
-  tar_target(
-    spdiv_drn,
-    lapply(names(bio_dt), function(in_org) {
-      print(in_org)
-      bio_dt[[in_org]][, calc_spdiv(in_biodt = .SD,
-                                    in_metacols = metacols,
-                                    level = 'regional'),
-                       by=country]
-    }) %>%
-      rbindlist
-  )
-  ,
+  # tar_target(
+  #   spdiv_drn,
+  #   lapply(names(bio_dt), function(in_org) {
+  #     print(in_org)
+  #     bio_dt[[in_org]][, calc_spdiv(in_biodt = .SD,
+  #                                   in_metacols = metacols,
+  #                                   level = 'regional'),
+  #                      by=country]
+  #   }) %>%
+  #     rbindlist
+  # )
+  # ,
   
   #Merge ecological, environmental and hydrological data
   tar_target(
     allvars_merged,
     merge_allvars_sites(in_spdiv_local = spdiv_local, 
-                        in_spdiv_drn = spdiv_drn,
+                        in_spdiv_drn = NULL,
                         in_hydrocon_compiled = hydrocon_sites_compiled,
                         in_hydrocon_summarized = hydrocon_sites_summarized,
                         in_env_dt = env_dt,
@@ -991,20 +991,20 @@ analysis_targets <- list(
           "Mean distance to the nearest flowing site - undirected")
       )
       
-      dt <- dt[, hydro_var_root := gsub(
-        "(_*[0-9]+past)|(_*m[0-9]+)", "", hydro_var)] %>%
-        .[, window_d := str_extract(hydro_var, '([0-9]+(?=past))|((?<=m)[0-9]+)')] %>%
-        .[, window_d := factor(window_d, levels=sort(unique(as.integer(window_d))))] %>%
-        merge(labels_dt,
-              by='hydro_var_root'
-        ) %>%
-        .[, hydro_label := factor(hydro_label, levels=labels_dt$hydro_label, ordered=T)] %>%
-        rbind(data.table(hydro_var='null', hydro_var_root='null', hydro_label='Null'), fill=T)
+      dt <- get_hydro_var_root(dt, in_place=F) %>%
+        merge(., labels_dt, by='hydro_var_root') %>%
+        .[, hydro_label := factor(hydro_label, 
+                                  levels=labels_dt$hydro_label, 
+                                  ordered=T)] %>%
+        rbind(data.table(hydro_var='null', hydro_var_root='null', 
+                         hydro_label='Null'), fill=T)
       
       return(dt)
     }
   )
   ,
+  
+
   
   # Run a first SSN with a single hydrological variable for each organism
   # to determine the top spatial covariance types
@@ -1071,7 +1071,10 @@ analysis_targets <- list(
     values = tidyr::expand_grid(
       in_response_var = c("invsimpson", "richness"),
       in_organism = c(
-        "miv_nopools", "miv_nopools_ept", "miv_nopools_och"
+        "miv_nopools", "miv_nopools_ept", "miv_nopools_och",
+        'fun_sedi_nopools', 'fun_biof_nopools',
+        'dia_sedi_nopools', 'dia_biof_nopools',
+        'bac_sedi_nopools', 'bac_biof_nopools'
       )
     ),
     names = c("in_response_var", "in_organism"),  # branch names will reflect both
@@ -1123,7 +1126,7 @@ analysis_targets <- list(
           in_ssnmodels = ssnmodels,
           in_organism = in_organism,
           in_covtype_selected = ssn_covtype_selected,
-          in_hydrovars_dt = hydro_vars_dt
+          in_hydro_vars_dt = hydro_vars_dt
         )
       }
     ),

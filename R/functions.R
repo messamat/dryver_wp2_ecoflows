@@ -1253,6 +1253,22 @@ trans_pca_wrapper <- function(in_dt, in_cols_to_ordinate, id_cols,
     ))
   }
 }
+#------ get_hydro_var_root -----------------------------------------------------
+get_hydro_var_root <- function(dt, in_place=TRUE) {
+  if (!in_place) {
+    dt <- copy(dt)
+  }
+  dt[, hydro_var_root := gsub(
+    "(_*[0-9]+(yr)*past)|(_*m[0-9]+)", "", hydro_var)] %>%
+    .[, window_d := str_extract(hydro_var,
+                                '([0-9]+(?=yrpast))|([0-9]+(?=past))|((?<=m)[0-9]+)')] %>%
+    .[, window_d := factor(window_d, levels=sort(unique(as.integer(window_d))))]
+  
+  if (!in_place) {
+    return(dt)
+  }
+}
+
 ################################################################################
 #---------------------------------- workflow functions ---------------------------------------------
 # path_list = tar_read(bio_data_paths)
@@ -1745,9 +1761,11 @@ read_biodt <- function(path_list, in_metadata_edna,
   
   #Subset original table's columns based on selected taxa
   dt_list$miv_nopools_ept <- dt_list$miv_nopools[
-    ,.SD, .SDcols = !no_ept_taxon_list]
+    ,.SD, .SDcols = !no_ept_taxon_list] %>% 
+    .[, organism := 'miv_nopools_ept']
   dt_list$miv_nopools_och <- dt_list$miv_nopools[
-    ,.SD, .SDcols = !no_och_taxon_list]
+    ,.SD, .SDcols = !no_och_taxon_list]%>% 
+    .[, organism := 'miv_nopools_och']
   
   #Fill NAs in dates with eDNA metadata if possible - remove pools--------------
   dt_list$dia_sedi[
@@ -1967,9 +1985,7 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
     
     #Format local diversity decomposition
     localdiv_decomp <- as.data.table(decomp$tab_by_site) %>%
-      setnames(c('nsite'), 'ncamwx<5
-               *ùk
-               $*^ùpaigns')
+      setnames(c('nsite'), 'ncampaigns')
     localdiv_decomp[, site := unique(biodt_copy$site)]
     
     out_dt <- mergeDTlist(
@@ -4576,7 +4592,7 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path) {
 #------ merge_allvars_sites ----------------------------------------------------
 # in_country <- 'Spain'
 # in_spdiv_local <- tar_read(spdiv_local)
-# in_spdiv_drn <- tar_read(spdiv_drn)
+# in_spdiv_drn <- NULL
 # in_hydrocon_compiled <- tar_read(hydrocon_sites_compiled)
 # in_hydrocon_summarized <- tar_read(hydrocon_sites_summarized)
 # in_env_dt <- tar_read(env_dt)
@@ -4617,8 +4633,8 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn=NULL,
   dry_only_sites <- in_env_dt[, any(state_of_flow=='F'), by=site][V1==F, site]
   
   #Merge diversity data
-  setDT(in_spdiv_drn)
   if (!is.null(in_spdiv_drn)) {
+    setDT(in_spdiv_drn)
     spdiv <- merge(in_spdiv_local, in_spdiv_drn,
                    by=c('country', 'organism')) 
   } else {
@@ -5128,7 +5144,7 @@ plot_cor_heatmaps <- function(in_cor_matrices,
 #          loadings = TRUE, loadings.colour = 'blue',
 #          loadings.label = TRUE, loadings.label.size = 5) + theme_bw()
 
-# in_allvars_dt <- tar_read(allvars_merged)$dt_summarized
+# in_allvars_dt <- tar_read(allvars_merged)$dt
 # by_date=F
 
 #' @title Ordinate local environmental data
@@ -5147,6 +5163,7 @@ ordinate_local_env <- function(in_allvars_dt) {
                     'moss_cover', 'wood_cover', 'riparian_cover_in_the_riparian_area',
                     'shade', 'hydromorphological_alteration', 'm2_biofilm',
                     'conductivity_micros_cm', 'ph', 'temperature_c')
+  
   #'oxygen_mg_l' missing for entire country
   
   id_cols <- c('site', 'country')
@@ -5484,7 +5501,7 @@ create_ssn_europe <- function(in_network_path,
     sites_list$preds_proj <- preds_proj_lsn
   }
   
-  #4. Incorporate barriers into the landscape network
+  #4. Incorporate barriers into the landscape network -----
   #Only keep barriers over 2 m and under 100 m snap from network
   barriers_eu_sub <- lapply(names(in_barriers_path), function(in_country) {
     st_read(in_barriers_path[[in_country]]) %>%
@@ -5506,7 +5523,7 @@ create_ssn_europe <- function(in_network_path,
     sites_list$barriers <- barriers_lsn
   }
   
-  # 5. Calculate upstream distance 
+  # 5. Calculate upstream distance -----
   edges_lsn <- updist_edges(
     edges =  edges_lsn,
     save_local = TRUE,
@@ -5522,7 +5539,7 @@ create_ssn_europe <- function(in_network_path,
     lsn_path = lsn_path
   )
   
-  # 6. Compute segment Proportional Influence (PI) and Additive Function Values (AFVs)
+  # 6. Compute segment Proportional Influence (PI) and Additive Function Values (AFVs) ----
   if (min(net_eu$qsim_avg) > 0) {
     edges_lsn$qsim_avg_sqrt <- sqrt(edges_lsn$qsim_avg)
     
@@ -5548,7 +5565,7 @@ create_ssn_europe <- function(in_network_path,
   }
   
   
-  #7. Assemble an SSN for each organism 
+  #7. Assemble an SSN for each organism  -----
   #(so that it only includes data for the  corresponding sites and dates)
   out_ssn_list <- lapply(unique(sites_list_lsn$sites$organism), function(in_org) {
     out_ssn_path <- file.path(out_dir, paste0(out_ssn_name, '_', in_org, '.ssn'))
@@ -5573,6 +5590,7 @@ create_ssn_europe <- function(in_network_path,
     ))
   }) %>% setNames(unique(sites_list_lsn$sites$organism))
   
+  #Return --------------
   return(out_ssn_list)
 }
 
@@ -6734,14 +6752,20 @@ select_ssn_covariance <- function(in_ssnmodels) {
 }
 
 #------ format_ssn_hydrowindow -------------------------------------------------
-# in_ssnmodels <- tar_read(ssn_div_hydrowindow_richness_miv_nopools)
-# in_covtype_selected <- select_ssn_covariance(in_ssnmodels)
-# tar_load(ssn_div_models_to_run)
+# in_organism <- 'miv_nopools_ept'
+# in_response_var = 'richness'
+# ssn_div_models_to_run <- tar_read(ssn_div_models_to_run)
+# ssn_div_hydrowindow <- tar_read(ssn_div_hydrowindow_richness_miv_nopools_ept)
+# in_hydro_vars_dt <- tar_read(hydro_vars_dt)
+# in_covtype_selected <- tar_read(ssn_covtype_selected_richness_miv_nopools_ept)
 # 
-# in_organism <- 'miv_nopools'
-# ssn_model_names <- do.call(rbind, ssn_div_models_to_run)[,1:2] %>%
-#   as.data.table
-# in_ssnmodels <- cbind(ssn_model_names, in_ssnmodels)
+# ssn_model_names <- do.call(rbind, ssn_div_models_to_run)[
+#   , c("organism", "hydro_var", "response_var")] %>%
+#   as.data.table() %>%
+#   .[response_var == in_response_var & organism == in_organism, ]
+# 
+# in_ssnmodels <- cbind(ssn_model_names, ssn_div_hydrowindow)
+# names(in_ssnmodels)[ncol(in_ssnmodels)] <- "ssn_div_models"
 
 #' @title Format and plot SSN model results
 #' @description This comprehensive function processes the output of SSN models 
@@ -6755,7 +6779,7 @@ select_ssn_covariance <- function(in_ssnmodels) {
 format_ssn_hydrowindow <- function(in_ssnmodels, 
                                    in_organism, 
                                    in_covtype_selected,
-                                   in_hydrovars_dt) {
+                                   in_hydro_vars_dt) {
   # Get the selected covariance type for the specified organism
   org_covtype <- in_covtype_selected$dt_sub[organism==in_organism,][['covtypes']]
   
@@ -6782,16 +6806,12 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
   
   #Identify covariance structure with the lowest AICc across all time windows 
   #for each hydrological variable
-  ssn_hydrowindow_perf_allvars[, hydro_var_root := gsub(
-    "(_*[0-9]+(yr)*past)|(_*m[0-9]+)", "", hydro_var)] %>%
-    .[, window_d := str_extract(hydro_var,
-                                '([0-9]+(?=yrpast))|([0-9]+(?=past))|((?<=m)[0-9]+)')] %>%
-    .[, window_d := factor(window_d, levels=sort(unique(as.integer(window_d))))]
+  get_hydro_var_root(ssn_hydrowindow_perf_allvars)
   
   # Define labels for the hydrological variables for plotting
   ssn_hydrowindow_perf_allvars <- merge(
     ssn_hydrowindow_perf_allvars,
-    unique(in_hydrovars_dt, by='hydro_var_root')[, .(hydro_var_root, hydro_label)],
+    unique(in_hydro_vars_dt, by='hydro_var_root')[, .(hydro_var_root, hydro_label)],
     by='hydro_var_root')
   
   #Get variance decomposition estimated by model
