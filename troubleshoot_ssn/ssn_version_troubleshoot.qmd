@@ -1,0 +1,113 @@
+---
+title: "SSN Version Fit Comparison"
+format: html
+jupyter: false
+editor: visual
+---
+
+```{r}
+#| label: Setup
+out_rds = 'troubleshooting_ssn_lm.rds'
+if (!file.exists(out_rds)) {
+  source('_targets.R')
+}
+library(SSN2)
+```
+
+# Train the model from scratch with the SSN itself
+
+```{r load ssn}
+in_miv_ssn <- SSN2::ssn_import("results/ssn/ssn_eu_miv_nopools.ssn", overwrite=TRUE)
+
+SSN2::ssn_create_distmat(in_miv_ssn)
+
+ssn_from_scratch <- ssn_lm(
+  formula = richness ~ log10(basin_area_km2) + country:log10(basin_area_km2),
+  ssn.object = in_miv_ssn, 
+  taildown_type = 'exponential',
+  tailup_type = 'exponential',
+  euclid_type = 'spherical',
+  additive = "afv_qsqrt",
+  partition_factor = ~ as.factor(campaign),
+  # random = ~ country,
+  estmethod = 'ml')
+
+
+summary(ssn_from_scratch)
+```
+
+# Load and inspect the original fit (v0.2.1)
+
+```{r}
+#| label: Load and inspect the original fit
+# orig_list <- tar_read(ssn_richness_hydrowindow)[[1]]$ssn_list
+# fit_old <- orig_list$exponential_exponential_spherical
+
+out_rds = 'troubleshooting_ssn_lm.rds'
+if (!file.exists(out_rds)) {
+  saveRDS(fit_old, file=out_rds)
+}
+fit_old <- readRDS(out_rds)
+
+summary(fit_old)
+```
+
+# Use attributes of the old fit to refit identically, but with v0.3.0
+
+```{r}
+#| label: Use attributes of the old fit to refit exactly
+fit_new <- ssn_lm(
+  formula = fit_old$formula,
+  ssn.object = fit_old$ssn.object,
+  tailup_type = str_split(attr(fit_old$coefficients$params_object$tailup, 'class'), '_')[[1]][2],
+  taildown_type = str_split(attr(fit_old$coefficients$params_object$taildown, 'class'), '_')[[1]][2],
+  euclid_type = str_split(attr(fit_old$coefficients$params_object$euclid, 'class'), '_')[[1]][2],
+  additive = fit_old$additive,
+  estmethod = fit_old$estmethod,
+  random = fit_old$random,
+  partition_factor = fit_old$partition_factor
+)
+
+summary(fit_new)
+
+print(fit_old$coefficients$params_object)
+print(fit_new$coefficients$params_object)
+```
+
+# Fit null models
+
+```{r}
+#| label: Fit a null model
+fit_null <- function(ssn_lm_obj) {
+  ssn_lm(
+    formula = as.formula(paste0(all.vars(ssn_lm_obj$formula)[1], ' ~ 1')),
+    ssn.object = ssn_lm_obj$ssn.object,
+    tailup_type = str_split(attr(ssn_lm_obj$coefficients$params_object$tailup, 'class'), '_')[[1]][2],
+    taildown_type = str_split(attr(ssn_lm_obj$coefficients$params_object$taildown, 'class'), '_')[[1]][2],
+    euclid_type = str_split(attr(ssn_lm_obj$coefficients$params_object$euclid, 'class'), '_')[[1]][2],
+    additive = ssn_lm_obj$additive,
+    estmethod = ssn_lm_obj$estmethod,
+    random = ssn_lm_obj$random,
+    partition_factor = ssn_lm_obj$partition_factor
+  )
+}
+
+null_old <- fit_null(fit_old)
+null_new <- fit_null(fit_new)
+
+summary(null_old)
+summary(null_new)
+
+get_dev <- function(fit) deviance(fit)
+get_pseudoR2 <- function(fit, null) 1 - get_dev(fit) / get_dev(null)
+
+results <- data.frame(
+  model = c("old_full", "old_null", "new_full", "new_null"),
+  deviance = c(get_dev(fit_old), get_dev(null_old),
+               get_dev(fit_new), get_dev(null_new)),
+  pseudoR2 = c(get_pseudoR2(fit_old, null_old), NA,
+               get_pseudoR2(fit_new, null_new), NA)
+)
+
+results
+```
