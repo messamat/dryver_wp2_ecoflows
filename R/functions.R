@@ -1927,6 +1927,9 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
     #Fourth-root transform data - DO NOT TRANSFORM DATA IN THE END
     # biodt_copy[, (spcols) := lapply(.SD, function(x) x^(1/4)), 
     #            .SDcols = spcols]
+    #Example of publication that 4th-root transforms:
+    #Garcıa-Roger et al. (2011). Aquatic Sciences 73, 567–579. doi:10.1007/S00027-011-0218-3
+    #Elias et al. (2015). Marine and Freshwater Research, 2015, 66, 469–480 http://dx.doi.org/10.1071/MF13312
     
     # ggplot(biodt_melt, aes(x=(value^(1/4)))) +
     #   geom_histogram() +
@@ -1964,7 +1967,9 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
     
     #Format local diversity decomposition
     localdiv_decomp <- as.data.table(decomp$tab_by_site) %>%
-      setnames(c('nsite'), 'ncampaigns')
+      setnames(c('nsite'), 'ncamwx<5
+               *ùk
+               $*^ùpaigns')
     localdiv_decomp[, site := unique(biodt_copy$site)]
     
     out_dt <- mergeDTlist(
@@ -4588,7 +4593,7 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path) {
 #' @param in_env_summarized A list containing summarized environmental data tables.
 #' @param in_genal_upa A data table with upstream area data for a specific site in Genal.
 #' @return A list containing the merged data tables and a list of column names.
-merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
+merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn=NULL,
                                 in_hydrocon_compiled, in_hydrocon_summarized,
                                 in_env_dt, in_env_summarized,
                                 in_genal_upa) {
@@ -4613,9 +4618,14 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn,
   
   #Merge diversity data
   setDT(in_spdiv_drn)
-  spdiv <- merge(in_spdiv_local, in_spdiv_drn,
-                 by=c('country', 'organism')) %>%
-    .[!(site=='GEN04' & campaign=='1'),]
+  if (!is.null(in_spdiv_drn)) {
+    spdiv <- merge(in_spdiv_local, in_spdiv_drn,
+                   by=c('country', 'organism')) 
+  } else {
+    spdiv <- in_spdiv_local
+  }
+  
+  spdiv <- spdiv[!(site=='GEN04' & campaign=='1'),]
   #Remove GEN04_1 from all organisms, no local environmental data, sampled only for eDNA. Too unsure.
   
   #Create "organism_class" column for labeling/coloring/merging
