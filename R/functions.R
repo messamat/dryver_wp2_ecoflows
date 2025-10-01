@@ -1269,6 +1269,96 @@ get_hydro_var_root <- function(dt, in_place=TRUE) {
   }
 }
 
+#------ get_full_hydrolabel ----------------------------------------------------
+get_full_hydrolabel <- function(in_hydro_vars_dt,
+                                in_hydro_var) {
+  h_unit <- ifelse(grepl(pattern='.*yrpast$', in_hydro_var), 'y', 'd')
+  
+  return(in_hydro_vars_dt[hydro_var == in_hydro_var,
+                          paste(hydro_label, ': past',
+                                window_d, h_unit)])
+}
+
+#------ plot_ssn_emmeans -------------------------------------------------------
+plot_ssn_emmeans <- function(in_mod, in_predvar, 
+                             in_predvar_label, interaction_var,
+                             plot=T) {
+  in_ssn <- in_mod$ssn.object
+  newdat <- list(
+    seq(min(in_ssn$obs[[in_predvar]], na.rm = TRUE),
+        max(in_ssn$obs[[in_predvar]], na.rm = TRUE),
+        length.out = 50)
+  )
+  names(newdat) <- in_predvar
+  
+  response_var <- all.vars(in_mod$formula)[[1]]
+  
+  #Marginal means plot
+  emm_dt <- emmeans(in_mod, 
+                    data=in_mod$ssn.object$obs, 
+                    specs= as.formula(paste0('~', in_predvar, '|', interaction_var)),
+                    at = newdat,
+                    type = "response") %>%
+    data.frame %>%
+    setDT %>%
+    merge(as.data.table(in_ssn$obs)[, list(max_predvar = max(get(in_predvar))),
+                                    by=interaction_var], by=interaction_var) %>%
+    .[get(in_predvar) < max_predvar]
+  
+  if (plot) {
+    emm_plot <- emm_dt %>%
+      ggplot(aes(x=get(in_predvar), fill=get(interaction_var))) +
+      geom_line(aes(y=emmean, color=get(interaction_var)), linewidth=2) +
+      geom_ribbon(aes(ymin=asymp.LCL, ymax=asymp.UCL), alpha=0.1) +
+      scale_x_continuous(name=in_predvar_label) +
+      scale_y_continuous(name=paste('Estimated marginal mean:', 
+                                    Hmisc::capitalize(response_var))) +
+      scale_color_discrete(name=Hmisc::capitalize(interaction_var)) + 
+      scale_fill_discrete(name=Hmisc::capitalize(interaction_var)) + 
+      theme_classic()
+  } else {
+    emm_plot <- NULL
+  }
+  
+  return(list(
+    dt=emm_dt,
+    plot=emm_plot
+  ))
+}
+
+#------ plot_ssn_emtrends ------------------------------------------------------
+
+plot_ssn_emtrends <- function(in_mod, in_predvar, 
+                              in_predvar_label, interaction_var, plot=T) {
+  response_var <- all.vars(in_mod$formula)[[1]]
+  
+  emtrends_dt <- emtrends(object = in_mod, 
+                          specs = as.formula(paste('~', interaction_var)), 
+                          var = in_predvar,
+                          data=in_mod$ssn.object$obs) %>% 
+    as.data.frame %>%
+    setDT
+  
+  if (plot) {
+    emtrends_plot <- ggplot(emtrends_dt, aes(x = get(interaction_var), 
+                                             y = get(paste0(in_predvar, '.trend')))) +
+      geom_pointrange(aes(ymin = asymp.LCL, ymax = asymp.UCL,
+                          color=get(interaction_var))) +
+      geom_hline(yintercept=0, linetype=2) +
+      theme_minimal() +
+      labs(y = paste("Estimated slope of", response_var),
+           x = Hmisc::capitalize(interaction_var)) +
+      coord_flip()
+  } else {
+    emtrends_plot <- NULL
+  }
+  
+  return(list(
+    dt = emtrends_dt,
+    plot = emtrends_plot
+  ))
+}
+
 ################################################################################
 #---------------------------------- workflow functions ---------------------------------------------
 # path_list = tar_read(bio_data_paths)
@@ -6848,15 +6938,17 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
     by='varcomp')
   
   #Plot variance decomposition as a stacked bar chart
+  page_num = 1
   plot_ssn_hydrowindow_varcomp <- ggplot(
-    ssn_hydrowindow_varcomp[proportion > 0, ],
+    ssn_hydrowindow_varcomp[proportion > 0 & hydro_label != 'Null', ],
     aes(x = window_d, y = proportion, fill = varcomp_label)
   ) +
     geom_bar(stat = "identity", position = "stack", alpha=0.75) +
     geom_text(
       aes(label = round(100 * proportion)),
       position = position_stack(vjust = 0.5),
-      colour = "black") +
+      size=3,
+      colour = '#555555') +
     scale_fill_manual(
       name = 'Variance components',
       values=ssn_hydrowindow_varcomp[
@@ -6865,15 +6957,44 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
     scale_y_continuous('Percentage of variance', 
                        breaks=c(0, 0.5, 1),
                        labels = scales::label_percent()) +
-    facet_wrap(~hydro_label, scales = "free") +
+    facet_wrap_paginate(~hydro_label, 
+                        labeller = label_wrap_gen(width=25),
+                        nrow=2, ncol=3, scales = "free_x",
+                        page=page_num) +
     coord_cartesian(expand = FALSE) +
     theme_bw()
   
-  #Plot best model for each variable for single window for each hydrological variable
+  
+  #Get best model for each variable for single window for each hydrological variable
   ssn_hydrowindow_best <- ssn_hydrowindow_perf_allvars[
     , .SD[which.min(AICc),], 
     by = hydro_var_root]
   
+  in_mod <- ssn_hydrowindow_best[1, mod][[1]]
+  in_predvar <- ssn_hydrowindow_best[1, hydro_var]
+  in_predvar_label <-  ifelse(in_predvar %in% in_hydro_vars_dt$hydro_var,
+                              get_full_hydrolabel(in_hydro_vars_dt, in_predvar),
+                              in_predvar)
+  interaction_var <- 'country'
+  
+  #Plot marginal means for each "best model"
+  lapply(ssn_hydrowindow_best$hydro_var, function(in_predvar) {
+    
+    
+  })
+  
+  #Plot estimated coefs and confint for each best model
+  
+
+
+  plot_ssn_emmeans(in_mod, in_predvar, predvar_label, interaction_var, plot=F)
+
+  plot_ssn_emtrends(in_mod, in_predvar, 
+                    in_predvar_label, interaction_var, plot=F)
+  
+
+  ##############################################################################
+  ##############################################################################
   
   #Get model predictions from the best models
   mod_preds <- lapply(seq(nrow(ssn_hydrowindow_best)), function(i) {
@@ -8182,7 +8303,7 @@ diagnose_ssn_mod <- function(in_ssn_mods,
 }
 
 #------ plot_ssn2_marginal_effects ---------------------------------------------
-# in_ssn_mods <- tar_read(ssn_mods_miv_yr)
+# tar_load(ssn_mods_miv_yr)
 # write_plots=T
 # out_dir = figdir
 # in_mod <- ssn_mods_miv_yr$ssn_mod_fit_best
@@ -8208,7 +8329,7 @@ diagnose_ssn_mod <- function(in_ssn_mods,
 #'   prediction grid. Defaults to 100.
 #'
 #' @return A ggplot object visualizing the marginal effects.
-plot_ssn2_marginal_effects <- function(
+plot_ssn_summarized_marginal <- function(
     in_mod,                # fitted SSN2 model
     hydro_var,          # the covariate you want to VARY
     fixed_var,          # the covariate you want to FIX at mean
@@ -8218,6 +8339,7 @@ plot_ssn2_marginal_effects <- function(
 ) {
   
   in_mod_best <- ssn_mods_miv_yr$ssn_mod_fit_best
+  in_ssn <- in_mod_best$ssn.object
   
   emm_best_stream_type <- emmeans(in_mod_best, 
                                   data=in_mod_best$ssn.object$obs, 
@@ -8246,20 +8368,20 @@ plot_ssn2_marginal_effects <- function(
   
   # Define a grid of basin areas
   newdat_area <- data.frame(
-    basin_area_km2 = seq(round(100*min(ssn_miv$obs$basin_area_km2, na.rm = TRUE)),
-                         round(100*max(ssn_miv$obs$basin_area_km2, na.rm = TRUE)),
+    basin_area_km2 = seq(round(100*min(in_ssn$obs$basin_area_km2, na.rm = TRUE)),
+                         round(100*max(in_ssn$obs$basin_area_km2, na.rm = TRUE)),
                          length.out = 50)/100
   )
   
   emm_best_areas <- emmeans(in_mod_best, 
-                            data=ssn_miv$obs,
+                            data=in_ssn$obs,
                             ~ sqrt(basin_area_km2) | country, 
                             at = list(basin_area_km2 = newdat_area$basin_area_km2),
                             type='response') %>%
     data.frame() %>%
     setDT %>%
     ggplot(aes(x=basin_area_km2, fill=country)) +
-    geom_line(aes(y=prob, color=country), size=2) +
+    geom_line(aes(y=prob, color=country), linewidth=2) +
     geom_ribbon(aes(ymin=asymp.LCL, ymax=asymp.UCL), alpha=0.1) +
     scale_x_continuous(name=expression('Basin area -'~km^2)) +
     scale_y_continuous(name='Estimated marginal mean: mean richness') +
@@ -8282,7 +8404,7 @@ plot_ssn2_marginal_effects <- function(
   )
   
   emm_predict_durd <- emmeans(in_mod_predict, 
-                              data=ssn_miv$obs,
+                              data=in_ssn$obs,
                               ~ DurD_samp | country, 
                               at = list(DurD_samp = newdat_durd$DurD_samp),
                               type='response') %>%
@@ -8304,15 +8426,15 @@ plot_ssn2_marginal_effects <- function(
   
   # Define a grid of basin areas
   newdat_area <- data.frame(
-    basin_area_km2 = seq(round(100*min(ssn_miv$obs$basin_area_km2, na.rm = TRUE)),
-                         round(100*max(ssn_miv$obs$basin_area_km2, na.rm = TRUE)),
+    basin_area_km2 = seq(round(100*min(in_ssn$obs$basin_area_km2, na.rm = TRUE)),
+                         round(100*max(in_ssn$obs$basin_area_km2, na.rm = TRUE)),
                          length.out = 50)/100
   )
   
   emm_predict_areas <- emmeans(in_mod_predict, 
-                               data=ssn_miv$obs,
+                               data=in_ssn$obs,
                                ~ sqrt(basin_area_km2) | country, 
-                               at = list(basin_area_km2 = newdat$basin_area_km2),
+                               at = list(basin_area_km2 = newdat_area$basin_area_km2),
                                type='response') %>%
     data.frame() %>%
     setDT %>%
@@ -8329,13 +8451,6 @@ plot_ssn2_marginal_effects <- function(
                          'emm_miv_yr_best_area.png'),
     plot =emm_best_areas, 
     width=5, height=5)
-  
-  
-  
-  
-  
-  
-  
   
   
   # Get fixed effects

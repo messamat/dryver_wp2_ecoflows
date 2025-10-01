@@ -10,6 +10,7 @@ pkg_vec <- list(
   'forecast',
   'future.apply',
   'ggcorrplot',
+  'ggforce',
   'ggnewscale',
   'ggnetwork',
   'ggplot2',
