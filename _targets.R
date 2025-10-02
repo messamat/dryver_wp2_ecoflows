@@ -966,6 +966,7 @@ analysis_targets <- list(
       
       labels_dt <- data.table(
         hydro_var_root = c('DurD', 'FreD', 'PDurD', "PFreD",
+                           "PrdD",
                            'DurD_CV', "FreD_CV", "meanConD_CV", 
                            "FstDrE_SD", "sd6",
                            "uQ90", "oQ10", "maxPQ", "PmeanQ",
@@ -976,6 +977,7 @@ analysis_targets <- list(
           "Number of no-flow periods",
           "Proportion of no-flow days (percentile)",
           "Number of no-flow periods (percentile)",
+          "Time to last no flow date",
           "CV of the annual proportion of no-flow days", 
           "CV of the annual number of no-flow periods",
           "CV of the mean annual drying event duration", 
@@ -1005,7 +1007,6 @@ analysis_targets <- list(
   ,
   
   
-  
   # Run a first SSN with a single hydrological variable for each organism
   # to determine the top spatial covariance types
   tar_target(
@@ -1016,7 +1017,9 @@ analysis_targets <- list(
       formula_root = 'log10(basin_area_km2) + log10(basin_area_km2):country',
       hydro_var = 'DurD365past',
       response_var = alpha_var_list,
-      ssn_covtypes = ssn_covtypes
+      ssn_covtypes = ssn_covtypes,
+      include_state_of_flow = !(str_split_1(organism_list, '_')[1] == 'miv'), #Include state of flow if microbes
+      include_seasonality = F
     ),
     pattern = cross(organism_list, alpha_var_list),
     iteration = "list"
@@ -1098,6 +1101,7 @@ analysis_targets <- list(
             response_var = in_response_var,
             ssn_covtypes = ssn_covtypes[label %in% model_setup$covtypes, ],
             family = "Gaussian",
+            include_state_of_flow = !(str_split_1(in_organism, '_')[1] == 'miv'), #Include state of flow if microbes
             include_seasonality = FALSE
           )
         })

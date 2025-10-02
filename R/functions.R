@@ -452,7 +452,7 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
       .[!is.na(noflow_period), noflow_period_dur := .N,  #Compute duration of each no-flow period
         by = .(noflow_period, reach_id)] %>%
       .[, last_noflowdate := .SD[last_noflow, date], by = .(reach_id)] %>% #Convert to data
-      .[, PrdD := difftime(date, last_noflowdate, units='days'), #Compute duration of each no-flow period
+      .[, PrdD := difftime(date, last_noflowdate, units='days'), #Compute time to last no flow date
         by = .(reach_id)] %>%
       .[, last_noflow := NULL]
     
@@ -1273,10 +1273,14 @@ get_hydro_var_root <- function(dt, in_place=TRUE) {
 get_full_hydrolabel <- function(in_hydro_vars_dt,
                                 in_hydro_var) {
   h_unit <- ifelse(grepl(pattern='.*yrpast$', in_hydro_var), 'y', 'd')
-  
-  return(in_hydro_vars_dt[hydro_var == in_hydro_var,
-                          paste(hydro_label, ': past',
-                                window_d, h_unit)])
+  if (in_hydro_var %in% in_hydro_vars_dt$hydro_var) {
+    out_label <- in_hydro_vars_dt[hydro_var == in_hydro_var,
+                                  paste(hydro_label, ': past', window_d, h_unit)] 
+  } else {
+    out_label <- in_hydro_var
+  }
+
+  return(out_label)
 }
 
 #------ get_ssn_emmeans -------------------------------------------------------
@@ -1359,7 +1363,7 @@ get_ssn_emtrends <- function(in_mod, in_pred_var,
                pred_var_name = in_pred_var)] %>%
       setnames(paste0(in_pred_var, '.trend') , 'trend')
     
-  }  else if (is.data.table(in_emm_dt)) {
+  }  else if (is.data.table(in_emtrends_dt)) {
     emtrends_dt <- in_emtrends_dt
     response_var <- emtrends_dt[1, response_var]
   }
@@ -6674,6 +6678,9 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
 # estmethod = "ml"
 # partition_formula = as.formula("~ as.factor(campaign)")
 # random_formula = as.formula("~ country")
+# standardize_hydro_var = T
+# include_state_of_flow = F
+# include_seasonality = F
 
 # tar_load(ssn_covtypes)
 # in_ssn = tar_read(ssn_eu_summarized)
@@ -6686,6 +6693,7 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
 # random_formula = NULL
 # estmethod='ml'
 # family= "Gaussian"
+
 
 #' @title Model SSN with hydrological variables across time windows
 #' @description Automates the process of fitting SSN models to test the effect 
@@ -6708,13 +6716,22 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
                                   random_formula = as.formula("~ country"),
                                   family = "Gaussian",
                                   estmethod = "ml",
-                                  include_seasonality=F) {
+                                  standardize_hydro_var = T,
+                                  include_state_of_flow = F,
+                                  include_seasonality = F) {
   
   # hydro_var <- grep(paste0('^', hydro_var_str), 
   #                   names(in_ssn[[organism]]$ssn$obs), 
   #                   value=T)
   
-  # 1. Construct the full model formula
+  # Standardize hydrological variable
+  if (standardize_hydro_var) {
+    in_ssn[[organism]]$ssn$obs[[paste0(hydro_var, '_scaled')]] <-
+      as.numeric(scale(in_ssn[[organism]]$ssn$obs[[hydro_var]]))
+    hydro_var <- paste0(hydro_var, '_scaled')
+  }
+  
+  # Construct the full model formula
   if (!is.null(hydro_var)) {
     full_formula <- paste0(response_var, ' ~ ', hydro_var, ' + ',
                            hydro_var, ':country +', formula_root)
@@ -6726,7 +6743,11 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
     full_formula <- paste(full_formula, '+ doy + I(doy^2)')
   }
   
-  # 2. Fit SSN models using quick_ssn
+  if (include_state_of_flow) {
+    full_formula <- paste(full_formula, '+ state_of_flow')
+  }
+  
+  # Fit SSN models using quick_ssn
   ssn_list <- quick_ssn(in_ssn = in_ssn[[organism]]$ssn, 
                         in_formula = as.formula(full_formula),
                         family = family,
@@ -6735,7 +6756,7 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
                         random_formula = random_formula,
                         estmethod = estmethod)
   
-  # 3. Collect model summary statistics (glance)
+  # Collect model summary statistics (glance)
   ssn_glance <- lapply(names(ssn_list), function(label) {
     model <- ssn_list[[label]]
     
@@ -6771,9 +6792,7 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
 }
 
 
-
 #------ plot_hydro_comparison --------------------------------------------------
-#------ compare standard hydro metrics with flow-duration curve-based metrics ---
 # vars_list <- c('DurD', 'FreD')
 # var_substr <- vars_list[[1]]
 # in_cor_dt <- tar_read(cor_matrices_list)$div_bydrn
@@ -6921,7 +6940,7 @@ prepare_hydrowindow_perf_table <- function(in_ssnmodels, in_organism,
   ))
 }
 
-# ------ get_varcomp -------------------------------------------------------
+#------ get_varcomp -------------------------------------------------------
 #' Extract and plot SSN variance decomposition 
 #'
 #' Computes variance components from selected SSN models, and Creates stacked 
@@ -7024,7 +7043,7 @@ get_hydrowindow_varcomp <- function(perf_dt, nrow_pag = 2, ncol_pag = 3) {
   )
 }
 
-#------ get_all_emmeans --------------------------------------------------------
+#------ get_hydrowindow_emmeans --------------------------------------------------------
 #' Extract and plot marginal means (EMMeans) from best models
 #'
 #' Runs [get_ssn_emmeans()] for all predictors in the best models.
@@ -7063,6 +7082,10 @@ get_hydrowindow_emmeans <- function(best_dt, in_hydro_vars_dt) {
 }
 
 #------ get_hydrowindow_emtrends -------------------------------------------------------
+# hydrowindown_perf_tables <- tar_read(hydrowindow_perf_tables_richness_fun_sedi_nopools)
+# best_dt <- hydrowindown_perf_tables$best
+in_hydro_vars_dt <- tar_read(hydro_vars_dt)
+
 #' Extract and plot marginal slopes (EMTrends) from best models
 #'
 #' Runs [get_ssn_emtrends()] for all predictors in the best models.
@@ -7074,6 +7097,7 @@ get_hydrowindow_emmeans <- function(best_dt, in_hydro_vars_dt) {
 #' @export
 get_hydrowindow_emtrends <- function(best_dt, in_hydro_vars_dt) {
   emtrends_dt_all <- lapply(best_dt$hydro_var, function(in_pred_var) {
+    print(in_pred_var)
     in_mod <- best_dt[hydro_var == in_pred_var, mod][[1]]
     if (in_pred_var == "null") in_pred_var <- all.vars(in_mod$formula)[2]
     
@@ -7081,7 +7105,8 @@ get_hydrowindow_emtrends <- function(best_dt, in_hydro_vars_dt) {
                      interaction_var = "country", plot = FALSE)$dt
     
   }) %>% rbindlist(use.names = TRUE, fill = TRUE) %>%
-    .[, pred_var_label := get_full_hydrolabel(in_hydro_vars_dt, pred_var_name)]
+    .[, pred_var_label := get_full_hydrolabel(in_hydro_vars_dt, pred_var_name),
+      by=.(pred_var_name)]
 
   emtrends_plot <- get_ssn_emtrends(in_emtrends_dt = emtrends_dt_all, 
                                     interaction_var='country', plot=T)$plot +
@@ -7145,284 +7170,6 @@ plot_hydrowindow_x_preds <- function(preds, best_dt) {
     facet_wrap(country ~ variable, scales = "free") + theme_bw()
 }
 
-
-#------ format_ssn_hydrowindow -------------------------------------------------
-# in_organism <- 'miv_nopools_ept'
-# in_response_var = 'richness'
-# ssn_div_models_to_run <- tar_read(ssn_div_models_to_run)
-# ssn_div_hydrowindow <- tar_read(ssn_div_hydrowindow_richness_miv_nopools_ept)
-# in_hydro_vars_dt <- tar_read(hydro_vars_dt)
-# in_covtype_selected <- tar_read(ssn_covtype_selected_richness_miv_nopools_ept)
-# 
-# ssn_model_names <- do.call(rbind, ssn_div_models_to_run)[
-#   , c("organism", "hydro_var", "response_var")] %>%
-#   as.data.table() %>%
-#   .[response_var == in_response_var & organism == in_organism, ]
-# 
-# in_ssnmodels <- cbind(ssn_model_names, ssn_div_hydrowindow)
-# names(in_ssnmodels)[ncol(in_ssnmodels)] <- "ssn_div_models"
-
-#' @title Format and plot SSN model results
-#' @description This comprehensive function processes the output of SSN models 
-#'      to extract key results, including variance decomposition and model predictions. 
-#'      It generates several plots to visualize these results, such as stacked bar 
-#'      charts of variance components and scatter plots of observed vs. fitted values.
-#' @param in_ssnmodels A data table with fitted SSN models for various hydrological windows.
-#' @param in_organism A string specifying the organism to analyze.
-#' @param in_covtype_selected A list from `select_ssn_covariance` containing the best covariance types.
-#' @return A list containing the formatted data table and several ggplot objects.
-# format_ssn_hydrowindow <- function(in_ssnmodels, 
-#                                    in_organism, 
-#                                    in_covtype_selected,
-#                                    in_hydro_vars_dt) {
-#   # Get the selected covariance type for the specified organism
-#   org_covtype <- in_covtype_selected$dt_sub[organism==in_organism,][['covtypes']]
-#   
-#   # Combine model glance tables and attach the full model objects---------------
-#   ssn_hydrowindow_perf_allvars <- lapply(
-#     in_ssnmodels[organism==in_organism, ssn_div_models],
-#     function(x) {
-#       merge(
-#         x[['ssn_glance']],
-#         data.table(covtypes=names(x[['ssn_list']]),
-#                    mod=x[['ssn_list']]),
-#         by='covtypes'
-#       )
-#     }) %>% 
-#     rbindlist(fill=T) %>%
-#     # Filter for the selected covariance type and handle 'null' hydro_var
-#     .[covtypes==org_covtype,] %>%
-#     .[is.na(hydro_var), hydro_var := 'null']
-#   
-#   
-#   # Remove the large model object to save memory 
-#   #(the data table `ssn_hydrowindow_perf_allvars` still contains the `mod` column)
-#   remove(in_ssnmodels)
-#   
-#   #Identify covariance structure with the lowest AICc across all time windows 
-#   #for each hydrological variable ----------------------------------------------
-#   get_hydro_var_root(ssn_hydrowindow_perf_allvars)
-#   
-#   # Define labels for the hydrological variables for plotting
-#   ssn_hydrowindow_perf_allvars <- merge(
-#     ssn_hydrowindow_perf_allvars,
-#     unique(in_hydro_vars_dt, by='hydro_var_root')[, .(hydro_var_root, hydro_label)],
-#     by='hydro_var_root')
-#   
-#   #Get variance decomposition estimated by model
-#   varcomp_labels <- c('Remaining variance (nugget)', 
-#                       'Spatially dependent variance - euclidean',
-#                       'Spatially dependent variance - taildown',
-#                       'Spatially dependent variance - tailup',
-#                       'Random intercept - country',
-#                       'Fixed effects pseudo-R2'
-#   )
-#   
-#   ssn_hydrowindow_varcomp <- ssn_hydrowindow_perf_allvars[
-#     ,    {
-#       if (inherits(mod[[1]], c("ssn_lm", "ssn_glm"))) {
-#         vc <- SSN2::varcomp(mod[[1]])
-#         as.data.table(vc)   # multi-row result
-#       } else {
-#         data.table()        # return empty DT so it skips
-#       }
-#     }
-#     , by=.(response_var, hydro_var, covtypes, hydro_label, window_d)
-#   ] %>%
-#     merge(data.table(
-#       varcomp=c(
-#         "nugget",
-#         "euclid_de", "taildown_de", "tailup_de",         
-#         "1 | country", "Covariates (PR-sq)"),
-#       varcomp_label = factor(varcomp_labels, 
-#                              levels=varcomp_labels, 
-#                              ordered=T),
-#       varcomp_color = c('lightgrey', '#b2df8a', '#a6cee3',
-#                         '#1f78b4', '#f1b6da','#feb24c')
-#     ),
-#     by='varcomp')
-#   
-#   #Plot variance decomposition as a stacked bar chart --------------------------
-#   varcomp_subdt <- ssn_hydrowindow_varcomp[proportion > 0 & hydro_label != 'Null',]
-#   varcomp_null <- ssn_hydrowindow_varcomp[proportion > 0 & hydro_label == 'Null',] %>%
-#     .[, hydro_label := 'Null: only basin area']
-#   nrow_pag = 2
-#   ncol_pag = 3
-#   page_num <- ceiling(varcomp_subdt[, length(unique(hydro_label))]
-#                       /(nrow_pag*ncol_pag))
-#   
-#   plot_varcomp_list <- lapply(seq_len(page_num), function(in_page) {
-#     p_main <- ggplot(
-#       varcomp_subdt,
-#       aes(x = window_d, y = proportion, fill = varcomp_label)
-#     ) +
-#       geom_bar(stat = "identity", position = "stack", alpha=0.75) +
-#       geom_text(
-#         aes(label = round(100 * proportion)),
-#         position = position_stack(vjust = 0.5),
-#         size=3,
-#         colour = '#555555') +
-#       scale_fill_manual(
-#         name = 'Variance components',
-#         values=ssn_hydrowindow_varcomp[
-#           proportion > 0,][order(varcomp_label), unique(varcomp_color)]) +
-#       scale_x_discrete('Temporal window of aggregation') + 
-#       scale_y_continuous('Percentage of variance', 
-#                          breaks=c(0, 0.5, 1),
-#                          labels = scales::label_percent()) +
-#       facet_wrap_paginate(~hydro_label, 
-#                           labeller = label_wrap_gen(width=25),
-#                           nrow=nrow_pag, ncol=ncol_pag, scales = "free_x",
-#                           page=in_page) +
-#       coord_cartesian(expand = FALSE) +
-#       theme_bw() +
-#       theme(legend.background=element_blank())
-#     
-#     p_null <-  ggplot(
-#       varcomp_null,
-#       aes(x = window_d, y = proportion, fill = varcomp_label)
-#     ) +
-#       geom_bar(stat = "identity", position = "stack", alpha=0.75) +
-#       geom_text(
-#         aes(label = round(100 * proportion)),
-#         position = position_stack(vjust = 0.5),
-#         size=3,
-#         colour = '#555555') +
-#       scale_fill_manual(
-#         name = 'Variance components',
-#         values=ssn_hydrowindow_varcomp[
-#           proportion > 0,][order(varcomp_label), unique(varcomp_color)]) +
-#       scale_x_discrete('Temporal window of aggregation (days)') + 
-#       scale_y_continuous('Percentage of variance', 
-#                          breaks=c(0, 0.5, 1),
-#                          labels = scales::label_percent()) +
-#       coord_cartesian(expand = FALSE) +
-#       theme_bw() +
-#       theme(legend.position='none',
-#             axis.title=element_blank(),
-#             axis.text=element_blank()) +
-#       facet_wrap(~hydro_label,
-#                  labeller = label_wrap_gen(width=15)
-#                  )
-#     
-#     (p_main + guide_area()) + p_null  + 
-#       plot_layout(
-#         design = "
-#     AAAAAAAABBB
-#     AAAAAAAAC##
-#     ",
-#         axes = 'collect',
-#         guides = 'collect')
-# 
-#   })
-#   plot_varcomp_list[[3]] 
-# 
-#   
-#   #Get best model for each variable for single window for each hydrological variable
-#   ssn_hydrowindow_best <- ssn_hydrowindow_perf_allvars[
-#     , .SD[which.min(AICc),], 
-#     by = hydro_var_root]
-#   
-# 
-#   #Plot marginal means for each "best model" -----------------------------------
-#   emmeans_dt_all <- lapply(ssn_hydrowindow_best$hydro_var, function(in_pred_var) {
-#     print(in_pred_var)
-#     in_mod <- ssn_hydrowindow_best[hydro_var == in_pred_var, mod][[1]]
-#     if (in_pred_var=='null') {
-#       in_pred_var <- all.vars(in_mod$formula)[2] #Fragile
-#     }
-#     
-#     in_pred_var_label <-  ifelse((in_pred_var %in% in_hydro_vars_dt$hydro_var) 
-#                                 && (in_pred_var != 'null'),
-#                                 get_full_hydrolabel(in_hydro_vars_dt, in_pred_var),
-#                                 in_pred_var)
-# 
-#     emm_dt <- get_ssn_emmeans(in_mod, in_pred_var, pred_var_label, 
-#                               interaction_var='country', plot=F)$dt
-#     
-#     return(emm_dt)
-#   }) %>% rbindlist(use.names=T, fill=T)
-#   
-#   get_ssn_emmeans(in_emm_dt = emmeans_dt_all, interaction_var='country', plot=T)$plot +
-#     facet_wrap(~pred_var_name, scales='free')
-#   
-# 
-#   #Plot estimated coefs and confint for each best model  -----------------------
-#   emtrends_dt_all <- lapply(ssn_hydrowindow_best$hydro_var, function(in_pred_var) {
-#     print(in_pred_var)
-#     in_mod <- ssn_hydrowindow_best[hydro_var == in_pred_var, mod][[1]]
-#     if (in_pred_var=='null') {
-#       in_pred_var <- all.vars(in_mod$formula)[2] #Fragile
-#     }
-#     
-#     emm_dt <- get_ssn_emtrends(in_mod, in_pred_var, pred_var_label, 
-#                                interaction_var='country', plot=F)$dt
-#     
-#     return(emm_dt)
-#   }) %>% rbindlist(use.names=T, fill=T) 
-#   
-#   
-#   emtrends_dt_all[, pred_var_label := get_full_hydrolabel(in_hydro_vars_dt, 
-#                                                           pred_var_name)]
-#   
-#   in_pred_var_label <-  ifelse((in_pred_var %in% in_hydro_vars_dt$hydro_var) 
-#                                && (in_pred_var != 'null'),
-#                                ,
-#                                in_pred_var)
-#   
-#   get_ssn_emtrends(in_emtrends_dt = emtrends_dt_all, 
-#                    interaction_var='country', plot=T)$plot +
-#     facet_wrap(~pred_var_name, scales='free_x')
-#   
-#   
-# 
-#   ##############################################################################
-#   ##############################################################################
-#   
-#   #Get model predictions from the best models ----------------------------------
-#   mod_preds <- lapply(seq(nrow(ssn_hydrowindow_best)), function(i) {
-#     # Subset the data.table to get the current row
-#     aug_data <- SSN2::augment(ssn_hydrowindow_best[i, mod[[1]]], 
-#                               drop=FALSE) %>%
-#       cbind(ssn_hydrowindow_best[i, .(hydro_var, response_var, covtypes,
-#                                       hydro_var_root, window_d)])
-#     return(aug_data)
-#   }) %>% rbindlist
-#   
-#   #Plot observation vs predictions for the best models -------------------------
-#   resp_var <- ssn_hydrowindow_best$response_var[[1]]
-#   obs_preds_plot <- ggplot(mod_preds, 
-#                            aes(x=.fitted, y=get(resp_var), color=country)) +
-#     geom_abline() +
-#     geom_point() +
-#     geom_smooth(method='lm') +
-#     scale_y_continuous(name=resp_var) +
-#     facet_grid(country~hydro_var) +
-#     theme_bw()
-#   
-#   # Reshape data for plotting predictor vs. predictions
-#   mod_preds_melt <- mod_preds[, 
-#                               c(setdiff(ssn_hydrowindow_best$hydro_var, 'null'),
-#                                 'country',  'basin_area_km2', '.fitted'), 
-#                               with=F] %>%
-#     melt(id.vars=c('country', 'basin_area_km2', '.fitted'))
-#   
-#   #Plot predictor variable vs predictions
-#   x_preds_plot <- ggplot(mod_preds_melt, 
-#                          aes(x = value, y = .fitted, color = country)) +
-#     geom_point() +
-#     geom_smooth(method='lm') +
-#     facet_wrap(country~variable, scales='free') +
-#     theme_bw()
-#   
-#   return(list(
-#     dt = ssn_hydrowindow_perf_allvars[,.SD, .SDcols = !c('mod')],
-#     plot_varcomp = plot_ssn_hydrowindow_varcomp,
-#     plot_obs_preds = obs_preds_plot,
-#     plot_x_preds = x_preds_plot
-#     # , plot_marginal = marginal_plot
-#   ))
-# }
 
 #------ save_ssn_div_hydrowindow_plots ------------------------------------
 # in_ssn_div_hydrowindow_formatted = tar_read(ssn_div_hydrowindow_formatted)
