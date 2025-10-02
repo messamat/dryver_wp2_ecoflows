@@ -1279,43 +1279,59 @@ get_full_hydrolabel <- function(in_hydro_vars_dt,
                                 window_d, h_unit)])
 }
 
-#------ plot_ssn_emmeans -------------------------------------------------------
-plot_ssn_emmeans <- function(in_mod, in_predvar, 
-                             in_predvar_label, interaction_var,
-                             plot=T) {
-  in_ssn <- in_mod$ssn.object
-  newdat <- list(
-    seq(min(in_ssn$obs[[in_predvar]], na.rm = TRUE),
-        max(in_ssn$obs[[in_predvar]], na.rm = TRUE),
-        length.out = 50)
-  )
-  names(newdat) <- in_predvar
+#------ get_ssn_emmeans -------------------------------------------------------
+get_ssn_emmeans <- function(in_mod, 
+                            in_pred_var, interaction_var,
+                            in_pred_var_label=NULL,
+                            in_emm_dt=NULL, plot=T, label_pred_var=T) {
   
-  response_var <- all.vars(in_mod$formula)[[1]]
-  
-  #Marginal means plot
-  emm_dt <- emmeans(in_mod, 
-                    data=in_mod$ssn.object$obs, 
-                    specs= as.formula(paste0('~', in_predvar, '|', interaction_var)),
-                    at = newdat,
-                    type = "response") %>%
-    data.frame %>%
-    setDT %>%
-    merge(as.data.table(in_ssn$obs)[, list(max_predvar = max(get(in_predvar))),
-                                    by=interaction_var], by=interaction_var) %>%
-    .[get(in_predvar) < max_predvar]
+  if (is.null(in_emm_dt)) {
+    in_ssn <- in_mod$ssn.object
+    newdat <- list(
+      seq(min(in_ssn$obs[[in_pred_var]], na.rm = TRUE),
+          max(in_ssn$obs[[in_pred_var]], na.rm = TRUE),
+          length.out = 50)
+    )
+    names(newdat) <- in_pred_var
+    
+    response_var <- all.vars(in_mod$formula)[[1]]
+    
+    #Marginal means plot
+    emm_dt <- emmeans(in_mod, 
+                      data=in_mod$ssn.object$obs, 
+                      specs= as.formula(paste0('~', in_pred_var, '|', interaction_var)),
+                      at = newdat,
+                      type = "response") %>%
+      data.frame %>%
+      setDT %>%
+      merge(as.data.table(in_ssn$obs)[, list(max_pred_var = max(get(in_pred_var))),
+                                      by=interaction_var], by=interaction_var) %>%
+      .[get(in_pred_var) < max_pred_var] %>%
+      .[, `:=`(response_var=response_var,
+               pred_var_name = in_pred_var)] %>%
+      setnames(in_pred_var, 'pred_var')
+    
+  } else if (is.data.table(in_emm_dt) && 
+             all(c('pred_var', interaction_var, 'emmean')  %in% names(in_emm_dt))
+             ){
+    emm_dt <- in_emm_dt
+    response_var <- emm_dt[1, response_var]
+  }
   
   if (plot) {
     emm_plot <- emm_dt %>%
-      ggplot(aes(x=get(in_predvar), fill=get(interaction_var))) +
+      ggplot(aes(x=pred_var, fill=get(interaction_var))) +
       geom_line(aes(y=emmean, color=get(interaction_var)), linewidth=2) +
       geom_ribbon(aes(ymin=asymp.LCL, ymax=asymp.UCL), alpha=0.1) +
-      scale_x_continuous(name=in_predvar_label) +
       scale_y_continuous(name=paste('Estimated marginal mean:', 
                                     Hmisc::capitalize(response_var))) +
       scale_color_discrete(name=Hmisc::capitalize(interaction_var)) + 
       scale_fill_discrete(name=Hmisc::capitalize(interaction_var)) + 
       theme_classic()
+    
+    if (label_pred_var && !is.null(in_pred_var_label)) {
+      emm_plot <- emm_plot + scale_x_continuous(name=in_pred_var_label)
+    }
   } else {
     emm_plot <- NULL
   }
@@ -1326,22 +1342,31 @@ plot_ssn_emmeans <- function(in_mod, in_predvar,
   ))
 }
 
-#------ plot_ssn_emtrends ------------------------------------------------------
+#------ get_ssn_emtrends ------------------------------------------------------
+get_ssn_emtrends <- function(in_mod, in_pred_var, 
+                              in_pred_var_label, interaction_var,
+                              in_emtrends_dt=NULL, plot=T) {
+  if (is.null(in_emtrends_dt)) {
+    response_var <- all.vars(in_mod$formula)[[1]]
+    
+    emtrends_dt <- emtrends(object = in_mod, 
+                            specs = as.formula(paste('~', interaction_var)), 
+                            var = in_pred_var,
+                            data=in_mod$ssn.object$obs) %>% 
+      as.data.frame %>%
+      setDT %>%
+      .[, `:=`(response_var=response_var,
+               pred_var_name = in_pred_var)] %>%
+      setnames(paste0(in_pred_var, '.trend') , 'trend')
+    
+  }  else if (is.data.table(in_emm_dt)) {
+    emtrends_dt <- in_emtrends_dt
+    response_var <- emtrends_dt[1, response_var]
+  }
 
-plot_ssn_emtrends <- function(in_mod, in_predvar, 
-                              in_predvar_label, interaction_var, plot=T) {
-  response_var <- all.vars(in_mod$formula)[[1]]
-  
-  emtrends_dt <- emtrends(object = in_mod, 
-                          specs = as.formula(paste('~', interaction_var)), 
-                          var = in_predvar,
-                          data=in_mod$ssn.object$obs) %>% 
-    as.data.frame %>%
-    setDT
-  
   if (plot) {
     emtrends_plot <- ggplot(emtrends_dt, aes(x = get(interaction_var), 
-                                             y = get(paste0(in_predvar, '.trend')))) +
+                                             y = trend)) +
       geom_pointrange(aes(ymin = asymp.LCL, ymax = asymp.UCL,
                           color=get(interaction_var))) +
       geom_hline(yintercept=0, linetype=2) +
@@ -6873,7 +6898,7 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
   # Get the selected covariance type for the specified organism
   org_covtype <- in_covtype_selected$dt_sub[organism==in_organism,][['covtypes']]
   
-  # Combine model glance tables and attach the full model objects
+  # Combine model glance tables and attach the full model objects---------------
   ssn_hydrowindow_perf_allvars <- lapply(
     in_ssnmodels[organism==in_organism, ssn_div_models],
     function(x) {
@@ -6895,7 +6920,7 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
   remove(in_ssnmodels)
   
   #Identify covariance structure with the lowest AICc across all time windows 
-  #for each hydrological variable
+  #for each hydrological variable ----------------------------------------------
   get_hydro_var_root(ssn_hydrowindow_perf_allvars)
   
   # Define labels for the hydrological variables for plotting
@@ -6937,66 +6962,149 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
     ),
     by='varcomp')
   
-  #Plot variance decomposition as a stacked bar chart
-  page_num = 1
-  plot_ssn_hydrowindow_varcomp <- ggplot(
-    ssn_hydrowindow_varcomp[proportion > 0 & hydro_label != 'Null', ],
-    aes(x = window_d, y = proportion, fill = varcomp_label)
-  ) +
-    geom_bar(stat = "identity", position = "stack", alpha=0.75) +
-    geom_text(
-      aes(label = round(100 * proportion)),
-      position = position_stack(vjust = 0.5),
-      size=3,
-      colour = '#555555') +
-    scale_fill_manual(
-      name = 'Variance components',
-      values=ssn_hydrowindow_varcomp[
-        proportion > 0,][order(varcomp_label), unique(varcomp_color)]) +
-    scale_x_discrete('Temporal window of aggregation (days)') + 
-    scale_y_continuous('Percentage of variance', 
-                       breaks=c(0, 0.5, 1),
-                       labels = scales::label_percent()) +
-    facet_wrap_paginate(~hydro_label, 
-                        labeller = label_wrap_gen(width=25),
-                        nrow=2, ncol=3, scales = "free_x",
-                        page=page_num) +
-    coord_cartesian(expand = FALSE) +
-    theme_bw()
+  #Plot variance decomposition as a stacked bar chart --------------------------
+  varcomp_subdt <- ssn_hydrowindow_varcomp[proportion > 0 & hydro_label != 'Null',]
+  varcomp_null <- ssn_hydrowindow_varcomp[proportion > 0 & hydro_label == 'Null',] %>%
+    .[, hydro_label := 'Null: only basin area']
+  nrow_pag = 2
+  ncol_pag = 3
+  page_num <- ceiling(varcomp_subdt[, length(unique(hydro_label))]
+                      /(nrow_pag*ncol_pag))
   
+  plot_varcomp_list <- lapply(seq_len(page_num), function(in_page) {
+    p_main <- ggplot(
+      varcomp_subdt,
+      aes(x = window_d, y = proportion, fill = varcomp_label)
+    ) +
+      geom_bar(stat = "identity", position = "stack", alpha=0.75) +
+      geom_text(
+        aes(label = round(100 * proportion)),
+        position = position_stack(vjust = 0.5),
+        size=3,
+        colour = '#555555') +
+      scale_fill_manual(
+        name = 'Variance components',
+        values=ssn_hydrowindow_varcomp[
+          proportion > 0,][order(varcomp_label), unique(varcomp_color)]) +
+      scale_x_discrete('Temporal window of aggregation') + 
+      scale_y_continuous('Percentage of variance', 
+                         breaks=c(0, 0.5, 1),
+                         labels = scales::label_percent()) +
+      facet_wrap_paginate(~hydro_label, 
+                          labeller = label_wrap_gen(width=25),
+                          nrow=nrow_pag, ncol=ncol_pag, scales = "free_x",
+                          page=in_page) +
+      coord_cartesian(expand = FALSE) +
+      theme_bw() +
+      theme(legend.background=element_blank())
+    
+    p_null <-  ggplot(
+      varcomp_null,
+      aes(x = window_d, y = proportion, fill = varcomp_label)
+    ) +
+      geom_bar(stat = "identity", position = "stack", alpha=0.75) +
+      geom_text(
+        aes(label = round(100 * proportion)),
+        position = position_stack(vjust = 0.5),
+        size=3,
+        colour = '#555555') +
+      scale_fill_manual(
+        name = 'Variance components',
+        values=ssn_hydrowindow_varcomp[
+          proportion > 0,][order(varcomp_label), unique(varcomp_color)]) +
+      scale_x_discrete('Temporal window of aggregation (days)') + 
+      scale_y_continuous('Percentage of variance', 
+                         breaks=c(0, 0.5, 1),
+                         labels = scales::label_percent()) +
+      coord_cartesian(expand = FALSE) +
+      theme_bw() +
+      theme(legend.position='none',
+            axis.title=element_blank(),
+            axis.text=element_blank()) +
+      facet_wrap(~hydro_label,
+                 labeller = label_wrap_gen(width=15)
+                 )
+    
+    (p_main + guide_area()) + p_null  + 
+      plot_layout(
+        design = "
+    AAAAAAAABBB
+    AAAAAAAAC##
+    ",
+        axes = 'collect',
+        guides = 'collect')
+
+  })
+  plot_varcomp_list[[3]] 
+
   
   #Get best model for each variable for single window for each hydrological variable
   ssn_hydrowindow_best <- ssn_hydrowindow_perf_allvars[
     , .SD[which.min(AICc),], 
     by = hydro_var_root]
   
-  in_mod <- ssn_hydrowindow_best[1, mod][[1]]
-  in_predvar <- ssn_hydrowindow_best[1, hydro_var]
-  in_predvar_label <-  ifelse(in_predvar %in% in_hydro_vars_dt$hydro_var,
-                              get_full_hydrolabel(in_hydro_vars_dt, in_predvar),
-                              in_predvar)
-  interaction_var <- 'country'
-  
-  #Plot marginal means for each "best model"
-  lapply(ssn_hydrowindow_best$hydro_var, function(in_predvar) {
+
+  #Plot marginal means for each "best model" -----------------------------------
+  emmeans_dt_all <- lapply(ssn_hydrowindow_best$hydro_var, function(in_pred_var) {
+    print(in_pred_var)
+    in_mod <- ssn_hydrowindow_best[hydro_var == in_pred_var, mod][[1]]
+    if (in_pred_var=='null') {
+      in_pred_var <- all.vars(in_mod$formula)[2] #Fragile
+    }
     
+    in_pred_var_label <-  ifelse((in_pred_var %in% in_hydro_vars_dt$hydro_var) 
+                                && (in_pred_var != 'null'),
+                                get_full_hydrolabel(in_hydro_vars_dt, in_pred_var),
+                                in_pred_var)
+
+    emm_dt <- get_ssn_emmeans(in_mod, in_pred_var, pred_var_label, 
+                              interaction_var='country', plot=F)$dt
     
-  })
+    return(emm_dt)
+  }) %>% rbindlist(use.names=T, fill=T)
   
-  #Plot estimated coefs and confint for each best model
+  get_ssn_emmeans(in_emm_dt = emmeans_dt_all, interaction_var='country', plot=T)$plot +
+    facet_wrap(~pred_var_name, scales='free')
+  
+
+  #Plot estimated coefs and confint for each best model  -----------------------
+  emtrends_dt_all <- lapply(ssn_hydrowindow_best$hydro_var, function(in_pred_var) {
+    print(in_pred_var)
+    in_mod <- ssn_hydrowindow_best[hydro_var == in_pred_var, mod][[1]]
+    if (in_pred_var=='null') {
+      in_pred_var <- all.vars(in_mod$formula)[2] #Fragile
+    }
+    
+    emm_dt <- get_ssn_emtrends(in_mod, in_pred_var, pred_var_label, 
+                               interaction_var='country', plot=F)$dt
+    
+    return(emm_dt)
+  }) %>% rbindlist(use.names=T, fill=T) 
+  
+  
+  emtrends_dt_all[, pred_var_label := get_full_hydrolabel(in_hydro_vars_dt, 
+                                                          pred_var_name)]
+  
+  in_pred_var_label <-  ifelse((in_pred_var %in% in_hydro_vars_dt$hydro_var) 
+                               && (in_pred_var != 'null'),
+                               ,
+                               in_pred_var)
+  
+  get_ssn_emtrends(in_emtrends_dt = emtrends_dt_all, 
+                   interaction_var='country', plot=T)$plot +
+    facet_wrap(~pred_var_name, scales='free_x')
   
 
 
-  plot_ssn_emmeans(in_mod, in_predvar, predvar_label, interaction_var, plot=F)
 
-  plot_ssn_emtrends(in_mod, in_predvar, 
-                    in_predvar_label, interaction_var, plot=F)
+  plot_ssn_emtrends(in_mod, in_pred_var, 
+                    in_pred_var_label, interaction_var, plot=F)
   
 
   ##############################################################################
   ##############################################################################
   
-  #Get model predictions from the best models
+  #Get model predictions from the best models ----------------------------------
   mod_preds <- lapply(seq(nrow(ssn_hydrowindow_best)), function(i) {
     # Subset the data.table to get the current row
     aug_data <- SSN2::augment(ssn_hydrowindow_best[i, mod[[1]]], 
@@ -7006,7 +7114,7 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
     return(aug_data)
   }) %>% rbindlist
   
-  #Plot observation vs predictions for the best models
+  #Plot observation vs predictions for the best models -------------------------
   resp_var <- ssn_hydrowindow_best$response_var[[1]]
   obs_preds_plot <- ggplot(mod_preds, 
                            aes(x=.fitted, y=get(resp_var), color=country)) +
@@ -7031,96 +7139,6 @@ format_ssn_hydrowindow <- function(in_ssnmodels,
     geom_smooth(method='lm') +
     facet_wrap(country~variable, scales='free') +
     theme_bw()
-  
-  # # Sub-function:
-  # #Plot the "marginal" effect of each hydrological variable while
-  # #keeping surface area at global mean and global intercept
-  # plot_ssn2_marginal_effects <- function(
-  #   in_mod,                # fitted SSN2 model
-  #   hydro_var,          # the covariate you want to VARY
-  #   fixed_var,          # the covariate you want to FIX at mean
-  #   fixed_var_mean,
-  #   group_var = "country",
-  #   n_points = 100
-  # ) {
-  #   # Get fixed effects
-  #   fixef_dt <- SSN2::tidy(in_mod) %>% as.data.table()
-  #   
-  #   # Identify base terms
-  #   intercept <- fixef_dt[term == "(Intercept)", estimate]
-  #   b_hydro   <- fixef_dt[term == hydro_var, estimate]
-  #   b_fixed   <- fixef_dt[term == fixed_var, estimate]
-  #   
-  #   # Find interaction slopes for hydro
-  #   interaction_pattern <- paste0(group_var, ".*:", hydro_var)
-  #   hydro_interactions <- fixef_dt[grepl(interaction_pattern, term)]
-  #   hydro_interactions[, group := sub(paste0(group_var, "(.*):.*"), "\\1", term)]
-  #   hydro_interactions <- hydro_interactions[, .(group = group, b_hydro_group = estimate)]
-  #   
-  #   # Find interaction slopes for fixed covariate
-  #   fixed_pattern <- paste0(fixed_var, ":", group_var)
-  #   fixed_interactions <- fixef_dt[str_starts(term, fixed(fixed_pattern)),]
-  #   fixed_interactions[, group := sub(paste0(fixed_var, ":.*", group_var, "(.*)"), "\\1", term)]
-  #   fixed_interactions <- fixed_interactions[, .(group = group, b_fixed_group = estimate)]
-  #   
-  #   # Get observed data to build range & mean
-  #   mod_obs <- in_mod$ssn.object$obs %>% as.data.table()
-  #   
-  #   # Build new data grid: hydro varies, fixed stays constant
-  #   grid_hydro <- mod_obs[, .(
-  #     hydro = seq(min(get(hydro_var), na.rm = TRUE),
-  #                 max(get(hydro_var), na.rm = TRUE),
-  #                 length.out = n_points)
-  #   ), by = group_var]
-  #   
-  #   newdata_dt <- copy(grid_hydro)
-  #   setnames(newdata_dt, old = group_var, new = "group")
-  #   newdata_dt[, fixed := fixed_var_mean]
-  #   
-  #   # Merge interactions
-  #   newdata_dt <- merge(newdata_dt, hydro_interactions, by = "group", all.x = TRUE)
-  #   newdata_dt <- merge(newdata_dt, fixed_interactions, by = "group", all.x = TRUE)
-  #   
-  #   # Fill NA with 0 if no interaction
-  #   newdata_dt[is.na(b_hydro_group), b_hydro_group := 0]
-  #   newdata_dt[is.na(b_fixed_group), b_fixed_group := 0]
-  #   
-  #   # Calculate predicted
-  #   newdata_dt[, predicted :=
-  #                intercept +
-  #                (b_hydro + b_hydro_group) * hydro +
-  #                (b_fixed + b_fixed_group) * fixed
-  #   ]
-  #   
-  #   # Plot
-  #   out_plot <- ggplot(newdata_dt, aes(x = hydro, y = predicted, color = group)) +
-  #     geom_line(linewidth = 1) +
-  #     labs(
-  #       x = hydro_var,
-  #       y = "Predicted",
-  #       color = group_var
-  #     ) +
-  #     theme_bw()
-  #   
-  #   return(out_plot)
-  # }
-  # 
-  # # Generate marginal effect plots for each hydrological variable
-  # marginal_plot <- lapply(
-  #   setdiff(unique(ssn_hydrowindow_best$hydro_var), 'null'),
-  #   function(in_hydro_var) {
-  #     in_mod <- ssn_hydrowindow_best[hydro_var == in_hydro_var, mod[[1]]]
-  #     
-  #     out_plot <- plot_ssn2_marginal_effects(
-  #       in_mod =  in_mod,
-  #       hydro_var = in_hydro_var,
-  #       fixed_var = "log10(basin_area_km2)",
-  #       fixed_var_mean = mean(log10(in_mod$ssn.object$obs[["basin_area_km2"]])),
-  #       group_var = "country"
-  #     )
-  #     return(out_plot)
-  #   })  %>%
-  #   patchwork::wrap_plots(.)
   
   return(list(
     dt = ssn_hydrowindow_perf_allvars[,.SD, .SDcols = !c('mod')],
