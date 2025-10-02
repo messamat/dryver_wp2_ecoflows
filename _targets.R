@@ -734,16 +734,29 @@ analysis_targets <- list(
   # )
   # ,
   
-  #Merge ecological, environmental and hydrological data
+  #Merge ecological, environmental and hydrological data by site and campaign
   tar_target(
-    allvars_merged,
-    merge_allvars_sites(in_spdiv_local = spdiv_local, 
-                        in_spdiv_drn = NULL,
-                        in_hydrocon_compiled = hydrocon_sites_compiled,
-                        in_hydrocon_summarized = hydrocon_sites_summarized,
-                        in_env_dt = env_dt,
-                        in_env_summarized = env_summarized,
-                        in_genal_upa = genal_sites_upa_dt)
+    allvars_sites,
+    merge_allvars_sites(
+      in_spdiv_local = spdiv_local,
+      in_hydrocon_compiled = hydrocon_sites_compiled,
+      in_env_dt = env_dt,
+      in_genal_upa = genal_sites_upa_dt
+    )
+  ),
+  
+  #Merge ecological, environmental and hydrological data by site across campaigns
+  tar_target(
+    allvars_summarized,
+    merge_allvars_summarized(
+      spdiv = spdiv_local,
+      in_hydrocon_compiled = hydrocon_sites_compiled,
+      in_hydrocon_summarized = hydrocon_sites_summarized,
+      in_env_summarized = env_summarized,
+      in_genal_upa = genal_sites_upa_dt,
+      dry_only_sites = allvars_sites$dry_only_sites,
+      dtcols_sites = allvars_sites$cols
+    )
   )
   ,
   
@@ -800,7 +813,7 @@ analysis_targets <- list(
     lapply(alpha_var_list, function(in_var) {
       plot_drn_hydrodiv(in_hydrocon_compiled = hydrocon_sites_compiled, 
                         in_sites_dt = sites_dt,
-                        in_allvars_dt = allvars_merged$dt,
+                        in_allvars_dt = allvars_sites$dt,
                         in_organism_dt = organism_dt,
                         alpha_var = in_var,
                         write_plots=T,
@@ -811,7 +824,7 @@ analysis_targets <- list(
   
   tar_target(
     hydrowindow_lm_scatter,
-    plot_scatter_lm(in_allvars_merged=allvars_merged, 
+    plot_scatter_lm(in_allvars_sites=allvars_sites, 
                     temporal_var_substr='DurD', 
                     response_var=alpha_var_list,
                     in_organism_dt = organism_dt,
@@ -824,7 +837,7 @@ analysis_targets <- list(
   
   tar_target(
     area_div_scatter,
-    plot_areadiv_scatter(in_dt=allvars_merged$dt_summarized,
+    plot_areadiv_scatter(in_dt=allvars_summarized$dt,
                          in_organism_dt=organism_dt,
                          write_plots=T,
                          out_dir = figdir)
@@ -833,31 +846,31 @@ analysis_targets <- list(
   
   tar_target(
     biof_vs_sedi_plots,
-    plot_edna_biof_vs_sedi(in_allvars_merged=allvars_merged) 
+    plot_edna_biof_vs_sedi(in_allvars_sites=allvars_sites) 
   )
   ,
   
   #For sites x dates: Create matrices of correlations between predictors and responses, and among predictors
   tar_target(
     cor_matrices_list,
-    compute_cor_matrix(allvars_merged)
+    compute_cor_matrix(allvars_sites)
   )
   ,
   
   #For data averaged by site: Create matrices of correlations between predictors and responses, and among predictors
   tar_target(
     cor_matrices_list_summarized,
-    compute_cor_matrix_summarized(allvars_merged)
+    compute_cor_matrix_summarized(allvars_summarized)
   )
   ,
   
   #Create matrices of correlations between predictors and responses, only for non-perennial sites
   tar_target(
     cor_matrices_list_ires, {
-      allvars_merged_ires <- copy(allvars_merged)
-      allvars_merged_ires$dt <- allvars_merged$dt[stream_type=='TR',]
+      allvars_sites_ires <- copy(allvars_sites)
+      allvars_sites_ires$dt <- allvars_sites$dt[stream_type=='TR',]
       
-      return(compute_cor_matrix(allvars_merged_ires))
+      return(compute_cor_matrix(allvars_sites_ires))
     }
   )
   ,
@@ -881,7 +894,7 @@ analysis_targets <- list(
   #-> No, good
   tar_target(
     corplots_div_habvol,
-    check_cor_div_habvol(in_allvars_merged = allvars_merged)
+    check_cor_div_habvol(in_allvars_sites = allvars_sites)
   )
   ,
   
@@ -903,7 +916,7 @@ analysis_targets <- list(
   #Ordinate local environmental variables to use axes in regression models
   tar_target(
     local_env_pca,
-    ordinate_local_env(in_allvars_dt = allvars_merged$dt)
+    ordinate_local_env(in_allvars_dt = allvars_sites$dt)
   ),
   
   #Create Spatial Stream Network (SSN) object
@@ -911,7 +924,7 @@ analysis_targets <- list(
     ssn_eu,
     create_ssn_europe(in_network_path = network_ssnready_shp_list,
                       in_sites_path = site_snapped_gpkg_list,
-                      in_allvars_dt = allvars_merged$dt,
+                      in_allvars_dt = allvars_sites$dt,
                       in_local_env_pca = local_env_pca,
                       in_barriers_path = barrier_snapped_gpkg_list,
                       in_hydrostats_net_hist = hydrostats_net_hist,
@@ -1205,7 +1218,7 @@ analysis_targets <- list(
   #Ordinate local environmental variables to use axes in regression models
   tar_target(
     local_env_pca_summarized,
-    ordinate_local_env(in_allvars_dt = allvars_merged$dt_summarized)
+    ordinate_local_env(in_allvars_dt = allvars_summarized$dt)
   )
   ,
   
@@ -1214,7 +1227,7 @@ analysis_targets <- list(
     ssn_eu_summarized,
     create_ssn_europe(in_network_path = network_ssnready_shp_list,
                       in_sites_path = site_snapped_gpkg_list,
-                      in_allvars_dt = allvars_merged$dt_summarized,
+                      in_allvars_dt = allvars_summarized$dt,
                       in_local_env_pca = local_env_pca_summarized,
                       in_barriers_path = barrier_snapped_gpkg_list,
                       in_hydrostats_net_hist = hydrostats_net_hist,
@@ -1228,7 +1241,7 @@ analysis_targets <- list(
   tar_target(
     ssn_summarized_maps,
     map_ssn_summarized(in_ssn_summarized = ssn_eu_summarized,
-                       in_allvars_merged = allvars_merged,
+                       in_allvars_summarized = allvars_summarized,
                        in_organism_dt = organism_dt)
   )
   ,
@@ -1243,7 +1256,7 @@ analysis_targets <- list(
   tar_target(
     ssn_mods_miv_yr,
     model_miv_yr(in_ssn_eu_summarized = ssn_eu_summarized,
-                 in_allvars_merged = allvars_merged,
+                 in_allvars_summarized = allvars_summarized,
                  in_cor_matrices = cor_matrices_list_summarized,
                  ssn_covtypes = ssn_covtypes)
   ),

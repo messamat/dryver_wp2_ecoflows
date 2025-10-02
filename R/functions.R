@@ -2112,6 +2112,11 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
       by=c('site', 'campaign'), all=T, sort = T, set_suffix=F) %>%
       merge(localdiv_decomp, by='site', all.x=T)
     
+    #Remove GEN04_1 from all organisms, no local environmental data, sampled only for eDNA. Too unsure.
+    out_dt <- out_dt[!(site == 'GEN04' & campaign == '1'),]
+    #Create organism class for coloring/ordering
+    out_dt[, organism_class := gsub('_[a-z]+', '', organism)]
+    
   } else if (level == 'regional') {
     nsites <- nrow(decomp$tab_by_site) #Number of sites
     nsteps <- max(decomp$tab_by_site[,'nsite']) #Number of sampling campaigns
@@ -4439,7 +4444,7 @@ compile_hydrocon_sites_country <- function(in_hydrostats_sub_comb,
 }
 
 #------ summarize_sites_hydrocon --------------------------------------------
-# in_hydrocon_compiled <- tar_read(hydrocon_compiled)
+in_hydrocon_compiled <- tar_read(hydrocon_sites_compiled)
 
 
 #' @title Summarize hydrological and connectivity data 
@@ -4456,6 +4461,7 @@ summarize_sites_hydrocon <- function(in_hydrocon_compiled
   hydrocon_summmarized <- in_hydrocon_compiled[
     #(date >= min(date_range)) &   (date <= max(date_range))
     , list( #`:=`
+      upstream_area_net = upstream_area_net,
       DurD_samp = sum(isflowing==0)/.N, #Total number of no-flow days 
       DurD3650past = .SD[.N, DurD3650past]/3650,
       PDurD365past = .SD[.N, PDurD365past],
@@ -4562,7 +4568,8 @@ summarize_network_hydrostats <- function(
 #' @param in_env_dt A data.table containing raw environmental data with a 'state_of_flow' column.
 #' @return A list containing two summarized data tables 
 #'     (all flows, and only flowing sites) and a ggplot object of the boxplot.
-summarize_env <- function(in_env_dt) {
+summarize_env <- function(in_env_dt,
+                          in_genal_upa) {
   # dynamic_vars <- c(
   #   'avg_depth_macroinvertebrates',
   #   'avg_velocity_macroinvertebrates',
@@ -4604,7 +4611,9 @@ summarize_env <- function(in_env_dt) {
   env_summarized <- in_env_dt[state_of_flow != 'D', 
                               lapply(.SD, function(x) mean(x, na.rm=T)),
                               .SDcols = dat_cols,
-                              by=group_cols]
+                              by=group_cols] %>%
+    .[is.na(basin_area_km2),  # Fill basin area NAs for Genal basin
+      basin_area_km2 := in_genal_upa[.SD, on="site", x.basin_area_km2]]
   
   # calculate mean for each data column, only for 'F' (flowing) sites
   env_summarized_nopools <- in_env_dt[state_of_flow == 'F',
@@ -4718,30 +4727,26 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path) {
 # in_env_summarized <- tar_read(env_summarized)
 # in_genal_upa = tar_read(genal_sites_upa_dt)
 
-#' @title Merge all variables for sites
-#' @description This function takes multiple data tables (biodiversity, hydrological connectivity, environmental variables) and merges them into two comprehensive data tables: one at the individual campaign level and one summarized by site.
-#' @param in_spdiv_local A data table with biodiversity statistics.
-#' @param in_spdiv_drn A data table with DRN biodiversity statistics.
-#' @param in_hydrocon_compiled A data table with compiled hydrological and connectivity data by date and site.
-#' @param in_hydrocon_summarized A data table with summarized hydrological and connectivity data by site.
-#' @param in_env_dt A data table with sampling-time environmental data.
-#' @param in_env_summarized A list containing summarized environmental data tables.
-#' @param in_genal_upa A data table with upstream area data for a specific site in Genal.
-#' @return A list containing the merged data tables and a list of column names.
-merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn=NULL,
-                                in_hydrocon_compiled, in_hydrocon_summarized,
-                                in_env_dt, in_env_summarized,
+#' @title Merge all variables for sites (campaign-level)
+#' @description Merges biodiversity, hydrological, and environmental data
+#'              at the individual campaign × site × organism level.
+#' @param in_spdiv_local A biodiversity data.table.
+#' @param in_hydrocon_compiled Hydrological/connectivity data by date & site.
+#' @param in_env_dt Environmental data at sampling times.
+#' @param in_genal_upa Upstream area data for the Genal basin.
+merge_allvars_sites <- function(in_spdiv_local, 
+                                in_spdiv_drn=NULL,
+                                in_hydrocon_compiled,
+                                in_env_dt,
                                 in_genal_upa) {
+  
+  #Prepare data  ---------------------------------------------------------------
+  setDT(in_env_dt)
   
   #Fill basin area NAs in environmental data for Genal basin in Spain
   #https://stackoverflow.com/questions/72940045/replace-na-in-a-table-with-values-in-column-with-another-table-by-conditions-in
   in_env_dt[is.na(basin_area_km2),
-            basin_area_km2 :=  in_genal_upa[
-              .SD, on='site', x.basin_area_km2]]
-  
-  in_env_summarized$dt_nopools[is.na(basin_area_km2),
-                               basin_area_km2 :=  in_genal_upa[
-                                 .SD, on='site', x.basin_area_km2]]
+            basin_area_km2 := in_genal_upa[.SD, on='site', x.basin_area_km2]]
   
   #Compute state of flow in previous time step (could be inserted much before in the workflow later)
   in_env_dt[, state_of_flow_tm1 := lag(state_of_flow, n=1L), by=site]
@@ -4760,133 +4765,138 @@ merge_allvars_sites <- function(in_spdiv_local, in_spdiv_drn=NULL,
     spdiv <- in_spdiv_local
   }
   
-  spdiv <- spdiv[!(site=='GEN04' & campaign=='1'),]
-  #Remove GEN04_1 from all organisms, no local environmental data, sampled only for eDNA. Too unsure.
-  
-  #Create "organism_class" column for labeling/coloring/merging
-  spdiv[, organism_class := gsub('_[a-z]+', '', organism)]
-  
-  
-  #List column names by originating dt
+  # Define columns -------------------------------------------------------------
   group_cols = c("running_id", "site", "date", "campaign", "organism", 
                  "organism_class", "country", "UID", "upstream_area_net")
   exclude_cols = c("ncampaigns", "name", "isflowing", "reach_length",
                    "noflow_period", "noflow_period_dur", "last_noflowdate", "drn",
                    "if_ip_number_and_size_2_axes_+_depth_of_the_pools",
                    "latitude", "longitude", "reach_id", "hy", "month",
-                   'min_wetted_width', 'left_river_bank_slope', 'right_river_bank_slope',
-                   'qsim')
+                   "min_wetted_width", "left_river_bank_slope", "right_river_bank_slope",
+                   "qsim")
   
-  dtcols <- list(
+  dtcols_sites <- list(
     div = setdiff(names(spdiv), 
                   c(group_cols, exclude_cols,
                     names(in_hydrocon_compiled), names(in_env_dt))),
-    div_summarized = c("mean_richness", "mean_expshannon", "mean_invsimpson",
-                       "JBDtotal", "JRepl", "JRichDif", "JRepl/BDtotal", "JRichDif/BDtotal",
-                       "RBDtotal", "RRepl", "RRichDif", "RRepl/BDtotal", "RRichDif/BDtotal",
-                       "Gamma", "Beta", "mAlpha"), 
     hydro_con = setdiff(names(in_hydrocon_compiled), 
                         c(group_cols, exclude_cols,
                           names(spdiv), names(in_env_dt))),
-    hydro_con_summarized = setdiff(names(in_hydrocon_summarized), 
-                                   c(group_cols, exclude_cols,
-                                     names(spdiv), names(in_env_dt))), 
     env = setdiff(names(in_env_dt),
                   c(group_cols, exclude_cols,
                     names(spdiv), names(in_hydrocon_compiled))),
-    env_summarized = setdiff(c(names(in_env_summarized$dt_nopools), 
-                               'upstream_area_net'),
-                             c(group_cols, exclude_cols)),
-    group_cols =  group_cols,
+    group_cols = group_cols,
     exclude_cols = exclude_cols
   )
   
-  #Delineate numeric environmental columns
-  dtcols <- c(dtcols, 
-              env_num = list(intersect(dtcols$env,
-                                       names(in_env_dt)[
-                                         sapply(in_env_dt, class) 
-                                         %in% c('numeric', 'integer')])
-              ),
-              env_summarized_num = list(intersect(
-                dtcols$env_summarized,
-                names(in_env_summarized$dt_nopools)[
-                  sapply(in_env_summarized$dt_nopools, class) 
-                  %in% c('numeric', 'integer')])
-              )
+  # numeric environmental columns
+  dtcols_sites <- c(
+    dtcols_sites,
+    env_num = list(intersect(dtcols_sites$env,
+                             names(in_env_dt)[
+                               sapply(in_env_dt, class) %in% c("numeric", "integer")]))
   )
   
-  #Compute average metric between sediment and biofilm for eDNA
-  # avg_spdiv_edna <- spdiv[
-  #   organism_class %in% c('dia', 'fun', 'bac'), 
-  #   lapply(.SD, function(x) mean(x, na.rm=T)), 
-  #   by = eval(names(spdiv)[names(spdiv) %in% 
-  #                            setdiff(dtcols$group_cols, 'organism')]),
-  #   .SDcols = setdiff(dtcols$div, 
-  #                     c(dtcols$group_cols, dtcols$exclude_cols))
-  # ] %>%
-  #   .[, organism := organism_class]
-  
-  # bind the averaged eDNA data with the original biodiversity data
-  # spdiv <- rbind(spdiv, avg_spdiv_edna, use.names=T, fill=T)
-  
-  
-  #------------ Create data.table for individual site and campaigns ------------
-  #Merge diversity metrics with hydro_con
+  # Merge ----------------------------------------------------------------------
+  # Merge biodiversity + hydro connectivity
   spdiv_hydro_con <- merge(spdiv, in_hydrocon_compiled,
-                           by=c('date', 'site'), all.x=T) 
+                           by=c('date', 'site'), all.x=TRUE)
   
-  #Merge environmental variables
-  setDT(in_env_dt)
-  all_vars_merged <- merge(spdiv_hydro_con, 
-                           in_env_dt[, c(dtcols$env, 'site', 'campaign'), with=F],
-                           by=c('site', 'campaign'), all.x=T) %>%
-    .[!(site %in% dry_only_sites), ] %>% #Remove sites that never flowed 
+  # Merge environment
+  all_vars_merged <- merge(
+    spdiv_hydro_con, 
+    in_env_dt[, c(dtcols$env, 'site', 'campaign'), with=FALSE],
+    by=c('site', 'campaign'), all.x=TRUE) %>%
+    .[!(site %in% dry_only_sites), ] %>%
     .[, country := factor(
       country,
-      levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ))]
-  
-  
-  #------------ Create data.table summarized by site across campaigns ---------
-  # summarize biodiversity data across all dates
-  spdiv_summarized <- spdiv[!duplicated(paste(site, organism)), 
-                            intersect(names(spdiv), 
-                                      c(group_cols, dtcols$div_summarized)), 
-                            with=F] %>%
-    .[, `:=`(mean_richness = as.integer(round(mean_richness)))] #Round mean richness to an integer (for binomial modelling)
-  
-  all_vars_summarized <- merge(
-    spdiv_summarized,
-    in_hydrocon_summarized[, c(dtcols$hydro_con_summarized, 'site'),  with=F], 
-    by='site', all.x=T) %>%
-    merge(in_hydrocon_compiled[!duplicated(site), .(site, upstream_area_net)],
-          by='site') %>%
-    merge(in_env_summarized$dt_nopools[, c(dtcols$env_summarized, 'site'), with=F],
-          by='site', all.x=T) %>%
-    .[, c('campaign', 'date') := NULL] %>%
-    .[!(site %in% dry_only_sites), ] %>% #Remove sites that never flowed 
-    .[, country := factor(
-      country,
-      levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ))]
+      levels = c("Finland","France","Hungary","Czech","Croatia","Spain"))] 
   
   return(list(
     dt = all_vars_merged,
-    dt_summarized = all_vars_summarized,
-    cols = dtcols)
+    dry_only_sites = dry_only_sites,
+    cols = dtcols
+  ))
+}
+
+#------ merge_allvars_summarized ----------------------------------------------
+
+#' @title Merge all variables summarized by site
+#' @description Summarizes biodiversity across campaigns and merges with
+#'              site-level hydrological & environmental summaries.
+#' @param spdiv A biodiversity data.table (already cleaned).
+#' @param in_hydrocon_summarized Hydrological/connectivity data summarized by site.
+#' @param in_env_summarized A list of summarized environmental data.tables.
+#' @param in_genal_upa Upstream area data for the Genal basin.
+#' @param dry_only_sites Sites that never flowed (from merge_allvars_sites).
+#' @param dtcols_sites Column lists from merge_allvars_sites.
+#' @return A list containing:
+#'   \item{dt_summarized}{Merged site-level summarized data}
+#'   \item{cols}{List of relevant column vectors for summarized merging}
+merge_allvars_summarized <- function(spdiv,
+                                     in_hydrocon_summarized,
+                                     in_env_summarized,
+                                     dry_only_sites,
+                                     dtcols_sites) {
+  
+  #----------------- Column definitions (summarized) -----------------
+  dtcols_summarized <- list(
+    div_summarized = c("mean_richness", "mean_expshannon", "mean_invsimpson",
+                       "JBDtotal", "JRepl", "JRichDif", "JRepl/BDtotal", "JRichDif/BDtotal",
+                       "RBDtotal", "RRepl", "RRichDif", "RRepl/BDtotal", "RRichDif/BDtotal",
+                       "Gamma", "Beta", "mAlpha"),
+    hydro_con_summarized = setdiff(names(in_hydrocon_summarized), 
+                                   c(dtcols_sites$group_cols, dtcols_sites$exclude_cols,
+                                     names(spdiv))),
+    env_summarized = setdiff(c(names(in_env_summarized$dt_nopools), "upstream_area_net"),
+                             c(dtcols_sites$group_cols, dtcols_sites$exclude_cols))
   )
+  
+  dtcols_summarized <- c(
+    dtcols_summarized,
+    env_summarized_num = list(intersect(
+      dtcols_summarized$env_summarized,
+      names(in_env_summarized$dt_nopools)[
+        sapply(in_env_summarized$dt_nopools, class) %in% c("numeric", "integer")]))
+  )
+  
+  #------------ Summarize biodiversity -----------------
+  spdiv_summarized <- spdiv[!duplicated(paste(site, organism)), 
+                            c(dtcols_sites$group_cols,
+                              dtcols_summarized$div_summarized),
+                            with=FALSE] %>%
+    .[, mean_richness := as.integer(round(mean_richness))]
+  
+  #------------ Site-level merge -----------------
+  all_vars_summarized <- merge(
+    spdiv_summarized,
+    in_hydrocon_summarized[, c(dtcols_summarized$hydro_con_summarized, "site"), with=FALSE],
+    by="site", all.x=TRUE) %>%
+    merge(in_env_summarized$dt_nopools[, c(dtcols_summarized$env_summarized, "site"), with=FALSE],
+          by="site", all.x=TRUE) %>%
+    .[, c("campaign", "date") := NULL] %>%
+    .[!(site %in% dry_only_sites), ] %>%
+    .[, country := factor(
+      country,
+      levels = c("Finland", "France", "Hungary", "Czech", "Croatia", "Spain"))]
+  
+  return(list(
+    dt = all_vars_summarized,
+    cols = dtcols_summarized
+  ))
 }
 
 #------ plot_edna_biof_vs_sedi -------------------------------------------------
-# in_allvars_merged <- tar_read(allvars_merged)
+# in_allvars_sites <- tar_read(allvars_sites)
 
 #' @title Plot eDNA biofilm vs sediment
 #' @description This function creates two plots comparing richness and Gamma 
 #'     diversity between eDNA samples from biofilm and sediment, faceted by organism 
 #'     class and country.
-#' @param in_allvars_merged A list containing the merged data tables, specifically `in_allvars_merged$dt`.
+#' @param in_allvars_sites A list containing the merged data tables, specifically `in_allvars_sites$dt`.
 #' @return A list containing two ggplot objects: `richness` and `site_gamma`.
-plot_edna_biof_vs_sedi <- function(in_allvars_merged) {
-  allvars_edna <- setDT(in_allvars_merged$dt)[organism_class %in% c('dia', 'fun', 'bac'),] 
+plot_edna_biof_vs_sedi <- function(in_allvars_sites) {
+  allvars_edna <- setDT(in_allvars_sites$dt)[organism_class %in% c('dia', 'fun', 'bac'),] 
   allvars_edna[, edna_source := gsub('^[a-z]+_', '', organism)]
   
   #Compare diversity metric by source of edna (biofilm vs sediment), organism and country
@@ -4932,19 +4942,19 @@ plot_edna_biof_vs_sedi <- function(in_allvars_merged) {
 }
 
 #------ compute_cor_matrix -----------------------------------------------------
-# in_allvars_merged <- tar_read(allvars_merged)
+# in_allvars_sites <- tar_read(allvars_sites)
 
 #' @title Compute grouped correlation matrices
 #' @description This function computes correlation matrices for different sets of 
 #'     variables (hydrology, environment, diversity) and different groupings 
 #'     (overall, by organism, by country).
-#' @param in_allvars_merged A list containing the data table (`dt`) and a list 
+#' @param in_allvars_sites A list containing the data table (`dt`) and a list 
 #'     of column names (`cols`) categorized by their origin.
 #' @return A list containing five correlation matrices for different variable 
 #'     combinations and groupings, plus the original column list.
-compute_cor_matrix <- function(in_allvars_merged) {
-  dt <- in_allvars_merged$dt
-  cols_by_origin <- in_allvars_merged$cols
+compute_cor_matrix <- function(in_allvars_sites) {
+  dt <- in_allvars_sites$dt
+  cols_by_origin <- in_allvars_sites$cols
   
   #Pre-formatting: fill NA values and convert data types
   dt[is.na(noflow_period_dur), noflow_period_dur := 0]
@@ -5001,17 +5011,17 @@ compute_cor_matrix <- function(in_allvars_merged) {
 }
 
 #------ compute_cor_matrix_summarized ------------------------------------------
-# in_allvars_merged <- tar_read(allvars_merged)
+# in_allvars_summarized <- tar_read(allvars_summarized)
 
 #' @title Compute summarized correlation matrices
 #' @description This function computes correlation matrices using site-summarized 
 #'      data (across all sampling dates), analyzing relationships between 
 #'      hydrological, environmental, and diversity metrics at a broader scale.
-#' @param in_allvars_merged A list containing the summarized data table (`dt_summarized`) and column list (`cols`).
+#' @param in_allvars_summarized A list containing the summarized data table (`dt_summarized`) and column list (`cols`).
 #' @return A list of correlation matrices for summarized data.
-compute_cor_matrix_summarized <- function(in_allvars_merged) {
-  dt <- in_allvars_merged$dt_summarized
-  cols_by_origin <- in_allvars_merged$cols
+compute_cor_matrix_summarized <- function(in_allvars_summarized) {
+  dt <- in_allvars_summarized$dt
+  cols_by_origin <- in_allvars_summarized$cols
   
   # --- Calculate Correlations for each site summarized ---
   # 1. Overall Correlation (Hydro)
@@ -5263,7 +5273,7 @@ plot_cor_heatmaps <- function(in_cor_matrices,
 #          loadings = TRUE, loadings.colour = 'blue',
 #          loadings.label = TRUE, loadings.label.size = 5) + theme_bw()
 
-# in_allvars_dt <- tar_read(allvars_merged)$dt
+# in_allvars_dt <- tar_read(allvars_sites)$dt
 # by_date=F
 
 #' @title Ordinate local environmental data
@@ -5467,7 +5477,7 @@ create_ssn_preds <- function(in_network_path,
 # in_network_path = tar_read(network_ssnready_shp_list)
 # in_sites_path = tar_read(site_snapped_gpkg_list)
 # in_barriers_path = tar_read(barrier_snapped_gpkg_list)
-# in_allvars_dt= tar_read(allvars_merged)$dt
+# in_allvars_dt= tar_read(allvars_sites)$dt
 # in_local_env_pca = tar_read(local_env_pca)
 # in_hydrostats_net_hist = tar_read(hydrostats_net_hist)
 # in_pred_pts = NULL
@@ -5477,7 +5487,7 @@ create_ssn_preds <- function(in_network_path,
 
 # in_network_path = tar_read(network_ssnready_shp_list)
 # in_sites_path = tar_read(site_snapped_gpkg_list)
-# in_allvars_dt = tar_read(allvars_merged)$dt_summarized
+# in_allvars_dt = tar_read(allvars_summarized)$dt
 # in_local_env_pca = tar_read(local_env_pca_summarized)
 # in_barriers_path = tar_read(barrier_snapped_gpkg_list)
 # in_hydromod = tar_read(hydromod_comb_hist)
@@ -6005,7 +6015,7 @@ map_ssn_facets <- function(in_ssn,
 
 #------ map_ssn_summarized -----------------------------------------------------
 # in_ssn_summarized <- tar_read(ssn_eu_summarized)
-# in_allvars_merged <- tar_read(allvars_merged)
+# in_allvars_summarized <- tar_read(allvars_summarized)
 # in_organism_dt = tar_read(organism_dt)
 # verbose = T
 
@@ -6014,12 +6024,12 @@ map_ssn_facets <- function(in_ssn,
 #'      physical variables across the European SSN. It creates separate plots 
 #'      for each variable, faceted by country.
 #' @param in_ssn_summarized A list of SSN objects, typically for different organisms.
-#' @param in_allvars_merged A list containing a data table of all variables and column names.
+#' @param in_allvars_summarized A list containing a data table of all variables and column names.
 #' @param in_organism_dt A data table mapping organism codes to their labels.
 #' @param verbose A logical value to indicate whether to print progress messages.
 #' @return A named list of ggplot objects, combining maps of diversity and physical variables.
 map_ssn_summarized <- function(in_ssn_summarized,
-                               in_allvars_merged,
+                               in_allvars_summarized,
                                in_organism_dt,
                                verbose = T) {
   
@@ -6027,7 +6037,7 @@ map_ssn_summarized <- function(in_ssn_summarized,
   # create a data frame of all organism-diversity variable combinations
   div_map_params <- expand.grid(intersect(names(in_ssn_summarized), 
                                           in_organism_dt$organism),
-                                in_allvars_merged$cols$div_summarized,
+                                in_allvars_summarized$cols$div_summarized,
                                 stringsAsFactors = FALSE) %>%
     setDT %>%
     setnames(c('organism', 'divcol')) 
@@ -6053,8 +6063,8 @@ map_ssn_summarized <- function(in_ssn_summarized,
   
   
   #Plot every physical variable
-  physvars <- c(in_allvars_merged$cols$hydro_con_summarized,
-                in_allvars_merged$cols$env_summarized_num,
+  physvars <- c(in_allvars_summarized$cols$hydro_con_summarized,
+                in_allvars_summarized$cols$env_summarized_num,
                 'upstream_area_net')
   maps_physvars <- lapply(physvars, function(in_ptcolor_col) {
     if (verbose) {print(paste('Mapping', in_ptcolor_col))}
@@ -6115,7 +6125,7 @@ save_ssn_summarized_maps <- function(in_ssn_summarized_maps,
 #------ plot_drn_hydrodiv ------------------------------------------------------
 # in_sites_dt <- tar_read(sites_dt)
 # in_hydrocon_compiled <- tar_read(hydrocon_sites_compiled)
-# in_allvars_dt <- tar_read(allvars_merged)$dt
+# in_allvars_dt <- tar_read(allvars_sites)$dt
 # in_drn_dt = drn_dt
 # out_dir = file.path(resdir, 'figures')
 
@@ -6272,18 +6282,18 @@ plot_drn_hydrodiv <- function(in_hydrocon_compiled,
   ))
 }
 #------ check_diversity_dependence_on_habitat_volume ---------------------------
-#n_allvars_merged <- tar_read(allvars_merged)
+#n_allvars_sites <- tar_read(allvars_sites)
 
 #' @title Check correlation between alpha diversity and habitat volume
 #' @description Creates diagnostic scatter plots to examine the relationship 
 #'     between alpha diversity and local habitat volume metrics (e.g., depth, width, velocity),
 #'     faceted by country.
-#' @param in_allvars_merged A list containing a data.table of all merged variables.
+#' @param in_allvars_sites A list containing a data.table of all merged variables.
 #' @param alpha_var Character string: name of the alpha diversity column to use (e.g., "richness", "shannon").
 #' @return A list of ggplot objects showing the relationships for different organism groups.
-check_cor_div_habvol <- function(in_allvars_merged, alpha_var = "richness") {
+check_cor_div_habvol <- function(in_allvars_sites, alpha_var = "richness") {
   
-  dt <- copy(in_allvars_merged$dt)
+  dt <- copy(in_allvars_sites$dt)
   
   # Compute scaled habitat metrics
   dt[, avg_vol_miv := avg_depth_macroinvertebrates * average_wetted_width_m]
@@ -6357,7 +6367,7 @@ check_cor_div_habvol <- function(in_allvars_merged, alpha_var = "richness") {
 
 
 #------ plot_areadiv_scatter ---------------------------------------------------
-# in_dt=tar_read(allvars_merged)$dt_summarized
+# in_dt=tar_read(allvars_summarized)$dt
 # in_organism_dt <- tar_read(organism_dt)
 # save_plots=T
 # out_dir = figdir
@@ -6502,7 +6512,7 @@ plot_cor_hydrowindow <-  function(in_cor_dt, temporal_var_substr, response_var_l
 #                    'uQ90', 'oQ10', 'maxPQ', 'PmeanQ',
 #                    'STcon.*_directed', 'STcon.*_undirected')
 # temporal_var_substr <- 'DurD'
-# in_allvars_merged <- tar_read(allvars_merged)
+# in_allvars_sites <- tar_read(allvars_sites)
 # response_var = 'richness' #c('richness', 'invsimpson','Jtm1'),
 # colors_list = drn_dt$color
 # plot=T
@@ -6510,7 +6520,7 @@ plot_cor_hydrowindow <-  function(in_cor_dt, temporal_var_substr, response_var_l
 # in_organism_dt <- tar_read(organism_dt)
 # plot_name_suffix = ''
 # 
-# in_allvars_merged=tar_read(allvars_merged)
+# in_allvars_sites=tar_read(allvars_sites)
 # temporal_var_substr='DurD'
 # response_var=alpha_var_list
 # in_organism_dt = tar_read(organism_dt)
@@ -6523,7 +6533,7 @@ plot_cor_hydrowindow <-  function(in_cor_dt, temporal_var_substr, response_var_l
 #' @description Creates scatter plots of a biological response variable versus 
 #'      hydrological variables with linear model trend lines, 
 #'      faceted by organism and hydrological variable.
-#' @param in_allvars_merged A list containing a data table of all merged variables.
+#' @param in_allvars_sites A list containing a data table of all merged variables.
 #' @param in_organism_dt A data table mapping organism codes to their labels.
 #' @param temporal_var_substr A string to filter for specific hydrological variables (e.g., 'DurD').
 #' @param response_var A list containing strings specifying the biological response variables (e.g., 'richness').
@@ -6532,7 +6542,7 @@ plot_cor_hydrowindow <-  function(in_cor_dt, temporal_var_substr, response_var_l
 #' @param plot_name_suffix A string to append to the output filename.
 #' @param out_dir The output directory for the saved plot.
 #' @return A ggplot object of the scatter plot with linear model fits.
-plot_scatter_lm <-  function(in_allvars_merged, 
+plot_scatter_lm <-  function(in_allvars_sites, 
                              in_organism_dt,
                              temporal_var_substr, 
                              response_var,
@@ -6541,13 +6551,13 @@ plot_scatter_lm <-  function(in_allvars_merged,
                              plot_name_suffix="", 
                              out_dir) {
   
-  dt <- in_allvars_merged$dt
+  dt <- in_allvars_sites$dt
   x_cols <- grep(paste0('^', temporal_var_substr), names(dt), value=T) %>%
     .[seq(1, length(.), 2)]
   
   dt_melt <- melt(dt, 
                   id.vars=intersect(
-                    c(in_allvars_merged$cols$group_cols, response_var), 
+                    c(in_allvars_sites$cols$group_cols, response_var), 
                     names(dt)
                   ),
                   measure.vars=x_cols) 
@@ -7278,7 +7288,7 @@ save_ssn_div_hydrowindow_plots <- function(
 # (L2 regularization), and Elastic Net (a combination) can help prevent overfitting 
 # by penalizing model complexity. glmnet is a great package for this, and it's easily integrated with caret.
 
-# in_allvars_merged <- tar_read(allvars_merged)
+# in_allvars_sites <- tar_read(allvars_sites)
 # in_ssn_eu <- tar_read(ssn_eu)
 # in_cor_matrices <- tar_read(cor_matrices_list)
 # library(glmulti)
@@ -7292,8 +7302,8 @@ save_ssn_div_hydrowindow_plots <- function(
 #'
 #' @param in_ssn_eu A list containing the SSN object for macroinvertebrates.
 #'   Expected to have a structure like `in_ssn_eu$miv_nopools$ssn`.
-#' @param in_allvars_merged A list containing merged environmental and hydrological
-#'   variables. Expected to have a structure like `in_allvars_merged$cols$hydro_con`.
+#' @param in_allvars_sites A list containing merged environmental and hydrological
+#'   variables. Expected to have a structure like `in_allvars_sites$cols$hydro_con`.
 #' @param in_cor_matrices A list of correlation matrices. Expected to contain
 #'   `div` and `div_bydrn` for diversity correlations and `env_cols`.
 #' @param ssn_covtypes A data frame or list specifying SSN covariance types
@@ -7301,7 +7311,7 @@ save_ssn_div_hydrowindow_plots <- function(
 #'
 #' @return A list of various model outputs, including LME models, SSN models,
 #'   diagnostic plots, AIC values, and model data tables.
-model_miv_t <- function(in_ssn_eu, in_allvars_merged, 
+model_miv_t <- function(in_ssn_eu, in_allvars_sites, 
                         in_cor_matrices, ssn_covtypes) {
   
   #Subset SSN and create distance matrices-----
@@ -7312,7 +7322,7 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
     setorderv(c('country', 'site', 'campaign')) 
   
   hydro_candidates <- setdiff(
-    in_allvars_merged$cols$hydro_con,
+    in_allvars_sites$cols$hydro_con,
     c('doy', 'month', 'hy', 'reach_id', 'qsim', 'UID',
       'isflowing', 'reach_length', 'noflow_period',
       'noflow_period_dur', 'last_noflowdate', 'PrdD')
@@ -7809,7 +7819,7 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
 }
 
 #------ model_miv_yr -----------------------------------------------------------
-# in_allvars_merged <- tar_read(allvars_merged)
+# in_allvars_summarized <- tar_read(allvars_summarized)
 # in_ssn_eu_summarized <- tar_read(ssn_eu_summarized)
 # in_cor_matrices <- tar_read(cor_matrices_list_summarized)
 # tar_load(ssn_covtypes)
@@ -7829,7 +7839,7 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
 #'
 #' @param in_ssn_eu_summarized A list containing the summarized SSN object for
 #'   macroinvertebrates. Expected to have a structure like `in_ssn_eu_summarized$miv_nopools$ssn`.
-#' @param in_allvars_merged A list containing merged environmental and hydrological
+#' @param in_allvars_summarized A list containing merged environmental and hydrological
 #'   variables. This is used to define the list of candidate variables.
 #' @param in_cor_matrices A list of correlation matrices, used to check for
 #'   relationships between variables and alpha diversity.
@@ -7853,7 +7863,7 @@ model_miv_t <- function(in_ssn_eu, in_allvars_merged,
 #'     \item \strong{ssn_pred_best}: Augmented data for the "best" model.
 #'   }
 model_miv_yr <- function(in_ssn_eu_summarized,
-                         in_allvars_merged,
+                         in_allvars_summarized,
                          in_cor_matrices, 
                          ssn_covtypes,
                          scale_predictors = T,
@@ -7872,7 +7882,7 @@ model_miv_yr <- function(in_ssn_eu_summarized,
     setorderv(c('country', 'site')) 
   
   # Define candidate hydrological variables
-  hydro_candidates <- in_allvars_merged$cols$hydro_con_summarized
+  hydro_candidates <- in_allvars_summarized$cols$hydro_con_summarized
   
   #Scale predictor data (mean of 0 and SD of 1) -----
   if (scale_predictors) {
