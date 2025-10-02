@@ -1004,7 +1004,7 @@ analysis_targets <- list(
   )
   ,
   
-
+  
   
   # Run a first SSN with a single hydrological variable for each organism
   # to determine the top spatial covariance types
@@ -1036,7 +1036,7 @@ analysis_targets <- list(
       #Convert to named list by organism
       covtypes_by_organism <- selected_covtypes[, .(covtypes = list(covtypes)), 
                                                 by = organism]
-
+      
       #Attach covtypes to each setup
       model_setup_list <- list()
       for (div_index in alpha_var_list) {
@@ -1072,16 +1072,17 @@ analysis_targets <- list(
       in_response_var = c("invsimpson", "richness"),
       in_organism = c(
         "miv_nopools", "miv_nopools_ept", "miv_nopools_och",
-        'fun_sedi_nopools', 'fun_biof_nopools',
-        'dia_sedi_nopools', 'dia_biof_nopools',
-        'bac_sedi_nopools', 'bac_biof_nopools'
+        "fun_sedi_nopools", "fun_biof_nopools",
+        "dia_sedi_nopools", "dia_biof_nopools",
+        "bac_sedi_nopools", "bac_biof_nopools"
       )
     ),
-    names = c("in_response_var", "in_organism"),  # branch names will reflect both
+    names = c("in_response_var", "in_organism"),
+    
+    # fit models
     tar_target(
       ssn_div_hydrowindow,
       {
-        # Subset the models for this response_var × organism
         models_subset <- keep(
           ssn_div_models_to_run,
           function(x) x$response_var == in_response_var && x$organism == in_organism
@@ -1089,7 +1090,6 @@ analysis_targets <- list(
         
         future_lapply(models_subset, function(model_setup) {
           print(paste(in_organism, in_response_var, model_setup$hydro_var, sep = " - "))
-          
           model_ssn_hydrowindow(
             in_ssn = ssn_eu,
             organism = in_organism,
@@ -1110,7 +1110,7 @@ analysis_targets <- list(
     ),
     
     tar_target(
-      ssn_div_hydrowindow_formatted,
+      hydrowindow_perf_tables,
       {
         # Combine model metadata with results
         ssn_model_names <- do.call(rbind, ssn_div_models_to_run)[
@@ -1122,27 +1122,79 @@ analysis_targets <- list(
         names(ssnmodels)[ncol(ssnmodels)] <- "ssn_div_models"
         
         # Format per organism
-        format_ssn_hydrowindow(
+        prepare_hydrowindow_perf_table(
           in_ssnmodels = ssnmodels,
           in_organism = in_organism,
           in_covtype_selected = ssn_covtype_selected,
-          in_hydro_vars_dt = hydro_vars_dt
-        )
+          in_hydro_vars_dt = hydro_vars_dt)
       }
     ),
     
     tar_target(
+      hydrowindow_varcomp, 
+      get_hydrowindow_varcomp(
+        perf_dt = hydrowindow_perf_tables$best, 
+        nrow_pag = 2, 
+        ncol_pag = 3)
+    )
+    ,
+    
+    tar_target(
+      hydrowindow_emmeans,
+      get_hydrowindow_emmeans(
+        best_dt = hydrowindow_perf_tables$best, 
+        in_hydro_vars_dt = hydro_vars_dt) 
+    )
+    ,
+    
+    tar_target(
+      hydrowindow_emtrends,
+      get_hydrowindow_emtrends(
+        best_dt = hydrowindow_perf_tables$best, 
+        in_hydro_vars_dt = hydro_vars_dt) 
+    )
+    ,
+    
+    tar_target(
+      hydrowindow_best_preds,
+      get_hydrowindow_prediction(
+        best_dt = hydrowindow_perf_tables$best) 
+    )
+    ,
+    
+    tar_target(
+      hydrowindow_obs_preds_plot,
+      plot_hydrowindow_obs_preds(
+        preds = hydrowindow_best_preds,
+        resp_var = in_response_var) 
+    )
+    ,
+    
+    tar_target(
+      hydrowindow_x_preds_plot,
+      plot_hydrowindow_x_preds(
+        preds = hydrowindow_best_preds, 
+        best_dt = hydrowindow_best_preds
+      ) 
+    )
+    ,
+    
+    tar_target(
       ssn_div_hydrowindow_plots_paths,
       save_ssn_div_hydrowindow_plots(
-        in_ssn_div_hydrowindow_formatted = ssn_div_hydrowindow_formatted,
+        hydrowindw_perf_tables,
+        plot_varcomp = hydrowindow_varcomp,
+        plot_obs_preds = hydrowindow_obs_preds_plot,
+        plot_x_preds = hydrowindow_x_preds_plot,
+        plot_emmeans = hydrowindow_emmeans,
+        plot_emtrends = hydrowindow_emtrends,
         in_organism = in_organism,
         in_response_var = in_response_var,
-        out_dir = figdir
-      )
+        out_dir = figdir) 
     )
   )
   ,
-
+  
   ##############################################################################
   # MODEL SITES SUMMARIZED
   ##############################################################################
