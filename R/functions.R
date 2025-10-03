@@ -338,22 +338,22 @@ compute_ecdf_multimerge <- function(in_dt, ecdf_columns, grouping_columns,
 
 #------ identify_drywet6mo   ------------------------------------------------
 identify_drywet6mo <- function(in_dt, flow_col='isflowing', jday_col = 'doy') {
-  
+
   #Add 3 months before and after record to avoid having NAs on the edges
   fill_dt <- data.table(rep(NA,91)) %>% setnames(flow_col)
-  
+
   in_dt <- rbind(fill_dt,
-                 rbind(in_dt, fill_dt, 
+                 rbind(in_dt, fill_dt,
                        fill=T),
                  fill=T)
-  
+
   #Computer total number of no-flow days in the 6-month period centered around
   #each day in the record
   in_dt <- in_dt[, noflow_6morollsum := frollsum(
     isflowing==0,
     n=183, align='center', hasNA=T, na.rm=T)] %>%
     .[ 92:(.N-91), ]
-  
+
   #Find the Julian day with the most number of no-flow days on interannual average
   driest_6mocenter <- in_dt[get(jday_col) < 366 #can lead to artefacts if drying was infrequent but occurred during that time
                             , as.Date(
@@ -361,21 +361,21 @@ identify_drywet6mo <- function(in_dt, flow_col='isflowing', jday_col = 'doy') {
                                 which.max(.SD[, mean(noflow_6morollsum, na.rm=T),by=jday_col]$V1)],
                               origin=as.Date("1970-01-01"))
   ]
-  
+
   #Identify the 6-month period centered on that julian day as the dry period
   driest_6moperiod <- data.table(
     dry_6mo = T,
     jday = as.numeric(format(
       seq(driest_6mocenter-91, driest_6mocenter+91, by='day'), '%j'))
   )
-  
+
   #Identify the other julian days as the wet period
-  in_dt <- merge(in_dt, driest_6moperiod, 
+  in_dt <- merge(in_dt, driest_6moperiod,
                  by.x=jday_col, by.y='jday', all.x=T) %>%
     .[is.na(dry_6mo), dry_6mo := F]
-  
+
   in_dt[, noflow_6morollsum := NULL]
-  
+
   return(in_dt[order(date),])
 }
 
@@ -532,14 +532,15 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
       na.rm=TRUE)
     
     
-    #Compute annual timing and interannual variability
+    #Compute annual timing and interannual variability--------------------------
     hydromod_dt_yr <- hydromod_dt_sites[, list(
       DurD_yr = sum(isflowing==0)/.N,
       FreD_yr = length(unique(noflow_period[!is.na(noflow_period)])),
       FstDrE = .SD[isflowing==0, min(doy, na.rm=T)],
       meanConD_yr = .SD[!duplicated(noflow_period), mean(noflow_period_dur, na.rm=T)]             
     ), by=.(reach_id, year = as.integer(format(date, '%Y')))] %>%
-      .[is.infinite(FstDrE), FstDrE := NA]
+      .[is.infinite(FstDrE), FstDrE := 365] %>% #For sites that don't dry, set it to 365
+      .[is.na(meanConD_yr), meanConD_yr := 0]
     
     
     #CV of annual number of no-flow days
@@ -590,15 +591,37 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
     
     #SD6: seasonal predictability of no-flow events (Gallart et al. 2012)
     #Identify contiguous six months with the most zero-flow days for computing Sd6
-    hydromod_dt_sites <- hydromod_dt_sites[, identify_drywet6mo(in_dt=.SD), 
-                                           by=.(reach_id)]
+    # After running identify_drywet6mo()
+    daily_classified <- hydromod_dt_sites[, identify_drywet6mo(.SD), by = reach_id]
     
-    base_dt <- hydromod_dt_sites[, ym := format(date, '%Y%m')] %>%
-      .[, any(!is.na(noflow_period)), 
-        by=.(year = as.integer(format(date, '%Y')), ym, dry_6mo, reach_id)] %>%
-      .[, .(n_months = sum(V1, na.rm=TRUE)), by=.(year, dry_6mo, reach_id)] %>%
-      dcast(year+reach_id~dry_6mo, value.var = 'n_months')
+    # Add month
+    daily_classified[, ym := format(date, "%Y%m")]
     
+    # Collapse: majority vote (or any rule you want)
+    monthly_classified <- daily_classified[
+      , .(dry_6mo = mean(dry_6mo, na.rm = TRUE) > 0.5),  # >50% of days in dry period
+      by = .(reach_id, ym)
+    ] %>%
+      .[, year := as.integer(substr(ym, 1, 4))]
+    
+    # For each month, check if no-flow occurred
+    hydromod_dt_sites[, ym := format(date, "%Y%m")]
+    noflow_by_month <- hydromod_dt_sites[
+      , .(has_noflow = any(!is.na(noflow_period))), 
+      by = .(reach_id, ym)]
+    
+    # Join no-flow with dry/wet classification
+    monthly_dt <- merge(noflow_by_month, monthly_classified,
+                        by = c('reach_id', 'ym'), all.x=T)
+    
+    # Count number of months with no-flow per year & season
+    base_dt <- monthly_dt[
+      , .(n_months = sum(has_noflow, na.rm = TRUE)), 
+      by = .(year, dry_6mo, reach_id)
+    ] %>%
+      dcast(year + reach_id ~ dry_6mo, value.var = "n_months", fill = 0)
+    
+    #Compute SD6
     rolling_sd6 <- function(dt, k) {
       colname <- paste0("sd6_", k, "yrpast")
       
@@ -607,7 +630,7 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
                       FUN = function(yrs) {
                         subdt <- .SD[year %in% yrs]   # only this reach_id’s rows
                         val <- 1 - subdt[, (mean(`FALSE`, na.rm=TRUE) / mean(`TRUE`, na.rm=TRUE))]
-                        ifelse(is.na(val) | mean(`TRUE`, na.rm=TRUE) == 0, 1, val)
+                        fifelse(is.na(val) | mean(`TRUE`, na.rm=TRUE) == 0, 1, val)
                       }),
          by = reach_id] 
     }
@@ -1093,7 +1116,8 @@ compute_cor_matrix_inner <- function(in_dt, group_vars = NULL,
   # Compute correlation within each group (or overall if group_vars is NULL)
   cor_results <- in_dt[, {
     if (single_group) {
-      cor_result <- Hmisc::rcorr(as.matrix(.SD[, x_cols, with=FALSE]), type = correlation_type)
+      cor_result <- Hmisc::rcorr(as.matrix(.SD[, x_cols, with=FALSE]), 
+                                 type = correlation_type)
     } else {
       cor_result <- Hmisc::rcorr(as.matrix(.SD[, x_cols, with=FALSE]),
                                  as.matrix(.SD[, y_cols, with=FALSE]),
@@ -4444,7 +4468,7 @@ compile_hydrocon_sites_country <- function(in_hydrostats_sub_comb,
 }
 
 #------ summarize_sites_hydrocon --------------------------------------------
-in_hydrocon_compiled <- tar_read(hydrocon_sites_compiled)
+# in_hydrocon_compiled <- tar_read(hydrocon_sites_compiled)
 
 
 #' @title Summarize hydrological and connectivity data 
@@ -4458,10 +4482,10 @@ in_hydrocon_compiled <- tar_read(hydrocon_sites_compiled)
 summarize_sites_hydrocon <- function(in_hydrocon_compiled
                                      #, date_range
 ) {
-  hydrocon_summmarized <- in_hydrocon_compiled[
+  hydrocon_summarized <- in_hydrocon_compiled[
     #(date >= min(date_range)) &   (date <= max(date_range))
     , list( #`:=`
-      upstream_area_net = upstream_area_net,
+      upstream_area_net = .SD[1, upstream_area_net],
       DurD_samp = sum(isflowing==0)/.N, #Total number of no-flow days 
       DurD3650past = .SD[.N, DurD3650past]/3650,
       PDurD365past = .SD[.N, PDurD365past],
@@ -4470,9 +4494,25 @@ summarize_sites_hydrocon <- function(in_hydrocon_compiled
       PFreD365past = .SD[.N, PFreD365past],
       DurD_max_samp = nafill(as.integer(max(noflow_period_dur, na.rm=T)), fill=0), #Maximum duration of no-flow period
       DurD_avg_samp = nafill(.SD[!duplicated(noflow_period), mean(noflow_period_dur, na.rm=T)], fill=0), #AVerage duration of no-flow period (same as DurD/FreD)
+      DurD_yr = .SD[1, DurD_yr],
+      FreD_yr = .SD[1, FreD_yr],
+      FstDrE = .SD[1, FstDrE],
+      meanConD_yr = .SD[1, meanConD_yr],
+      DurD_CV10yrpast = .SD[.N, DurD_CV10yrpast],
+      DurD_CV30yrpast = .SD[.N, DurD_CV30yrpast],
+      FreD_CV10yrpast = .SD[.N, FreD_CV10yrpast],
+      FreD_CV30yrpast = .SD[.N, FreD_CV30yrpast],
+      meanConD_CV10yrpast = .SD[.N, meanConD_CV10yrpast],
+      meanConD_CV30yrpast = .SD[.N, meanConD_CV30yrpast],
+      FstDrE_SD10yrpast = .SD[.N, FstDrE_SD10yrpast],
+      FstDrE_SD30yrpast = .SD[.N, FstDrE_SD30yrpast],
+      sd6_10yrpast = .SD[.N, sd6_10yrpast],
+      sd6_30yrpast = .SD[.N, sd6_30yrpast], 
       RelF_avg_samp = mean(relF),
       RelF_min_samp = min(relF),
       relF3650past = .SD[.N, relF3650past],
+      relF7mean_yrmin_cv10yrpast = .SD[.N, relF7mean_yrmin_cv10yrpast],
+      relF7mean_yrmin_cv30yrpast = .SD[.N, relF7mean_yrmin_cv30yrpast],
       qsim_avg_samp = mean(qsim),
       Pqsim_avg_samp = mean(Pqsim),
       PmeanQ10past_max_samp = max(PmeanQ10past),
@@ -4484,19 +4524,8 @@ summarize_sites_hydrocon <- function(in_hydrocon_compiled
       #PDurdmax_samp = 
     ), by=.(site, UID)]
   
-  return(hydrocon_summmarized)
+  return(hydrocon_summarized)
 }
-
-#Summarized----
-#Annual DurCV
-#Annual FreCV
-#Mean event duration 
-#CV of event duration
-#Average No-flow start date - Julian day of the first drying event
-#SD No-flow start date - Julian day of the first drying event
-#SD6 (Gallart et al. 2012)
-#CV RelF
-#CV mean distance
 
 #------ summarize_network_hydrostats -------------------------------------------
 # in_country = 'Croatia'
@@ -4722,9 +4751,7 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path) {
 # in_spdiv_local <- tar_read(spdiv_local)
 # in_spdiv_drn <- NULL
 # in_hydrocon_compiled <- tar_read(hydrocon_sites_compiled)
-# in_hydrocon_summarized <- tar_read(hydrocon_sites_summarized)
 # in_env_dt <- tar_read(env_dt)
-# in_env_summarized <- tar_read(env_summarized)
 # in_genal_upa = tar_read(genal_sites_upa_dt)
 
 #' @title Merge all variables for sites (campaign-level)
@@ -4740,7 +4767,7 @@ merge_allvars_sites <- function(in_spdiv_local,
                                 in_env_dt,
                                 in_genal_upa) {
   
-  #Prepare data  ---------------------------------------------------------------
+  # Prepare data  ---------------------------------------------------------------
   setDT(in_env_dt)
   
   #Fill basin area NAs in environmental data for Genal basin in Spain
@@ -4775,7 +4802,7 @@ merge_allvars_sites <- function(in_spdiv_local,
                    "min_wetted_width", "left_river_bank_slope", "right_river_bank_slope",
                    "qsim")
   
-  dtcols_sites <- list(
+  dtcols <- list(
     div = setdiff(names(spdiv), 
                   c(group_cols, exclude_cols,
                     names(in_hydrocon_compiled), names(in_env_dt))),
@@ -4790,9 +4817,9 @@ merge_allvars_sites <- function(in_spdiv_local,
   )
   
   # numeric environmental columns
-  dtcols_sites <- c(
-    dtcols_sites,
-    env_num = list(intersect(dtcols_sites$env,
+  dtcols <- c(
+    dtcols,
+    env_num = list(intersect(dtcols$env,
                              names(in_env_dt)[
                                sapply(in_env_dt, class) %in% c("numeric", "integer")]))
   )
@@ -4820,6 +4847,11 @@ merge_allvars_sites <- function(in_spdiv_local,
 }
 
 #------ merge_allvars_summarized ----------------------------------------------
+# in_spdiv_local <- tar_read(spdiv_local)
+# in_hydrocon_summarized <- tar_read(hydrocon_summarized)
+# in_env_summarized <- tar_read(env_summarized)
+# dry_only_sites <- tar_read(allvars_sites)$dry_only_sites
+# dtcols_sites <- tar_read(allvars_sites)$cols
 
 #' @title Merge all variables summarized by site
 #' @description Summarizes biodiversity across campaigns and merges with
@@ -4833,56 +4865,60 @@ merge_allvars_sites <- function(in_spdiv_local,
 #' @return A list containing:
 #'   \item{dt_summarized}{Merged site-level summarized data}
 #'   \item{cols}{List of relevant column vectors for summarized merging}
-merge_allvars_summarized <- function(spdiv,
+merge_allvars_summarized <- function(in_spdiv_local,
                                      in_hydrocon_summarized,
                                      in_env_summarized,
                                      dry_only_sites,
                                      dtcols_sites) {
   
   #----------------- Column definitions (summarized) -----------------
-  dtcols_summarized <- list(
+  dtcols <- list(
     div_summarized = c("mean_richness", "mean_expshannon", "mean_invsimpson",
                        "JBDtotal", "JRepl", "JRichDif", "JRepl/BDtotal", "JRichDif/BDtotal",
                        "RBDtotal", "RRepl", "RRichDif", "RRepl/BDtotal", "RRichDif/BDtotal",
                        "Gamma", "Beta", "mAlpha"),
     hydro_con_summarized = setdiff(names(in_hydrocon_summarized), 
-                                   c(dtcols_sites$group_cols, dtcols_sites$exclude_cols,
-                                     names(spdiv))),
-    env_summarized = setdiff(c(names(in_env_summarized$dt_nopools), "upstream_area_net"),
-                             c(dtcols_sites$group_cols, dtcols_sites$exclude_cols))
+                                   c(dtcols_sites$group_cols, 
+                                     dtcols_sites$exclude_cols,
+                                     names(in_spdiv_local))),
+    env_summarized = setdiff(c(names(in_env_summarized$dt_nopools),
+                               "upstream_area_net"),
+                             c(dtcols_sites$group_cols, 
+                               dtcols_sites$exclude_cols))
   )
   
-  dtcols_summarized <- c(
-    dtcols_summarized,
+  dtcols <- c(
+    dtcols,
     env_summarized_num = list(intersect(
-      dtcols_summarized$env_summarized,
+      dtcols$env_summarized,
       names(in_env_summarized$dt_nopools)[
         sapply(in_env_summarized$dt_nopools, class) %in% c("numeric", "integer")]))
   )
   
   #------------ Summarize biodiversity -----------------
-  spdiv_summarized <- spdiv[!duplicated(paste(site, organism)), 
-                            c(dtcols_sites$group_cols,
-                              dtcols_summarized$div_summarized),
-                            with=FALSE] %>%
+  spdiv_summarized <- in_spdiv_local[
+    !duplicated(paste(site, organism)), 
+    intersect(c(dtcols_sites$group_cols, dtcols$div_summarized),
+           names(in_spdiv_local)), 
+    with=FALSE] %>%
     .[, mean_richness := as.integer(round(mean_richness))]
   
   #------------ Site-level merge -----------------
-  all_vars_summarized <- merge(
-    spdiv_summarized,
-    in_hydrocon_summarized[, c(dtcols_summarized$hydro_con_summarized, "site"), with=FALSE],
-    by="site", all.x=TRUE) %>%
-    merge(in_env_summarized$dt_nopools[, c(dtcols_summarized$env_summarized, "site"), with=FALSE],
+  all_vars_merged <- spdiv_summarized %>%
+    merge(in_hydrocon_summarized[, c(dtcols$hydro_con_summarized, 
+                                     "upstream_area_net", "site"), with=FALSE],
+          by="site", all.x=TRUE) %>%
+    merge(in_env_summarized$dt_nopools[, c(dtcols$env_summarized, "site"), with=FALSE],
           by="site", all.x=TRUE) %>%
     .[, c("campaign", "date") := NULL] %>%
     .[!(site %in% dry_only_sites), ] %>%
-    .[, country := factor(
-      country,
-      levels = c("Finland", "France", "Hungary", "Czech", "Croatia", "Spain"))]
+    .[, country := factor(country,
+                          levels = c("Finland", "France", "Hungary", 
+                                     "Czech", "Croatia", "Spain"))]
   
   return(list(
-    dt = all_vars_summarized,
-    cols = dtcols_summarized
+    dt = all_vars_merged,
+    cols = dtcols
   ))
 }
 
@@ -5026,7 +5062,7 @@ compute_cor_matrix_summarized <- function(in_allvars_summarized) {
   # --- Calculate Correlations for each site summarized ---
   # 1. Overall Correlation (Hydro)
   cor_hydro <- compute_cor_matrix_inner(
-    dt,
+    in_dt = dt,
     x_cols = c(cols_by_origin$hydro_con_summarized),
     exclude_diagonal = FALSE) 
   

@@ -702,7 +702,8 @@ analysis_targets <- list(
   
   tar_target(
     env_summarized,
-    summarize_env(in_env_dt = env_dt)
+    summarize_env(in_env_dt = env_dt,
+                  in_genal_upa = genal_sites_upa_dt)
   )
   ,
   
@@ -749,11 +750,9 @@ analysis_targets <- list(
   tar_target(
     allvars_summarized,
     merge_allvars_summarized(
-      spdiv = spdiv_local,
-      in_hydrocon_compiled = hydrocon_sites_compiled,
+      in_spdiv_local = spdiv_local,
       in_hydrocon_summarized = hydrocon_sites_summarized,
       in_env_summarized = env_summarized,
-      in_genal_upa = genal_sites_upa_dt,
       dry_only_sites = allvars_sites$dry_only_sites,
       dtcols_sites = allvars_sites$cols
     )
