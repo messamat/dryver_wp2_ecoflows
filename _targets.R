@@ -717,7 +717,7 @@ analysis_targets <- list(
                                     level = 'local'),
                        by=country]
     }) %>%
-      rbindlist
+      rbindlist(fill=T)
   )
   ,
   
@@ -1250,50 +1250,50 @@ analysis_targets <- list(
     save_ssn_summarized_maps(in_ssn_summarized_maps = ssn_summarized_maps,
                              out_dir = figdir) 
   )
-  ,
-  
-  tar_target(
-    ssn_mods_miv_yr,
-    model_miv_yr(in_ssn_eu_summarized = ssn_eu_summarized,
-                 in_allvars_summarized = allvars_summarized,
-                 in_cor_matrices = cor_matrices_list_summarized,
-                 ssn_covtypes = ssn_covtypes)
-  ),
-  
-  
-  tar_target(
-    ssn_mods_miv_yr_diagnose,
-    diagnose_ssn_mod(in_ssn_mods = ssn_mods_miv_yr,
-                     response_var_label = 'Mean richness',
-                     write_plots = T,
-                     out_dir = figdir)
-  ),
-  
-  tar_target(
-    model_selection_table_path,
-    fwrite(ssn_mods_miv_yr$model_selection_table,
-           file.path(resdir, paste0('ssn_mods_miv_yr_model_selection_table_',
-                                    format(Sys.Date(), '%Y%m%d'),
-                                    '.csv')
-           )
-    )
-  ),
-  
-  #Compute statistics for two horizons: 2041-2070 and 2071-2100
-  tar_target(
-    ssn_preds,
-    predict_ssn_mod(in_ssn_mods = ssn_mods_miv_yr,
-                    proj_years = c(seq(1990,2020), seq(2040, 2099))
-    )
-  ),
-  
-  tar_target(
-    ssn_proj_maps,
-    map_ssn_mod(in_ssn = ssn_eu_summarized,
-                in_ssn_mods = ssn_mods_miv_yr,
-                in_ssn_preds = ssn_preds,
-                out_dir = figdir)
-  )
+  # ,
+  # 
+  # tar_target(
+  #   ssn_mods_miv_yr,
+  #   model_miv_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+  #                in_allvars_summarized = allvars_summarized,
+  #                in_cor_matrices = cor_matrices_list_summarized,
+  #                ssn_covtypes = ssn_covtypes)
+  # ),
+  # 
+  # 
+  # tar_target(
+  #   ssn_mods_miv_yr_diagnose,
+  #   diagnose_ssn_mod(in_ssn_mods = ssn_mods_miv_yr,
+  #                    response_var_label = 'Mean richness',
+  #                    write_plots = T,
+  #                    out_dir = figdir)
+  # ),
+  # 
+  # tar_target(
+  #   model_selection_table_path,
+  #   fwrite(ssn_mods_miv_yr$model_selection_table,
+  #          file.path(resdir, paste0('ssn_mods_miv_yr_model_selection_table_',
+  #                                   format(Sys.Date(), '%Y%m%d'),
+  #                                   '.csv')
+  #          )
+  #   )
+  # ),
+  # 
+  # #Compute statistics for two horizons: 2041-2070 and 2071-2100
+  # tar_target(
+  #   ssn_preds,
+  #   predict_ssn_mod(in_ssn_mods = ssn_mods_miv_yr,
+  #                   proj_years = c(seq(1990,2020), seq(2040, 2099))
+  #   )
+  # ),
+  # 
+  # tar_target(
+  #   ssn_proj_maps,
+  #   map_ssn_mod(in_ssn = ssn_eu_summarized,
+  #               in_ssn_mods = ssn_mods_miv_yr,
+  #               in_ssn_preds = ssn_preds,
+  #               out_dir = figdir)
+  # )
 )
 
 list(preformatting_targets, mapped_hydrotargets, 

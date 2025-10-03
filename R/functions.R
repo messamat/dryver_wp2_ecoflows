@@ -1829,7 +1829,7 @@ read_envdt <- function(in_env_data_path_annika,
 #' @details
 #' - Fills missing sampling dates from eDNA metadata.
 #' - Splits running IDs into site + campaign when needed.
-#' - Removes bacteria pool samples (keeps separate `_nopools` tables).
+#' - Removes pool samples (keeps separate `_nopools` tables).
 #' - Corrects a few known typos in dates (e.g., fungi 2012 → 2021).
 #'
 read_biodt <- function(path_list, in_metadata_edna, 
@@ -2000,8 +2000,8 @@ read_biodt <- function(path_list, in_metadata_edna,
 }
 
 #------ calc_spdiv -------------------------------------------------------------
-# in_country <- 'Croatia'
-# in_biodt <- tar_read(bio_dt)[['dia_sedi']][country == in_country,]
+# in_country <- 'Czech'
+# in_biodt <- tar_read(bio_dt)[['dia_biof']][country == in_country,]
 # in_metacols <- metacols
 # level='local'
 
@@ -2061,53 +2061,63 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
   #Set order
   setorderv(in_biodt, c('campaign', 'site'))
   
-  #Compute and partition taxonomic gamma diversity 
+  #Compute and partition taxonomic gamma diversity -----------------------------
   #between alpha and beta for the overall period, for individual sites
   #and for the metacom
-  spxp <- as.matrix(in_biodt[,-metacols_sub, with=F])
+  spxp <- as.matrix(in_biodt[, ..spcols])
   bio_structure <- data.frame(space = as.factor(in_biodt$site),
                               time = as.factor(in_biodt$campaign))
-  z = rowSums(spxp > 0)
-  decomp <- try(HierAnodiv(spxp = spxp[z>0,], 
-                           structure = bio_structure[z>0,], 
-                           phy = NULL, weight = NULL, check = T, q = 1))
+  
+  #Only compute decomp if there is variation in the species matrix
+  all_sites <- unique(in_biodt$site)
+  
+  if (any(rowSums(spxp > 0) > 0) && 
+      ncol(spxp[, colSums(spxp) > 0, drop=FALSE]) >= 2) {
+    decomp <- try(HierAnodiv(spxp = spxp[rowSums(spxp > 0) > 0,], 
+                             structure = bio_structure[rowSums(spxp > 0) > 0,], 
+                             phy = NULL, weight = NULL, check = TRUE, q = 1)) 
+    localdiv_decomp <- as.data.table(decomp$tab_by_site) %>%
+        setnames(c('nsite'), 'ncampaigns')
+    localdiv_decomp$site <- unique(as.character(bio_structure[rowSums(spxp > 0) > 0,]$space))
+    
+    # Add missing sites with NA
+    missing_sites <- setdiff(all_sites, localdiv_decomp$site)
+    if (length(missing_sites) > 0) {
+      na_rows <- data.table(
+        site = missing_sites,
+        ncampaigns = NA,
+        Gamma = 0,
+        Beta = 0,
+        mAlpha = 0
+      )
+      localdiv_decomp <- rbindlist(list(localdiv_decomp, na_rows), use.names = TRUE, fill = TRUE)
+    }
+    
+  } else {
+    # No variation -> all sites with NA
+    localdiv_decomp <- data.table(
+      site = all_sites,
+      ncampaigns = NA,
+      Gamma = 0,
+      Beta = 0,
+      mAlpha = 0
+    )
+  }
   
   if (level == 'local') {
-    #Compute species richness
+    #Compute species richness --------------------------------------------------
     biodt_div <-in_biodt[, list(richness = rowSums(.SD > 0)
     ), by=.(site, campaign, date, organism), .SDcols = spcols] %>%
       .[, mean_richness := mean(richness), by=site]
     
-    #Keep only sites x campaigns with species
-    biodt_copy <- merge(in_biodt, 
-                        biodt_div[mean_richness>0, .(site, campaign)],
-                        by=c('site', 'campaign'),
-                        all.x = F
-    )
+    biodt_copy <- copy(in_biodt)
     
-    #Fourth-root transform data - DO NOT TRANSFORM DATA IN THE END
-    # biodt_copy[, (spcols) := lapply(.SD, function(x) x^(1/4)), 
-    #            .SDcols = spcols]
-    #Example of publication that 4th-root transforms:
-    #Garcıa-Roger et al. (2011). Aquatic Sciences 73, 567–579. doi:10.1007/S00027-011-0218-3
-    #Elias et al. (2015). Marine and Freshwater Research, 2015, 66, 469–480 http://dx.doi.org/10.1071/MF13312
-    
-    # ggplot(biodt_melt, aes(x=(value^(1/4)))) +
-    #   geom_histogram() +
-    #   scale_x_continuous() +
-    #   facet_wrap(~country)
-    # 
-    # ggplot(biodt_melt, aes(x=log10(value+1))) +
-    #   geom_histogram() +
-    #   scale_x_continuous() +
-    #   facet_wrap(~country)
-    
-    #Compute invsimpson Index and inverse Simpson (alpha diversity) by site x time step
+    #Compute exp shannon and inverse Simpson (alpha diversity) by site x time step -----------------
     sha_simp <- biodt_copy[, list(
       campaign = campaign,
       site = site,
-      expshannon = exp(vegan::diversity(as.matrix(.SD), index = "shannon")),
-      invsimpson = vegan::diversity(as.matrix(.SD), index = "invsimpson")
+      expshannon = ifelse(rowSums(.SD) == 0, 0, exp(vegan::diversity(as.matrix(.SD), index = "shannon"))),
+      invsimpson = ifelse(rowSums(.SD) == 0, 0, vegan::diversity(as.matrix(.SD), index = "invsimpson"))
     ), .SDcols = spcols] %>%
       .[is.infinite(invsimpson), invsimpson := 0]  %>%
       .[, `:=`(
@@ -2115,22 +2125,72 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
         mean_invsimpson = mean(invsimpson)
       ), by=site]
     
-    #Compute nestedness and turnover based on temporal beta diversity
-    multicampaign_sites <- biodt_copy[, .N, by=site][N>1, site]
-    J_richrepl <- biodt_copy[site %in% multicampaign_sites,
-                             comp_richrepl_inner(dt = .SD, spcols = spcols,
-                                                 beta_div_coef = 'J', quant=F),
-                             by=site]
-    R_richrepl <- biodt_copy[site %in% multicampaign_sites,
-                             comp_richrepl_inner(dt = .SD, spcols = spcols,
-                                                 beta_div_coef = 'J', quant=T),
-                             by=site]
+    #Compute nestedness and turnover based on temporal beta diversity-----------
+    # Identify sites with multiple campaigns
+    multicampaign_sites <- biodt_copy[, .N, by = site][N > 1, site]
     
-    #Format local diversity decomposition
-    localdiv_decomp <- as.data.table(decomp$tab_by_site) %>%
-      setnames(c('nsite'), 'ncampaigns')
-    localdiv_decomp[, site := unique(biodt_copy$site)]
+    # Number of species per site
+    site_stats <- biodt_copy[site %in% multicampaign_sites,
+                             .(n_species = sum(colSums(.SD) > 0)), by = site, .SDcols = spcols]
     
+    valid_sites <- site_stats[n_species >= 2, site]
+    zero_sites  <- site_stats[n_species < 2, site]
+    
+    # Compute comp_richrepl_inner for valid sites
+    J_list <- lapply(valid_sites, function(s) {
+      sub_dt <- biodt_copy[site == s]
+      out <- comp_richrepl_inner(sub_dt, spcols = spcols, beta_div_coef = 'J', quant = FALSE)
+      out[, site := s]
+      out
+    })
+    R_list <- lapply(valid_sites, function(s) {
+      sub_dt <- biodt_copy[site == s]
+      out <- comp_richrepl_inner(sub_dt, spcols = spcols, beta_div_coef = 'J', quant = TRUE)
+      out[, site := s]
+      out
+    })
+    
+    # Combine valid sites
+    J_valid <- rbindlist(J_list, use.names = TRUE, fill = TRUE)
+    R_valid <- rbindlist(R_list, use.names = TRUE, fill = TRUE)
+    
+    # Fill zeros for zero-species sites using same column names as valid sites
+    if (length(zero_sites) > 0) {
+      zero_template_J <- J_valid[0]  # empty DT with correct column names
+      J_zero <- rbindlist(lapply(zero_sites, function(s) {
+        sub_dt <- biodt_copy[site == s, .(site, campaign)]
+        zero_dt <- zero_template_J[rep(1, nrow(sub_dt))]
+        zero_dt[, names(zero_dt) := 0]
+        zero_dt[, site := sub_dt$site]
+        zero_dt[, campaign := sub_dt$campaign]
+        zero_dt
+      }))
+      
+      zero_template_R <- R_valid[0]
+      R_zero <- rbindlist(lapply(zero_sites, function(s) {
+        sub_dt <- biodt_copy[site == s, .(site, campaign)]
+        zero_dt <- zero_template_R[rep(1, nrow(sub_dt))]
+        zero_dt[, names(zero_dt) := 0]
+        zero_dt[, site := sub_dt$site]
+        zero_dt[, campaign := sub_dt$campaign]
+        zero_dt
+      }))
+      
+      # Combine
+      J_richrepl <- rbindlist(list(J_valid, J_zero), use.names = TRUE, fill = TRUE)
+      R_richrepl <- rbindlist(list(R_valid, R_zero), use.names = TRUE, fill = TRUE)
+    } else {
+      J_richrepl <- J_valid
+      R_richrepl <- R_valid
+    }
+    
+    # Optional: sort
+    setorderv(J_richrepl, "site")
+    setorderv(R_richrepl, "site")
+    
+    
+    
+    #Merge all metrics ---------------------------------------------------------
     out_dt <- mergeDTlist(
       list(biodt_div, sha_simp, J_richrepl, R_richrepl), 
       by=c('site', 'campaign'), all=T, sort = T, set_suffix=F) %>%
@@ -2142,23 +2202,35 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
     out_dt[, organism_class := gsub('_[a-z]+', '', organism)]
     
   } else if (level == 'regional') {
-    nsites <- nrow(decomp$tab_by_site) #Number of sites
-    nsteps <- max(decomp$tab_by_site[,'nsite']) #Number of sampling campaigns
+    nsites <- if(!is.null(decomp)) nrow(decomp$tab_by_site) else 1
+    nsteps <- if(!is.null(decomp)) max(decomp$tab_by_site[,'nsite']) else 1
     
-    out_dt <- t(decomp[[1]]) %>%
-      data.table %>%
-      setnames(c('Gamma', 'Beta1', 'Beta2in1', 'mAlpha'),
-               paste0(c('gamma', 'beta_s', 'beta_t_s', 'malpha'), '_drn')
-      ) %>% 
-      .[, `:=`(organism = in_biodt[1, .(organism)][[1]],
-               beta_s_drn_std = (beta_s_drn-1)/(nsites-1),
-               beta_t_s_drn_std = (beta_t_s_drn-1)/(nsteps-1) 
-      )] 
+    if (!is.null(decomp)) {
+      out_dt <- t(decomp[[1]]) %>%
+        data.table %>%
+        setnames(c('Gamma', 'Beta1', 'Beta2in1', 'mAlpha'),
+                 paste0(c('gamma', 'beta_s', 'beta_t_s', 'malpha'), '_drn')
+        ) %>% 
+        .[, `:=`(organism = in_biodt[1, .(organism)][[1]],
+                 beta_s_drn_std = (beta_s_drn-1)/(nsites-1),
+                 beta_t_s_drn_std = (beta_t_s_drn-1)/(nsteps-1) 
+        )] 
+    } else {
+      #No species -> all zeros
+      out_dt <- data.table(
+        gamma_drn = 0,
+        beta_s_drn = 0,
+        beta_t_s_drn = 0,
+        malpha_drn = 0,
+        organism = in_biodt[1, .(organism)][[1]],
+        beta_s_drn_std = 0,
+        beta_t_s_drn_std = 0
+      )
+    }
   }
-  
+
   return(out_dt)
 }
-
 #------ sprich_plot ------------------------------------------------------------
 # in_sprich <- tar_read(sprich)
 # in_envdt <- tar_read(env_dt)
@@ -4589,6 +4661,7 @@ summarize_network_hydrostats <- function(
 
 #------ summarize_env ---------------------------------------------------------
 # in_env_dt <- tar_read(env_dt)
+# in_genal_upa <- tar_read(genal_sites_upa_dt)
 
 #' @title Summarize environmental data
 #' @description This function takes raw environmental data and computes the mean 
@@ -4636,13 +4709,15 @@ summarize_env <- function(in_env_dt,
   
   #str(in_env_dt[, dat_cols, with=F])
   
+  # Fill basin area NAs for Genal basin
+  in_env_dt[is.na(basin_area_km2),  
+      basin_area_km2 := in_genal_upa[.SD, on="site", x.basin_area_km2]]
+  
   # calculate mean for each data column, excluding dry sites
   env_summarized <- in_env_dt[state_of_flow != 'D', 
                               lapply(.SD, function(x) mean(x, na.rm=T)),
                               .SDcols = dat_cols,
-                              by=group_cols] %>%
-    .[is.na(basin_area_km2),  # Fill basin area NAs for Genal basin
-      basin_area_km2 := in_genal_upa[.SD, on="site", x.basin_area_km2]]
+                              by=group_cols] 
   
   # calculate mean for each data column, only for 'F' (flowing) sites
   env_summarized_nopools <- in_env_dt[state_of_flow == 'F',
@@ -7861,6 +7936,7 @@ model_miv_t <- function(in_ssn_eu, in_allvars_sites,
 # tar_load(ssn_covtypes)
 # tar_load(cor_heatmaps_summarized)
 # interactive = T
+# scale_predictors = T
 
 #' Macroinvertebrate model for annual data
 #'
