@@ -27,7 +27,8 @@ resdir <- 'results'
 figdir <- file.path(resdir, 'figures')
 
 #Set more efficient data storage
-tar_option_set(format = "qs")
+targets::tar_option_set(format = "qs",
+                        memory="transient")
 
 metacols <- c('campaign', 'site', 'running_id', 'country', 'date',
               'summa_sample', 'sample.id', 'sample_id', 'organism')
@@ -917,7 +918,7 @@ analysis_targets <- list(
     local_env_pca,
     ordinate_local_env(in_allvars_dt = allvars_sites$dt)
   ),
-  
+
   #Create Spatial Stream Network (SSN) object
   tar_target(
     ssn_eu,
@@ -933,7 +934,7 @@ analysis_targets <- list(
                       overwrite = T)
   )
   ,
-  
+
   #Define all hydrological variables: 62
   tar_target(
     hydro_vars_forssn,
@@ -942,17 +943,17 @@ analysis_targets <- list(
         c('DurD', 'FreD', 'PDurD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ', 'MaxConD'),
         paste0(c(30, 60, 90, 180, 365, 3650), 'past')
       )
-      
+
       hydroyr_grid <- expand.grid(
         c('DurD_CV', "FreD_CV", "meanConD_CV", "FstDrE_SD", "sd6"),
         paste0(c(10, 30), 'yrpast')
       )
-      
+
       stcon_grid <- expand.grid(paste0('STcon_m', c(30, 60, 90, 180, 365)),
                                 c('_directed', '_undirected'))
       fdist_grid <- expand.grid(paste0('Fdist_mean_', c(30, 60, 90, 180, 365, 3650), 'past'),
                                 c('_directed', '_undirected'))
-      
+
       hydro_regex_list <- c(
         paste0(hydrovar_grid$Var1,'.*', hydrovar_grid$Var2),
         paste0(hydroyr_grid$Var1,'.*', hydroyr_grid$Var2),
@@ -960,7 +961,7 @@ analysis_targets <- list(
         paste0(fdist_grid$Var1, fdist_grid$Var2),
         'PrdD'
       )
-      
+
       lapply(hydro_regex_list, function(var_str) {
         grep(paste0('^', var_str),
              names(ssn_eu[[1]]$ssn$obs),
@@ -969,56 +970,56 @@ analysis_targets <- list(
     }
   )
   ,
-  
+
   #Define hydrological labels
   tar_target(
     hydro_vars_dt,
     {
       dt <- data.table(hydro_var=hydro_vars_forssn)
-      
+
       labels_dt <- data.table(
         hydro_var_root = c('DurD', 'FreD', 'PDurD', "PFreD",
                            "PrdD",
-                           'DurD_CV', "FreD_CV", "meanConD_CV", 
+                           'DurD_CV', "FreD_CV", "meanConD_CV",
                            "FstDrE_SD", "sd6",
                            "uQ90", "oQ10", "maxPQ", "PmeanQ",
-                           "STcon_directed", "STcon_undirected", 
+                           "STcon_directed", "STcon_undirected",
                            "Fdist_mean_directed", "Fdist_mean_undirected"),
         hydro_label = c(
-          "Proportion of no-flow days", 
+          "Proportion of no-flow days",
           "Number of no-flow periods",
           "Proportion of no-flow days (percentile)",
           "Number of no-flow periods (percentile)",
           "Time to last no flow date",
-          "CV of the annual proportion of no-flow days", 
+          "CV of the annual proportion of no-flow days",
           "CV of the annual number of no-flow periods",
-          "CV of the mean annual drying event duration", 
+          "CV of the mean annual drying event duration",
           "SD of the date of first drying",
           "Seasonality of drying (SD6)",
-          "Number of low-flow days (< Q90)", 
-          "Number of high-flow days (>Q10)", 
-          "Maximum flow percentile", 
+          "Number of low-flow days (< Q90)",
+          "Number of high-flow days (>Q10)",
+          "Maximum flow percentile",
           "Mean flow percentile",
           "Spatio-temporal connectivity - upstream",
           "Spatio-temporal connectivity - undirected",
           "Mean distance to the nearest flowing site - upstream",
           "Mean distance to the nearest flowing site - undirected")
       )
-      
+
       dt <- get_hydro_var_root(dt, in_place=F) %>%
         merge(., labels_dt, by='hydro_var_root') %>%
-        .[, hydro_label := factor(hydro_label, 
-                                  levels=labels_dt$hydro_label, 
+        .[, hydro_label := factor(hydro_label,
+                                  levels=labels_dt$hydro_label,
                                   ordered=T)] %>%
-        rbind(data.table(hydro_var='null', hydro_var_root='null', 
+        rbind(data.table(hydro_var='null', hydro_var_root='null',
                          hydro_label='Null'), fill=T)
-      
+
       return(dt)
     }
   )
   ,
-  
-  
+
+
   # Run a first SSN with a single hydrological variable for each organism
   # to determine the top spatial covariance types
   tar_target(
@@ -1037,7 +1038,7 @@ analysis_targets <- list(
     iteration = "list"
   )
   ,
-  
+
   #Select the top 5 covariance structures for each organism based on AIC and
   #structure the models to run
   tar_target(
@@ -1047,11 +1048,11 @@ analysis_targets <- list(
       selected_covtypes <- lapply(ssn_div_covtype, `[[`, "ssn_glance") %>%
         rbindlist %>%
         .[, .SD[order(AIC)][1:5, .(covtypes)], by = organism]
-      
+
       #Convert to named list by organism
-      covtypes_by_organism <- selected_covtypes[, .(covtypes = list(covtypes)), 
+      covtypes_by_organism <- selected_covtypes[, .(covtypes = list(covtypes)),
                                                 by = organism]
-      
+
       #Attach covtypes to each setup
       model_setup_list <- list()
       for (div_index in alpha_var_list) {
@@ -1063,7 +1064,7 @@ analysis_targets <- list(
             hydro_var = NULL,
             covtypes = covtypes_by_organism[organism==org,]$covtypes[[1]]
           )
-          
+
           #Add all hydrovars
           for (hv in hydro_vars_forssn) {
             model_setup_list[[length(model_setup_list) + 1]] <- list(
@@ -1075,12 +1076,12 @@ analysis_targets <- list(
           }
         }
       }
-      
+
       return(model_setup_list)
     }
   )
   ,
-  
+
   #Run SSN for each chosen variable and time window
   tar_map(
     values = tidyr::expand_grid(
@@ -1093,7 +1094,7 @@ analysis_targets <- list(
       )
     ),
     names = c("in_response_var", "in_organism"),
-    
+
     # fit models
     tar_target(
       ssn_div_hydrowindow,
@@ -1102,7 +1103,7 @@ analysis_targets <- list(
           ssn_div_models_to_run,
           function(x) x$response_var == in_response_var && x$organism == in_organism
         )
-        
+
         future_lapply(models_subset, function(model_setup) {
           print(paste(in_organism, in_response_var, model_setup$hydro_var, sep = " - "))
           model_ssn_hydrowindow(
@@ -1119,12 +1120,12 @@ analysis_targets <- list(
         })
       }
     ),
-    
+
     tar_target(
       ssn_covtype_selected,
       select_ssn_covariance(in_ssnmodels = ssn_div_hydrowindow)
     ),
-    
+
     tar_target(
       hydrowindow_perf_tables,
       {
@@ -1133,10 +1134,10 @@ analysis_targets <- list(
           , c("organism", "hydro_var", "response_var")] %>%
           as.data.table() %>%
           .[response_var == in_response_var & organism == in_organism, ]
-        
+
         ssnmodels <- cbind(ssn_model_names, ssn_div_hydrowindow)
         names(ssnmodels)[ncol(ssnmodels)] <- "ssn_div_models"
-        
+
         # Format per organism
         prepare_hydrowindow_perf_table(
           in_ssnmodels = ssnmodels,
@@ -1145,60 +1146,60 @@ analysis_targets <- list(
           in_hydro_vars_dt = hydro_vars_dt)
       }
     ),
-    
+
     tar_target(
-      hydrowindow_varcomp, 
+      hydrowindow_varcomp,
       get_hydrowindow_varcomp(
-        perf_dt = hydrowindow_perf_tables$best, 
-        nrow_pag = 2, 
+        perf_dt = hydrowindow_perf_tables$all,
+        nrow_pag = 2,
         ncol_pag = 3)
     )
     ,
-    
+
     tar_target(
       hydrowindow_emmeans,
       get_hydrowindow_emmeans(
-        best_dt = hydrowindow_perf_tables$best, 
-        in_hydro_vars_dt = hydro_vars_dt) 
+        best_dt = hydrowindow_perf_tables$best,
+        in_hydro_vars_dt = hydro_vars_dt)
     )
     ,
-    
+
     tar_target(
       hydrowindow_emtrends,
       get_hydrowindow_emtrends(
-        best_dt = hydrowindow_perf_tables$best, 
-        in_hydro_vars_dt = hydro_vars_dt) 
+        best_dt = hydrowindow_perf_tables$best,
+        in_hydro_vars_dt = hydro_vars_dt)
     )
     ,
-    
+
     tar_target(
       hydrowindow_best_preds,
-      get_hydrowindow_prediction(
-        best_dt = hydrowindow_perf_tables$best) 
+      get_hydrowindow_predictions(
+        best_dt = hydrowindow_perf_tables$best)
     )
     ,
-    
+
     tar_target(
       hydrowindow_obs_preds_plot,
       plot_hydrowindow_obs_preds(
         preds = hydrowindow_best_preds,
-        resp_var = in_response_var) 
+        resp_var = in_response_var)
     )
     ,
-    
+
     tar_target(
       hydrowindow_x_preds_plot,
       plot_hydrowindow_x_preds(
-        preds = hydrowindow_best_preds, 
+        preds = hydrowindow_best_preds,
         best_dt = hydrowindow_best_preds
-      ) 
+      )
     )
     ,
-    
+
     tar_target(
       ssn_div_hydrowindow_plots_paths,
       save_ssn_div_hydrowindow_plots(
-        hydrowindw_perf_tables,
+        hydrowindow_perf_tables,
         plot_varcomp = hydrowindow_varcomp,
         plot_obs_preds = hydrowindow_obs_preds_plot,
         plot_x_preds = hydrowindow_x_preds_plot,
@@ -1206,7 +1207,7 @@ analysis_targets <- list(
         plot_emtrends = hydrowindow_emtrends,
         in_organism = in_organism,
         in_response_var = in_response_var,
-        out_dir = figdir) 
+        out_dir = figdir)
     )
   )
   ,
