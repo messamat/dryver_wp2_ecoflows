@@ -1295,7 +1295,8 @@ get_hydro_var_root <- function(dt, in_place=TRUE) {
 #------ get_full_hydrolabel ----------------------------------------------------
 get_full_hydrolabel <- function(in_hydro_vars_dt,
                                 in_hydro_var) {
-  h_unit <- ifelse(grepl(pattern='.*yrpast$', in_hydro_var), 'y', 'd')
+  # print(in_hydro_var)
+  h_unit <- ifelse(grepl(pattern='.*yrpast.*', in_hydro_var), 'y', 'd')
   
   if (grepl('_scaled', in_hydro_var)) {
     # scaled_ext <- 'scaled - '
@@ -1306,9 +1307,8 @@ get_full_hydrolabel <- function(in_hydro_vars_dt,
    
        
   if (in_hydro_var %in% in_hydro_vars_dt$hydro_var) {
-    out_label <- in_hydro_vars_dt[hydro_var == in_hydro_var,
-                                  paste(hydro_label,
-                                        ': past', window_d, h_unit)] 
+    out_label <- in_hydro_vars_dt[hydro_var == in_hydro_var,] %>%
+      .[1, paste(hydro_label, ': past', window_d, h_unit)] 
   } else {
     out_label <- in_hydro_var
     
@@ -1480,7 +1480,7 @@ check_resid_corr <- function(in_ssn_mod, in_idcol='site',
 #'   
 define_hydromod_paths <- function(in_hydromod_dir) {
   hydro_drn_paths_dt <- data.table(
-    country = c("Croatia", "Czech", "Finland", "France",  "Hungary", "Spain"),
+    country = c("Croatia", "Czechia", "Finland", "France",  "Hungary", "Spain"),
     catchment = c("Butiznica", "Velicka", "Lepsamaanjoki", "Albarine", "Bukkosdi", "Genal"), 
     best_sim = c(8, 9, 20, 3, 8, 15),
     all_sims_filename = c(
@@ -1667,7 +1667,7 @@ read_envdt <- function(in_env_data_path_annika,
     .[, orig_dt := grepl('.*_annika$', variable)] %>%
     .[, variable := gsub('(_annika)|(_common)', '', variable)] %>%
     data.table::dcast(formula=running_id+variable~orig_dt) %>%
-    setnames(c('FALSE', 'TRUE'), c('common', 'annika'))
+    setnames(c('FALSE', 'TRUE'), c('common', 'annika')) 
   
   check_diff <- compare_env_dts[
     common!=annika & 
@@ -1694,7 +1694,9 @@ read_envdt <- function(in_env_data_path_annika,
     setnames(tolower(names(.))) %>% #Convert all columns to lower case
     .[!(is.na(date) & is.na(state_of_flow)),] %>% #Remove records that were not sampled at all, but keep those that were simply dry
     setnames(c('bankfull_at_max__wetted_width_m', 'bankfull_at_min__wetted_width_m'),
-             c('bankfull_at_max_wetted_width_m', 'bankfull_at_min_wetted_width_m'))
+             c('bankfull_at_max_wetted_width_m', 'bankfull_at_min_wetted_width_m')) %>%
+    setnames('drn', 'country') %>%
+    .[country=='Czech', country := 'Czechia']
   
   # --- corrections for missing data ---
   #Substitute date for those that are dry
@@ -1727,7 +1729,7 @@ read_envdt <- function(in_env_data_path_annika,
   
   #In a dozen site in Hungary, "could not measure velocity" -- assign very low value just below existing minimum
   env_dt_merged[
-    drn=='Hungary' & is.na(avg_velocity_macroinvertebrates) & state_of_flow == 'F',
+    country=='Hungary' & is.na(avg_velocity_macroinvertebrates) & state_of_flow == 'F',
     avg_velocity_macroinvertebrates := 0.001]
   
   #Replace missing values for geomorphological measures with average across campaigns
@@ -1763,7 +1765,7 @@ read_envdt <- function(in_env_data_path_annika,
   #Fill missing data for average depth and velocity for macroinvertebrates based on discharge
   #using the average ratio between log(discharge) and these measures in other dates
   avg_ratio_sampling_hydraulic_dis <- env_dt_merged[
-    drn=='France' & avg_depth_macroinvertebrates>0 & discharge_l_s>1, 
+    country=='France' & avg_depth_macroinvertebrates>0 & discharge_l_s>1, 
     list(
       site_id = site,
       ratio_depth = avg_depth_macroinvertebrates/log10(discharge_l_s),
@@ -1811,7 +1813,7 @@ read_envdt <- function(in_env_data_path_annika,
   #Fill conductivity data for the few Hungarian sites for campaign #5
   #by computing their conductivity compared to the mean across sites
   avg_conductivity_ratio <- env_dt_merged[
-    drn=='Hungary' & campaign != 5  & state_of_flow == 'F',
+    country=='Hungary' & campaign != 5  & state_of_flow == 'F',
     list(
       site_id = site,
       ratio=conductivity_micros_cm/mean(conductivity_micros_cm, na.rm=T),
@@ -1820,7 +1822,7 @@ read_envdt <- function(in_env_data_path_annika,
     .[, mean(ratio), by=site_id]
   
   avg_conduct_5 <- env_dt_merged[
-    drn=='Hungary' & campaign == 5  & state_of_flow == 'F', 
+    country=='Hungary' & campaign == 5  & state_of_flow == 'F', 
     mean(conductivity_micros_cm, na.rm=T)]
   
   env_dt_merged[running_id %in% c('BUK09_5', 'BUK10_5','BUK50_5','BUK52_5'),
@@ -1849,6 +1851,9 @@ read_envdt <- function(in_env_data_path_annika,
   env_dt_merged[running_id=='BUK30_2', 
                 average_wetted_width_m := 3.05]
   
+  #Correct stream time
+  env_dt_merged[site=='BUK23', stream_type := 'TR']
+  
   #Inspect data
   #skim(env_dt_merged)
   #skim(env_dt_merged[state_of_flow == 'F',])
@@ -1861,6 +1866,8 @@ read_envdt <- function(in_env_data_path_annika,
 #------ read_biodt -------------------------------------------------------------
 # path_list = tar_read(bio_data_paths)
 # in_metadata_edna = tar_read(metadata_edna)
+# in_miv_full_dt = tar_read(miv_full_dt)
+# include_bacteria = T
 
 #' Read and clean biodiversity datasets
 #'
@@ -1889,7 +1896,7 @@ read_biodt <- function(path_list, in_metadata_edna,
       setnames(tolower(names(.))) 
     
     if ('country' %in% names(out_dt)) {
-      out_dt[country == 'Czech Republic', country := 'Czech']
+      out_dt[country == 'Czech Republic', country := 'Czechia']
     }
     
     if (is.character(out_dt$date)) {
@@ -1993,7 +2000,7 @@ read_biodt <- function(path_list, in_metadata_edna,
   # #Standardize country names
   # country_standard <- data.table(
   #   original = c("CRO", "FRA", "SPA", "CZ",  "HUN", "FIN"),
-  #   new = c("Croatia", 'France', "spain", "Czech", "Hungary", 'Finland')
+  #   new = c("Croatia", 'France', "spain", "Czechia", "Hungary", 'Finland')
   # )
   # in_metadata_edna <- merge(in_metadata_edna, country_standard,
   #                           by.x='country', by.y='original') %>%
@@ -2021,11 +2028,8 @@ read_biodt <- function(path_list, in_metadata_edna,
                                                       habitat != 'pool',
                                                     metacols_toget, with=F],
                                    by='running_id') 
-    if (org=='bac') {
-      dt_list[[org_medium]][country == 'Czech Republic', 
-                            country := 'Czech']
-    }
     
+
     if (org=='fun') {
       print('Correcting fungi dates')
       dt_list[[org_medium]][date == as.Date("2012-02-25"), 
@@ -2033,9 +2037,11 @@ read_biodt <- function(path_list, in_metadata_edna,
     }
     
     dt_list[[new_org_medium]] <- dt_list[[org_medium]] %>%
+      .[country %in% c('Czech Republic', 'Czech'), country := 'Czechia'] %>%
       .[habitat!='pool',] %>%
       .[, `:=`(habitat = NULL,
                organism = new_org_medium)]
+
     dt_list[[org_medium]][, habitat := NULL]
   } %>% invisible
   
@@ -2300,17 +2306,17 @@ plot_sprich <- function(in_sprich, in_envdt) {
   
   sprich_hydroobs <- merge(
     in_sprich[, list(mean_drn_richness = mean(richness)),
-              by=.(campaign, drn, organism)],
+              by=.(campaign, country, organism)],
     in_envdt[, list(per_flowing = 100*.SD[state_of_flow=='F', .N]/.N),
-             by=.(campaign, drn)],
-    by=c('campaign', 'drn')) %>%
+             by=.(campaign, country)],
+    by=c('campaign', 'country')) %>%
     .[, mean_drn_richness_relative := mean_drn_richness/max(mean_drn_richness),
-      by=.(drn, organism)]
+      by=.(country, organism)]
   
   ggplot(sprich_hydroobs[
     !(organism %in% c('miv', 'miv_nopools_flying', 'miv_nopools_nonflying')),],
     aes(x=campaign, y=mean_drn_richness_relative)) +
-    geom_line(aes(group=drn, color=drn), size=1.2) +
+    geom_line(aes(group=country, color=country), size=1.2) +
     scale_color_manual(values=c("#8c510a", "#bf812d", "#01665e", "#80cdc1", "#8073ac", "#543005")) +
     new_scale_color() +
     geom_point(aes(color=per_flowing), size=2) +
@@ -2320,7 +2326,7 @@ plot_sprich <- function(in_sprich, in_envdt) {
   
   ggplot(sprich_hydroobs[
     !(organism %in% c('miv', 'miv_nopools_flying', 'miv_nopools_nonflying')),],
-    aes(x=per_flowing, y=mean_drn_richness_relative, color=drn)) +
+    aes(x=per_flowing, y=mean_drn_richness_relative, color=country)) +
     geom_point() +
     geom_smooth(method='lm', se=F) +
     scale_color_manual(values=c("#8c510a", "#bf812d", "#01665e", "#80cdc1", "#8073ac", "#543005")) +
@@ -2331,8 +2337,8 @@ plot_sprich <- function(in_sprich, in_envdt) {
     aes(x=campaign, y=richness)) +
     #geom_point() +
     geom_line(aes(group=site, color=site)) +
-    geom_smooth(aes(group=drn)) +
-    facet_wrap(drn~organism, scales = 'free_y') +
+    geom_smooth(aes(group=country)) +
+    facet_wrap(country~organism, scales = 'free_y') +
     theme(legend.position='none')
   
   ggplot(
@@ -2340,15 +2346,15 @@ plot_sprich <- function(in_sprich, in_envdt) {
     aes(x=campaign, y=richness)) +
     #geom_point() +
     geom_boxplot(aes(group=site, color=state_of_flow)) +
-    facet_wrap(drn~organism, scales = 'free_y') 
+    facet_wrap(country~organism, scales = 'free_y') 
   
   ggplot(
     in_sprich[(organism %in% c('miv_nopools')),],
     aes(x=campaign, y=richness)) +
     #geom_point() +
     geom_line(aes(group=site, color=site)) +
-    geom_smooth(aes(group=drn)) +
-    facet_wrap(drn~organism, scales = 'free_y') +
+    geom_smooth(aes(group=country)) +
+    facet_wrap(country~organism, scales = 'free_y') +
     theme(legend.position='none')
 }
 #------ subset_network -----------------------------------------------------------
@@ -2551,39 +2557,49 @@ clean_network <- function(rivnet_path, idcol,
     suffix = c(".ini", ".clustered"),
     left = TRUE,
     largest = FALSE
-  )
+  ) 
+  rivnet_clustered_joinini <- rivnet_clustered_joinini[
+    as.numeric(st_length(rivnet_clustered_joinini)) > 1,]
   
   #Convert those without match to points every 10 meters
-  rivnet_nomatch_pts <- rivnet_clustered_joinini %>%
-    .[is.na(rivnet_clustered_joinini[[idcol]]),] %>%
-    st_line_sample(density = 1/10) %>%
-    st_sf(geometry = ., crs = st_crs(rivnet_clustered_joinini))
-  rivnet_nomatch_pts$UID <- rivnet_clustered_joinini[
-    is.na(rivnet_clustered_joinini[[idcol]]),][['UID']]
-  rivnet_nomatch_pts <- st_cast(rivnet_nomatch_pts, 'POINT')
-  
-  #For each point, get id of nearest line in initial river network
-  nearest_segix <- rivnet_nomatch_pts %>%
-    st_nearest_feature(., rivnet)
-  rivnet_nomatch_pts$nearest_id <- rivnet[nearest_segix,][[idcol]]
-  
-  #Compute distance to that nearest line
-  rivnet_nomatch_pts$nearest_dist <- st_distance(
-    rivnet_nomatch_pts, rivnet[nearest_segix,], 
-    by_element=TRUE)
-  
-  #Keep line for which the sum of the inverse distance to the points is greatest              
-  rivnet_nomatch_selid <- as.data.table(rivnet_nomatch_pts) %>%
-    .[, list(inverse_dist_sum = sum(1/nearest_dist)), 
-      by=.(UID, nearest_id)] %>%
-    .[, list(nearest_id=.SD[which.max(inverse_dist_sum), 
-                            nearest_id]), 
-      by=UID] 
-  
+  rivnet_nomatch_lines <- rivnet_clustered_joinini %>%
+    .[is.na(rivnet_clustered_joinini[[idcol]]),] 
+
+  if (nrow(rivnet_nomatch_lines) > 0) {
+    rivnet_nomatch_pts <- rivnet_nomatch_lines %>%
+      st_line_sample(density = 1/5) %>%
+      st_sf(geometry = ., crs = st_crs(rivnet_clustered_joinini))
+    rivnet_nomatch_pts$UID <- rivnet_clustered_joinini[
+      is.na(rivnet_clustered_joinini[[idcol]]),][['UID']]
+    rivnet_nomatch_pts <- st_cast(rivnet_nomatch_pts, 'POINT')
+    
+    #For each point, get id of nearest line in initial river network
+    nearest_segix <- rivnet_nomatch_pts %>%
+      st_nearest_feature(., rivnet)
+    rivnet_nomatch_pts$nearest_id <- rivnet[nearest_segix,][[idcol]]
+    
+    #Compute distance to that nearest line
+    rivnet_nomatch_pts$nearest_dist <- st_distance(
+      rivnet_nomatch_pts, rivnet[nearest_segix,], 
+      by_element=TRUE)
+    
+    #Keep line for which the sum of the inverse distance to the points is greatest              
+    rivnet_nomatch_selid <- as.data.table(rivnet_nomatch_pts) %>%
+      .[, list(inverse_dist_sum = sum(1/nearest_dist)), 
+        by=.(UID, nearest_id)] %>%
+      .[, list(nearest_id=.SD[which.max(inverse_dist_sum), 
+                              nearest_id]), 
+        by=UID] 
+    
+    rivnet_clustered_joinall <- merge(rivnet_clustered_joinini,
+                                      rivnet_nomatch_selid, 
+                                      by='UID', all.x=T)
+  } else {
+    rivnet_clustered_joinall <- rivnet_clustered_joinini
+  }
+
   #Fill NAs with those
-  rivnet_clustered_joinall <- merge(rivnet_clustered_joinini,
-                                    rivnet_nomatch_selid, 
-                                    by='UID', all.x=T)
+
   rivnet_clustered_joinall[[idcol]] <- dplyr::coalesce(
     rivnet_clustered_joinall[[idcol]],
     rivnet_clustered_joinall$nearest_id)
@@ -2819,7 +2835,7 @@ fix_complex_confluences <- function(rivnet_path, max_node_shift = 5,
   # Read input network
   rivnet <- st_read(rivnet_path) %>%
     st_cast("LINESTRING") %>%
-    st_set_geometry("geometry")
+    st_set_geometry("geometry") 
   
   #Compute from-to fields
   net_fromto <- as_sfnetwork(rivnet) %>%
@@ -3370,7 +3386,7 @@ reassign_netids <- function(rivnet_path, strahler_dt,
         .default = cat_cor
       )
       )
-  } else if (country == 'Czech') {
+  } else if (country == 'Czechia') {
     rivnet_catcor_manual <- rivnet_catcor_hydromod %>%
       mutate(cat_cor = case_match(
         UID,
@@ -3466,11 +3482,11 @@ reassign_netids <- function(rivnet_path, strahler_dt,
   return(out_path)
 }
 #------ compute_hydrostats_drn -------------------------------------------------
-# in_drn <- 'Croatia'
+# in_country <- 'Croatia'
 # varname <-  'isflowing' #qsim
-# in_sites_dt <- tar_read(sites_dt)[country == in_drn,]
-# in_network_path <- tar_read(network_ssnready_gpkg_list)[[in_drn]]
-# in_hydromod_drn <- tar_read_raw((paste0('hydromod_dt_', in_drn, '_', varname)))
+# in_sites_dt <- tar_read(sites_dt)[country == in_country,]
+# in_network_path <- tar_read(network_ssnready_gpkg_list)[[in_country]]
+# in_hydromod_drn <- tar_read_raw((paste0('hydromod_dt_', in_country, '_', varname)))
 # in_network_idcol = 'cat_cor'
 
 #' @title Compute hydrological statistics for a DRN
@@ -3517,11 +3533,11 @@ compute_hydrostats_drn <- function(in_network_path,
     if ('nsim' %in% names(intermod_dt)) {
       q_stats <- list()
       #Compute hydrological statistics at the DRN scale (Relative flowing length)
-      q_stats$drn <- intermod_dt[, 
+      q_stats$country <- intermod_dt[, 
                                  compute_hydrostats_intermittence(
                                    in_hydromod_dt = .SD,
                                    in_sites_dt = in_sites_dt,
-                                   scale = 'drn')$drn, 
+                                   scale = 'drn')$country, 
                                  by = nsim] 
       
       #Compute hydrological statistics at the scale of individual sites
@@ -3559,7 +3575,7 @@ compute_hydrostats_drn <- function(in_network_path,
 }
 
 #------ subset_hydrostats ------------------------------------------------------
-# in_country <- in_drn <- 'Czech'
+# in_country <- in_drn <- 'Czechia'
 # hydrostats <- tar_read_raw(paste0("hydrostats_", in_country, '_qsim'))
 # in_bio_dt <- tar_read(bio_dt)
 
@@ -3589,7 +3605,7 @@ subset_hydrostats <- function(hydrostats, in_bio_dt) {
 }
 
 #------ format_sites_dt ----------------------------------------------------------
-# in_country <- 'Spain'
+# in_country <- 'Czechia'
 # in_path <- tar_read(hydromod_paths_dt)[country == in_country, sites_reachids]
 # #check <- format_site_dt(in_path, in_country)
 # in_env_dt <- tar_read(env_dt)
@@ -3611,14 +3627,15 @@ format_site_dt <- function(in_path, in_env_dt, in_country) {
     sites_dt[, id := sub('BUT', '', id) %>%
                str_pad(width=2, side='left', pad = 0) %>%
                paste0('BUT', .)] %>%
-      .[id=='BUT19', reach_id := 2868] #Noticed after correcting the network topology
+      .[id=='BUT19', reach_id := 2868] #Noticed after correcting the network topology 
   } 
   
-  if (in_country == 'Czech') {
-    sites_dt[, id := sub('S', '', id) %>%
-               str_pad(width=2, side='left', pad = 0) %>%
-               paste0('VEL', .)]
-  } 
+  #Not needed anymore: corrected the input table.
+  # if (in_country == 'Czechia') {
+  #   sites_dt[, id := sub('S', '', id) %>%
+  #              str_pad(width=2, side='left', pad = 0) %>%
+  #              paste0('VEL', .)]
+  # } 
   
   if (in_country == 'Finland') {
     sites_dt[, id := sub('FIN', '', id) %>%
@@ -3642,12 +3659,14 @@ format_site_dt <- function(in_path, in_env_dt, in_country) {
   
   #Fill missing sites info from WP1 with info from field data
   #For Hungary and Spain
-  sites_dt_filled <- in_env_dt[drn==in_country, .(site, latitude, longitude)] %>%
+  sites_dt_filled <- in_env_dt[country==in_country, .(site, latitude, longitude)] %>%
     setnames(c('latitude', 'longitude'), c('latitude_field', 'longitude_field')) %>%
     unique %>%
     merge(sites_dt, by.x='site', by.y='id', all.x=T) %>%
     .[is.na(lat), `:=`(lat = latitude_field, lon = longitude_field)] %>%
-    .[, `:=`(latitude_field = NULL, longitude_field = NULL)]
+    .[, `:=`(latitude_field = NULL, longitude_field = NULL)] %>%
+    .[site != 'BUT08',] #BUT08 is not represented in river network. No hydrological information
+  
   
   sites_dt_filled[, reach_id := fcase(
     site=='BUK01', 657801L,
@@ -3658,7 +3677,6 @@ format_site_dt <- function(in_path, in_env_dt, in_country) {
     site=='GEN17', 5882L,
     site=='GEN23', 5732L,
     site=='GEN26', 5392L,
-    site=='VI01', 2438600L, #based on documentation in WP1 
     site=='AL01', 2455400L, #based on documentation in WP1 
     default=reach_id
   )]
@@ -3737,16 +3755,16 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
 
 
 #------ snap_sites -------------------------------------------------------------
-# drn <- 'Croatia'
-# in_sites_path <- tar_read(site_points_gpkg_list)[[drn]]
-# in_network_path <- tar_read(network_ssnready_gpkg_list)[[drn]]
+# country <- 'Croatia'
+# in_sites_path <- tar_read(site_points_gpkg_list)[[country]]
+# in_network_path <- tar_read(network_ssnready_gpkg_list)[[country]]
 # out_snapped_sites_path = NULL
 # overwrite = T
 # custom_proj = F
 # in_sites_unique_id = 'site'
 # in_network_unique_id = 'UID'
 # in_sites_idcol_tomatch = 'reach_id'
-# in_network_idcol_tomatch = 'cat'
+# in_network_idcol_tomatch = 'cat_cor'
 # proj_back = F
 
 #' @title Snap river sites to a river network
@@ -3929,9 +3947,9 @@ subset_amber <- function(amber_path, in_hydromod_paths_dt, out_dir,
 
 
 #------ snap_barriers ----------------------------------------------------------
-# drn <- 'France'
-# in_sites_path <- tar_read(barrier_points_gpkg_list)[[drn]]
-# in_network_path <- tar_read(network_ssnready_gpkg_list)[[drn]]
+# country <- 'France'
+# in_sites_path <- tar_read(barrier_points_gpkg_list)[[country]]
+# in_network_path <- tar_read(network_ssnready_gpkg_list)[[country]]
 # out_snapped_sites_path = NULL
 # overwrite = T
 # custom_proj = F
@@ -4000,10 +4018,9 @@ snap_barrier_sites <- function(in_sites_path,
 }
 
 #------ prepare_data_for_STcon ---------------------------------------------------
-# in_country <- in_drn <- 'Croatia'
-# in_hydromod_drn <- tar_read(hydromod_comb_hist)[[paste0(
-#   "hydromod_dt_", in_country, '_isflowing')]]
-# in_net_shp_path <- tar_read(network_ssnready_shp_list)[[in_drn]]
+# in_country <- in_drn <- 'Czechia'
+# in_hydromod_drn <- tar_read(hydromod_comb_hist)[[paste0("hydromod_hist_dt_", in_country, '_isflowing')]]
+# in_net_shp_path <- tar_read(network_ssnready_shp_list)[[in_country]]
 
 #' @title Prepare data for STcon analysis
 #' @description This function takes hydrological and network data, builds a 
@@ -4093,10 +4110,10 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
 
 
 #------ compute_STcon_rolling ---------------------------------------------------
-# in_drn <- 'Croatia'
-# in_preformatted_data <- tar_read(preformatted_data_STcon)[[in_drn]]
+# in_country <- 'Croatia'
+# in_preformatted_data <- tar_read(preformatted_data_STcon)[[in_country]]
 # in_bio_dt <- tar_read(bio_dt)
-# in_nsim <- NULL#tar_read(hydromod_paths_dt)[country == in_drn,]$best_sim
+# in_nsim <- NULL#tar_read(hydromod_paths_dt)[country == in_country,]$best_sim
 
 #' @title Compute rolling spatio-temporal connectivity
 #' @description This function computes spatio-temporal connectivity (STcon) for 
@@ -4456,7 +4473,7 @@ compute_Fdist <- function(sites_status_matrix,
 }
 
 #------ compute_Fdist_rolling ----------------------------------------------------
-# in_country <- 'Czech'
+# in_country <- 'Czechia'
 # in_Fdist_dt <- tar_read(dist_to_wet_directed)[[in_country]]
 # in_sites_dt <- as.data.table(vect(tar_read(site_snapped_gpkg_list)[[in_country]]))
 # setnames(setDT(in_Fdist_dt), 'value', 'Fdist')
@@ -4747,7 +4764,7 @@ summarize_env <- function(in_env_dt,
   #   'temperature_c')
   
   # define grouping and exclusion columns
-  group_cols <- c('drn', 'site', 'stream_type')
+  group_cols <- c('country', 'site', 'stream_type')
   exclude_cols <- c('if_ip_number_and_size_2_axes_+_depth_of_the_pools',
                     'campaign', 'date', 'state_of_flow')
   
@@ -4775,7 +4792,7 @@ summarize_env <- function(in_env_dt,
   
   # create a boxplot to visualize the summarized environmental data
   country_env_plot <- ggplot(melt(env_summarized, id.vars=group_cols),
-                             aes(x=drn, y=value, fill=drn)) +
+                             aes(x=country, y=value, fill=country)) +
     geom_boxplot() +
     facet_wrap(~variable, scales='free')
   
@@ -4960,7 +4977,7 @@ merge_allvars_sites <- function(in_spdiv_local,
     .[!(site %in% dry_only_sites), ] %>%
     .[, country := factor(
       country,
-      levels = c("Finland","France","Hungary","Czech","Croatia","Spain"))] 
+      levels = c("Finland","France","Hungary","Czechia","Croatia","Spain"))] 
   
   return(list(
     dt = all_vars_merged,
@@ -5037,12 +5054,70 @@ merge_allvars_summarized <- function(in_spdiv_local,
     .[!(site %in% dry_only_sites), ] %>%
     .[, country := factor(country,
                           levels = c("Finland", "France", "Hungary", 
-                                     "Czech", "Croatia", "Spain"))]
+                                     "Czechia", "Croatia", "Spain"))]
   
   return(list(
     dt = all_vars_merged,
     cols = dtcols
   ))
+}
+
+#------ create_hydro_vars_dt ---------------------------------------------------      
+create_hydro_vars_dt <- function(in_hydro_vars_forssn) {
+  dt <- data.table(hydro_var=in_hydro_vars_forssn)
+  
+  labels_dt <- data.table(
+    hydro_var_root = c('DurD', 'PDurD', "PrdD",
+                       'FreD', "PFreD",
+                       'DurD_CV', "FreD_CV", "meanConD_CV", "FstDrE_SD", 
+                       "sd6", "FstDrE",
+                       "uQ90", "oQ10", "maxPQ", "PmeanQ",
+                       "STcon_directed", "STcon_undirected",
+                       "Fdist_mean_directed", "Fdist_mean_undirected"),
+    hydro_label = c(
+      "Proportion of no-flow days",
+      "Proportion of no-flow days (percentile)",
+      "Time to last no flow date",
+      "Number of no-flow periods",
+      "Number of no-flow periods (percentile)",
+      "CV of the annual proportion of no-flow days",
+      "CV of the annual number of no-flow periods",
+      "CV of the mean annual drying event duration",
+      "SD of the date of first drying",
+      "Seasonality of drying (SD6)",
+      "Date of first drying",
+      "Number of low-flow days (< Q90)",
+      "Number of high-flow days (>Q10)",
+      "Maximum flow percentile",
+      "Mean flow percentile",
+      "Spatio-temporal connectivity - upstream",
+      "Spatio-temporal connectivity - undirected",
+      "Mean distance to the nearest flowing site - upstream",
+      "Mean distance to the nearest flowing site - undirected"),
+    hydro_class = c(
+      rep('Drying duration', 3),
+      rep('Drying frequency', 2),
+      rep('Drying predictability', 4),
+      rep('Drying timing', 2),
+      rep('Flow magnitude', 4),
+      rep('Connectivity', 4)
+    )
+  ) %>%
+    .[, metric_num:=seq_along(hydro_label), by=hydro_class]
+  
+  dt <- get_hydro_var_root(dt, in_place=F) %>%
+    merge(., labels_dt, by='hydro_var_root') %>%
+    .[, `:=`(hydro_label = factor(hydro_label,
+                                  levels=labels_dt$hydro_label,
+                                  ordered=T),
+             hydro_class = factor(hydro_class,
+                                  levels=unique(labels_dt$hydro_class),
+                                  ordered=T)
+    )] %>%
+    rbind(data.table(hydro_var='null', hydro_var_root='null',
+                     hydro_label='Null'), fill=T) 
+  
+  return(dt)
 }
 
 #------ plot_edna_biof_vs_sedi -------------------------------------------------
@@ -5676,7 +5751,7 @@ create_ssn_europe <- function(in_network_path,
                               in_sites_path,
                               in_allvars_dt,
                               in_local_env_pca,
-                              in_barriers_path,
+                              in_barriers_path = NULL,
                               in_hydrostats_net_hist,
                               in_pred_pts = NULL,
                               out_dir,
@@ -5741,7 +5816,7 @@ create_ssn_europe <- function(in_network_path,
     overwrite = overwrite
   )
   
-  setDT(in_allvars_dt)[country == 'Czech Republic', country := 'Czech']
+  setDT(in_allvars_dt)[country == 'Czech Republic', country := 'Czechia']
   
   # merge site data with all variables and PCA results
   sites_lsn_attri <- merge(sites_lsn,
@@ -5791,25 +5866,28 @@ create_ssn_europe <- function(in_network_path,
   
   #4. Incorporate barriers into the landscape network -----
   #Only keep barriers over 2 m and under 100 m snap from network
-  barriers_eu_sub <- lapply(names(in_barriers_path), function(in_country) {
-    st_read(in_barriers_path[[in_country]]) %>%
-      st_transform(3035) %>%
-      filter((!is.na(Height) & Height > 2) & snap_dist_m < 100)
-  }) %>% do.call(rbind, .)
-  
-  if (nrow(barriers_eu_sub) > 0) {
-    barriers_lsn <- sites_to_lsn(
-      sites = barriers_eu_sub,
-      edges =  edges_lsn,
-      lsn_path = lsn_path,
-      file_name = "barriers",
-      snap_tolerance = 5,
-      save_local = TRUE,
-      overwrite = overwrite
-    )
+  if (!is.null(in_barriers_path)) {
+    barriers_eu_sub <- lapply(names(in_barriers_path), function(in_country) {
+      st_read(in_barriers_path[[in_country]]) %>%
+        st_transform(3035) %>%
+        filter((!is.na(Height) & Height > 2) & snap_dist_m < 100)
+    }) %>% do.call(rbind, .)
     
-    sites_list$barriers <- barriers_lsn
+    if (nrow(barriers_eu_sub) > 0) {
+      barriers_lsn <- sites_to_lsn(
+        sites = barriers_eu_sub,
+        edges =  edges_lsn,
+        lsn_path = lsn_path,
+        file_name = "barriers",
+        snap_tolerance = 5,
+        save_local = TRUE,
+        overwrite = overwrite
+      )
+      
+      sites_list$barriers <- barriers_lsn
+    }
   }
+
   
   # 5. Calculate upstream distance -----
   edges_lsn <- updist_edges(
@@ -6108,7 +6186,7 @@ map_ssn_facets <- function(in_ssn,
   if (facet_col == 'country') {
     in_ssn$edges[[facet_col]] <- factor(
       in_ssn$edges[[facet_col]],
-      levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ),
+      levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain" ),
       ordered = T)
     facet_vals <- levels(in_ssn$edges[[facet_col]])
   } else {
@@ -6319,7 +6397,7 @@ plot_drn_hydrodiv <- function(in_hydrocon_compiled,
   
   hydrocon_compiled_country[, country := factor(
     country,
-    levels = c("Finland", "France", "Hungary", "Czech", "Croatia", "Spain"),
+    levels = c("Finland", "France", "Hungary", "Czechia", "Croatia", "Spain"),
     ordered = TRUE
   )]
   
@@ -6553,7 +6631,7 @@ plot_areadiv_scatter <- function(in_dt,
                         by = 'organism', all.x = FALSE) %>%
     .[, country := factor(
       country, 
-      levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain"),
+      levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain"),
       ordered = TRUE)] %>%
     .[!(organism %in% c('miv_nopools_flying', 'miv_nopools_noflying'))]
   
@@ -7287,7 +7365,7 @@ get_hydrowindow_emmeans <- function(best_dt, in_hydro_vars_dt) {
 }
 
 #------ get_hydrowindow_emtrends -------------------------------------------------------
-# hydrowindown_perf_tables <- tar_read(hydrowindow_perf_tables_richness_fun_sedi_nopools)
+# hydrowindown_perf_tables <- tar_read(hydrowindow_perf_tables_richness_bac_biof_nopools)
 # best_dt <- hydrowindown_perf_tables$best
 # in_hydro_vars_dt <- tar_read(hydro_vars_dt)
 
@@ -7311,7 +7389,7 @@ get_hydrowindow_emtrends <- function(best_dt, in_hydro_vars_dt) {
     
   }) %>% rbindlist(use.names = TRUE, fill = TRUE) %>%
     .[, pred_var_label := get_full_hydrolabel(in_hydro_vars_dt, pred_var_name),
-      by=.(pred_var_name)]
+      by=.(pred_var_name, country)]
 
   emtrends_plot <- get_ssn_emtrends(in_emtrends_dt = emtrends_dt_all, 
                                     interaction_var='country', plot=T)$plot +
@@ -7499,12 +7577,59 @@ save_ssn_div_hydrowindow_plots <- function(
 # y-axis: organism
 # label: dominant time window
 
-varcomp_list = list(
-  miv_nopools = tar_read(hydrowindow_varcomp_richness_miv_nopools)$dt,
-  miv_nopools_ept = tar_read(hydrowindow_varcomp_richness_miv_nopools_ept)$dt,
-  miv_nopools_och = tar_read(hydrowindow_varcomp_richness_miv_nopools_och)$dt
-)
+# in_hydrowindow_varcomp_multiorg = tar_read(
+#   hydrowindow_varcomp_richness_multiorg)
+# in_organism_dt <- tar_read(organism_dt)
+# in_hydro_vars_dt <- tar_read(hydro_vars_dt)
 
+plot_varcomp_multiorganisms <- function(in_hydrowindow_varcomp_multiorg,
+                                        in_hydro_vars_dt,
+                                        in_organism_dt) {
+
+  varcomp_best <- in_hydrowindow_varcomp_multiorg %>%
+    .[varcomp=="Covariates (PR-sq)", 
+      .SD[which.max(proportion),],
+      by=.(hydro_label, organism)] %>%
+    .[, null_fixedR2 := .SD[hydro_var=='null', proportion], by=organism] %>%
+    .[, marginal_R2 := proportion - null_fixedR2] %>%
+    .[!(hydro_label %in% c('Null', 'Mean flow percentile')),] %>%
+    merge(in_organism_dt, by='organism') %>%
+    merge(in_hydro_vars_dt[!duplicated(hydro_label),
+                           .(hydro_label, hydro_class, metric_num)], 
+          by='hydro_label') %>%
+    .[, h_unit := fifelse(grepl(pattern='.*yrpast.*', hydro_var), 'y', 'd')]
+
+  
+  varcomp_plot <- ggplot(varcomp_best, 
+                         aes(x=organism_class, y=marginal_R2, fill=organism_sub)) +
+    geom_bar(stat = "identity", position='dodge', alpha=0.6) +
+    geom_text(aes(y=Inf, hjust=0.1,label=paste(window_d, h_unit)), 
+              position = position_dodge(width = .9), size=3, color="#555555") +
+    scale_y_continuous(name='Marginal explained variance (%)',
+                       breaks=c(0, 0.05, 0.10),
+                       labels=scales::label_percent()) +
+    scale_x_discrete(name='Organism') +
+    scale_fill_manual(name='Subset',
+                      values= c('#666666', '#7570b3', '#66a61e', '#a6761d', '#1b9e77')
+                     ) + 
+    coord_flip(clip='off') +
+    facet_wrap(~ hydro_class + str_wrap(hydro_label, 30), ncol = 4, 
+               labeller = function (labels) {
+                 labels <- lapply(labels, as.character)
+                 list(do.call(paste, c(labels, list(sep = "\n"))))
+               }) +
+    theme_minimal() +
+    theme(
+      strip.text = element_text(margin = margin(t = 0, b = 0)), # shrink text padding
+      panel.spacing = unit(1.5, "lines"),        # space between facets
+      legend.box.margin = margin(l = 10, t = 0, r = 0, b = 0)
+    ) 
+  
+  return(list(
+    dt = varcomp_best,
+    plot = varcomp_plot
+  ))
+}
 #------ plot_emtrends_multiorganisms --------------------------------------------
 # -> em slopes across organisms
 # facet: hydrological variable
@@ -7513,6 +7638,101 @@ varcomp_list = list(
 # color: countries
 
 
+# in_hydro_vars_dt <- tar_read(hydro_vars_dt)
+# in_organism_dt <- tar_read(organism_dt)
+# 
+# in_hydrowindow_best_intercept_dt <- tar_read(hydrowindow_best_intercept_dt)
+# 
+# emtrends_list = list(
+#   miv_nopools = tar_read(hydrowindow_emtrends_richness_miv_nopools)$dt,
+#   miv_nopools_ept = tar_read(hydrowindow_emtrends_richness_miv_nopools_ept)$dt,
+#   miv_nopools_och = tar_read(hydrowindow_emtrends_richness_miv_nopools_och)$dt,
+#   dia_biof_nopools = tar_read(hydrowindow_emtrends_richness_dia_biof_nopools)$dt,
+#   dia_sedi_nopools = tar_read(hydrowindow_emtrends_richness_dia_sedi_nopools)$dt,
+#   fun_biof_nopools = tar_read(hydrowindow_emtrends_richness_fun_biof_nopools)$dt,
+#   fun_sedi_nopools = tar_read(hydrowindow_emtrends_richness_fun_sedi_nopools)$dt,
+#   bac_biof_nopools = tar_read(hydrowindow_emtrends_richness_bac_biof_nopools)$dt,
+#   bac_sedi_nopools = tar_read(hydrowindow_emtrends_richness_bac_sedi_nopools)$dt
+# )
+# in_drn_dt <- drn_dt
+
+plot_emtrends_multiorganisms <- function(emtrends_list,
+                                         in_hydrowindow_best_intercept_dt,
+                                         in_hydro_vars_dt,
+                                         in_organism_dt,
+                                         in_drn_dt) {
+  
+  emtrends_all <- rbindlist(emtrends_list, idcol='organism') %>% 
+    setnames('pred_var_name', 'hydro_var') #Format to merge with hydro_vars_dt
+  
+  #Get hydrological variable labels and class
+  emtrends_all <- emtrends_all %>%
+    get_hydro_var_root(in_place=F) %>%
+    merge(in_hydro_vars_dt[!duplicated(hydro_var_root), #Format to merge with hydro_vars_dt
+                           .(hydro_var_root, hydro_label, hydro_class)],
+          by='hydro_var_root') 
+  
+  #Normalize coefficients by intercept
+  emtrends_all <- emtrends_all %>% 
+    merge(in_hydrowindow_best_intercept_dt[, .(hydro_var_root, organism, intercept)], 
+          by=c('hydro_var_root', 'organism')) %>%
+    .[, `:=`(trend_rel = trend/abs(intercept),
+             lcl_rel = asymp.LCL/abs(intercept),
+             ucl_rel = asymp.UCL/abs(intercept)
+    )] 
+    
+  #Format country and labels for plotting
+  emtrends_all <- emtrends_all %>% 
+    .[, country := factor(
+      country, 
+      levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain" ),
+      ordered=T)
+    ] %>%
+    .[!(hydro_label %in% c('Null', 'Mean flow percentile')),] %>% #Remove to have 16 facets
+    merge(in_organism_dt, by='organism') %>% #Get organism labels and class
+    .[, h_unit := fifelse(grepl(pattern='.*yrpast.*', hydro_var), 'y', 'd')] %>% #Get time window unit
+    .[, organism_sub := gsub('Sediment', 'Sedi.', organism_sub)] %>%
+    .[, organism_sub := gsub('Biofilm', 'Biof.', organism_sub)] %>%
+    merge(in_drn_dt, by='country') %>% #Get colors for countries
+    setorder('organism') 
+    
+  response_var <- unique(emtrends_all$response_var)
+  
+  #Plot trend coefficients
+  emtrends_plot<- ggplot(emtrends_all, aes(x = organism_class, 
+                                           y = trend_rel,
+                                           group = organism_label)) +
+    geom_pointrange(aes(ymin = lcl_rel, ymax = ucl_rel, color= country),
+                    alpha=0.5, position = position_dodge(0.7)) +
+    geom_hline(yintercept=0, linetype=2) +
+    geom_text(aes(y=Inf, hjust=0.1,
+                  label=paste(organism_sub, '|', window_d, h_unit)), 
+              position = position_dodge(width = .7), size=3, color="#777777") +
+    scale_color_manual(name='Country',
+                       values=unique(emtrends_all$color)) +
+    labs(y = paste("Estimated slope of", response_var),
+         x = 'Organism') +
+    coord_flip(clip='off') +
+    facet_wrap(~ hydro_class + str_wrap(hydro_label, 30), 
+               ncol = 4, 
+               labeller = function (labels) {
+                 labels <- lapply(labels, as.character)
+                 list(do.call(paste, c(labels, list(sep = "\n"))))
+               },
+               scales='free_x') +
+    theme_minimal() +
+    theme(
+      strip.text = element_text(margin = margin(t = 0, b = 0)), # shrink text padding
+      panel.spacing = unit(2.3, "lines"),        # space between facets
+      legend.box.margin = margin(l = 20, t = 0, r = 0, b = 0)
+    ) 
+  
+  return(list(
+    dt=emtrends_all,
+    plot=emtrends_plot
+  ))
+  
+}
 
 #------ model_miv_t ------------------------------------------------------------
 # Regularization: Techniques like LASSO (L1 regularization), Ridge Regression 
@@ -7784,7 +8004,7 @@ model_miv_t <- function(in_ssn_eu, in_allvars_sites,
   
   #There are opposite patterns between countries, but these patterns are visible
   #in both relF and STcon: residuals increase with proportion of network flowing 
-  #for Croatia, France, and Hungary; decreases in Czech, Finland and Spain
+  #for Croatia, France, and Hungary; decreases in Czechia, Finland and Spain
   #These patterns are globally consistant across time windows
   
   invsimpson_miv_nopools_modlist[['all8_mod']] <- basic_train_mod(
@@ -9827,7 +10047,7 @@ diagnose_ssn_mod <- function(in_ssn_mods,
   predobs_plot_best <- setDT(in_ssn_mods$ssn_pred_best) %>%
     .[, country := factor(
       country, 
-      levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ),
+      levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain" ),
       ordered=T)
     ] %>% 
     ggplot(aes(x=.fitted, y=get(alpha_var))) +
@@ -9848,7 +10068,7 @@ diagnose_ssn_mod <- function(in_ssn_mods,
   #Check predictions for final model
   predobs_plot_final <- setDT(in_ssn_mods$ssn_pred_final)[, country := factor(
     country, 
-    levels = c("Finland", "France",  "Hungary", "Czech", "Croatia", "Spain" ),
+    levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain" ),
     ordered=T)
   ] %>% 
     ggplot(aes(x=.fitted, y=mean_invsimpson)) +
@@ -10443,7 +10663,7 @@ plot_alpha_cor_inner <- function(in_alphadat_merged_organism, x_var, facet_wrap=
       geom_smooth(colour="black", method = "lm", linewidth = 1.1, se = F) + 
       scale_linetype_identity() +   
       scale_color_manual(values = c("Croatia" = "#ef476f",
-                                    "Czech Republic" = "#f78c6b", 
+                                    "Czechia" = "#f78c6b", 
                                     "Finland" = "#ffd166", 
                                     "France" = "#06d6a0", 
                                     "Hungary" = "#118ab2",

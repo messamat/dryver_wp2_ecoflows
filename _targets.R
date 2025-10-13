@@ -1,9 +1,3 @@
-#Small changes to implement before next run
-#L22 functions: capitalize S in spain
-#L56 and L158 functions: catch metacols regardless of capitalization
-#Impute GEN04, campaign 1 date
-#Correct avg velocity 25 m/s
-
 library(rprojroot)
 rootdir <- rprojroot::find_root(has_dir('R'))
 setwd(rootdir)
@@ -34,10 +28,11 @@ metacols <- c('campaign', 'site', 'running_id', 'country', 'date',
               'summa_sample', 'sample.id', 'sample_id', 'organism')
 
 drn_dt <- data.table(
-  country = c("Croatia", "Czech", "Finland", "France",  "Hungary", "Spain"),
+  country = c("Croatia", "Czechia", "Finland", "France",  "Hungary", "Spain"),
   catchment = c("Butiznica", "Velicka", "Lepsamaanjoki", "Albarine", "Bukkosdi", "Genal"),
   color = c("#8c510a", "#bf812d", "#01665e", "#80cdc1", "#8073ac", "#543005")
 )
+
 
 hydro_combi <- expand.grid(
   in_country = drn_dt$country,
@@ -165,7 +160,7 @@ preformatting_targets <- list(
       file.path(wp1_data_gouv_dir, 'gis_data',
                 paste0('reaches_', in_catchment, '.csv')) %>%
         fread
-    }) %>% setNames(drn_dt$country)
+    }) %>% setNames(drn_dt$country) 
   )
   ,
   
@@ -184,7 +179,7 @@ preformatting_targets <- list(
       ] %>%
         .[, country := in_country]
     }) %>% rbindlist(use.names=T, fill=T) 
-    #Reach that flows to 9999 is outlet in Czech, Finland, France, and Hungary
+    #Reach that flows to 9999 is outlet in Czechia, Finland, France, and Hungary
     #Reach that flows to 0 is outlet in Spain and Croatia
   ),
   
@@ -215,7 +210,8 @@ preformatting_targets <- list(
       setnames(tolower(names(.))) %>%
       setnames(c('matchingenvid', 'sampling_date'),
                c('running_id', 'date')) %>%
-      .[, date := as.Date(date, "%d.%m.%Y")]
+      .[, date := as.Date(date, "%d.%m.%Y")] %>%
+      .[country == 'Czech Republic', country := 'Czechia']
   ),
   
   #Read full/raw macroinvertebrate sampling data
@@ -251,8 +247,9 @@ preformatting_targets <- list(
   tar_target(
     network_clean_gpkg_list,
     lapply(names(network_sub_gpkg_list), function(in_country) {
+      print(in_country)
       #Set size of simplifying radius to remove loops. See function
-      clustering_dist_list <- list(Croatia=50, Czech=60, Finland=50, 
+      clustering_dist_list <- list(Croatia=50, Czechia=60, Finland=50, 
                                    France=50, Hungary=50, Spain=40)
       
       out_net_path <- clean_network(
@@ -265,7 +262,7 @@ preformatting_targets <- list(
         return_path = TRUE)
       
       #Manual corrections
-      if (in_country == 'Czech') {
+      if (in_country == 'Czechia') {
         clean_net <- st_read(out_net_path) %>%
           .[!(.[['cat']] %in% c(40112, 40106, 40478)),]
         st_write(clean_net, out_net_path, append=F)
@@ -287,7 +284,7 @@ preformatting_targets <- list(
   tar_target(
     network_directed_gpkg_list,
     lapply(names(network_clean_gpkg_list), function(in_country) {
-      outlet_uid_list <- list(Croatia = 463, Czech = 4, Finland = 682,
+      outlet_uid_list <- list(Croatia = 463, Czechia = 4, Finland = 682,
                               France = 1, Hungary = 5, Spain = 86)
       
       out_net_path <- direct_network(
@@ -399,6 +396,7 @@ preformatting_targets <- list(
   tar_target(
     site_snapped_gpkg_list,
     lapply(names(site_points_gpkg_list), function(in_country) {
+      # print(in_country)
       snap_river_sites(in_sites_path = site_points_gpkg_list[[in_country]], 
                        in_network_path = network_ssnready_shp_list[[in_country]],
                        custom_proj = F,
@@ -410,31 +408,31 @@ preformatting_targets <- list(
     }) %>% setNames(names(site_points_gpkg_list))
   ),
   
-  #Subset amber river barrier dataset to only keep barriers on DRNs
-  tar_target(
-    barrier_points_gpkg_list,
-    subset_amber(amber_path = amber_path, 
-                 in_hydromod_paths_dt = hydromod_paths_dt, 
-                 out_dir = file.path(resdir, 'gis'),
-                 overwrite = T) 
-  )
-  ,
-  
-  #Snap barriers to river network
-  tar_target(
-    barrier_snapped_gpkg_list,
-    lapply(names(barrier_points_gpkg_list), function(in_country) {
-      snap_barrier_sites(in_sites_path = barrier_points_gpkg_list[[in_country]], 
-                         in_network_path = network_ssnready_shp_list[[in_country]],
-                         out_snapped_sites_path=NULL, 
-                         in_sites_idcol = 'GUID',
-                         attri_to_join = c('cat', 'UID'),
-                         custom_proj = F,
-                         overwrite = T)
-    }) %>% setNames(names(site_points_gpkg_list))
-  )
-  ,
-  
+  # #Subset amber river barrier dataset to only keep barriers on DRNs
+  # tar_target(
+  #   barrier_points_gpkg_list,
+  #   subset_amber(amber_path = amber_path, 
+  #                in_hydromod_paths_dt = hydromod_paths_dt, 
+  #                out_dir = file.path(resdir, 'gis'),
+  #                overwrite = T) 
+  # )
+  # ,
+  # 
+  # #Snap barriers to river network
+  # tar_target(
+  #   barrier_snapped_gpkg_list,
+  #   lapply(names(barrier_points_gpkg_list), function(in_country) {
+  #     snap_barrier_sites(in_sites_path = barrier_points_gpkg_list[[in_country]], 
+  #                        in_network_path = network_ssnready_shp_list[[in_country]],
+  #                        out_snapped_sites_path=NULL, 
+  #                        in_sites_idcol = 'GUID',
+  #                        attri_to_join = c('cat', 'UID'),
+  #                        custom_proj = F,
+  #                        overwrite = T)
+  #   }) %>% setNames(names(site_points_gpkg_list))
+  # )
+  # ,
+  # 
   tar_target(
     genal_sites_upa_dt,
     get_genal_drainage_area(in_flowdir_path = flowdir_hydrosheds90m_path, 
@@ -494,7 +492,7 @@ analysis_targets <- list(
   tar_target(
     preformatted_data_STcon,
     lapply(names(network_ssnready_shp_list), function(in_country) {
-      #print(in_country)
+      # print(in_country)
       prepare_data_for_STcon(
         in_hydromod_drn = hydromod_comb_hist[[paste0(
           "hydromod_hist_dt_", in_country, '_isflowing')]], 
@@ -535,7 +533,7 @@ analysis_targets <- list(
               output = in_output,
               direction = 'directed',
               routing_mode = 'in',
-              weighting = TRUE,
+              weighting = FALSE,
               rounding_factor = 1)
           }) %>% setNames(paste0('STcon_m', window_size_list)) #60, 90, 180,
         })
@@ -575,7 +573,7 @@ analysis_targets <- list(
               output = in_output,
               direction = 'undirected',
               routing_mode = 'all',
-              weighting = TRUE,
+              weighting = FALSE,
               rounding_factor = 1)
           }) %>% setNames(paste0('STcon_m', window_size_list)) #60, 90, 180, 
         })
@@ -789,15 +787,24 @@ analysis_targets <- list(
     organism_dt,
     data.table(
       organism = organism_list,
-      organism_label = c('Macroinvertebrates',
-                         'Macroinvertebrates - EPT',
-                         'Macroinvertebrates - OCH',
-                         # 'Macroinvertebrates - flying',
-                         # 'Macroinvertebrates - non-flying',
-                         'Fungi - sediment', 'Fungi - biofilm',
-                         'Diatoms - sediment', 'Diatoms - biofilm',
-                         'Bacteria - sediment', 'Bacteria - biofilm')
-    )
+      organism_label = factor(c('Macroinvertebrates - All',
+                                'Macroinvertebrates - EPT',
+                                'Macroinvertebrates - OCH',
+                                # 'Macroinvertebrates - flying',
+                                # 'Macroinvertebrates - non-flying',
+                                'Fungi - Sediment', 'Fungi - Biofilm',
+                                'Diatoms - Sediment', 'Diatoms - Biofilm',
+                                'Bacteria - Sediment', 'Bacteria - Biofilm'))
+    ) %>%
+      .[, c('organism_class', 'organism_sub') := tstrsplit(organism_label, ' - '),
+        by=organism] %>%
+      .[, `:=`(organism_class = factor(organism_class, 
+                                       levels=c('Macroinvertebrates',
+                                                'Diatoms', 'Fungi', 'Bacteria')),
+               organism_sub = factor(organism_sub, 
+                                     levels=c('All', 'EPT', 'OCH', 
+                                              'Sediment', 'Biofilm'))
+      )]
   )
   ,
   
@@ -926,7 +933,7 @@ analysis_targets <- list(
                       in_sites_path = site_snapped_gpkg_list,
                       in_allvars_dt = allvars_sites$dt,
                       in_local_env_pca = local_env_pca,
-                      in_barriers_path = barrier_snapped_gpkg_list,
+                      # in_barriers_path = barrier_snapped_gpkg_list,
                       in_hydrostats_net_hist = hydrostats_net_hist,
                       in_pred_pts = NULL,
                       out_dir = file.path(resdir, 'ssn'),
@@ -959,7 +966,7 @@ analysis_targets <- list(
         paste0(hydroyr_grid$Var1,'.*', hydroyr_grid$Var2),
         paste0(stcon_grid$Var1, stcon_grid$Var2),
         paste0(fdist_grid$Var1, fdist_grid$Var2),
-        'PrdD'
+        'PrdD', 'FstDrE'
       )
 
       lapply(hydro_regex_list, function(var_str) {
@@ -974,48 +981,7 @@ analysis_targets <- list(
   #Define hydrological labels
   tar_target(
     hydro_vars_dt,
-    {
-      dt <- data.table(hydro_var=hydro_vars_forssn)
-
-      labels_dt <- data.table(
-        hydro_var_root = c('DurD', 'FreD', 'PDurD', "PFreD",
-                           "PrdD",
-                           'DurD_CV', "FreD_CV", "meanConD_CV",
-                           "FstDrE_SD", "sd6",
-                           "uQ90", "oQ10", "maxPQ", "PmeanQ",
-                           "STcon_directed", "STcon_undirected",
-                           "Fdist_mean_directed", "Fdist_mean_undirected"),
-        hydro_label = c(
-          "Proportion of no-flow days",
-          "Number of no-flow periods",
-          "Proportion of no-flow days (percentile)",
-          "Number of no-flow periods (percentile)",
-          "Time to last no flow date",
-          "CV of the annual proportion of no-flow days",
-          "CV of the annual number of no-flow periods",
-          "CV of the mean annual drying event duration",
-          "SD of the date of first drying",
-          "Seasonality of drying (SD6)",
-          "Number of low-flow days (< Q90)",
-          "Number of high-flow days (>Q10)",
-          "Maximum flow percentile",
-          "Mean flow percentile",
-          "Spatio-temporal connectivity - upstream",
-          "Spatio-temporal connectivity - undirected",
-          "Mean distance to the nearest flowing site - upstream",
-          "Mean distance to the nearest flowing site - undirected")
-      )
-
-      dt <- get_hydro_var_root(dt, in_place=F) %>%
-        merge(., labels_dt, by='hydro_var_root') %>%
-        .[, hydro_label := factor(hydro_label,
-                                  levels=labels_dt$hydro_label,
-                                  ordered=T)] %>%
-        rbind(data.table(hydro_var='null', hydro_var_root='null',
-                         hydro_label='Null'), fill=T)
-
-      return(dt)
-    }
+    create_hydro_vars_dt(in_hydro_vars_forssn = hydro_vars_forssn)
   )
   ,
 
@@ -1212,6 +1178,140 @@ analysis_targets <- list(
   )
   ,
   
+  #Combine performance tables
+  tar_target(
+    hydrowindow_best_richness_intercept_dt,
+    list(
+      miv_nopools = hydrowindow_perf_tables_richness_miv_nopools$best,
+      miv_nopools_ept = hydrowindow_perf_tables_richness_miv_nopools_ept$best,
+      miv_nopools_och = hydrowindow_perf_tables_richness_miv_nopools_och$best,
+      dia_biof_nopools = hydrowindow_perf_tables_richness_dia_biof_nopools$best,
+      dia_sedi_nopools = hydrowindow_perf_tables_richness_dia_sedi_nopools$best,
+      fun_biof_nopools = hydrowindow_perf_tables_richness_fun_biof_nopools$best,
+      fun_sedi_nopools = hydrowindow_perf_tables_richness_fun_sedi_nopools$best,
+      bac_biof_nopools = hydrowindow_perf_tables_richness_bac_biof_nopools$best,
+      bac_sedi_nopools = hydrowindow_perf_tables_richness_bac_sedi_nopools$best
+    ) %>%
+      rbindlist(idcol='organism') %>%
+      .[, intercept := coef(mod[[1]])[1], by=.(organism, hydro_var_root)] %>%
+      .[, .SD, .SDcols=!c('mod')]
+  )
+  ,
+  
+  tar_target(
+    hydrowindow_varcomp_richness_multiorg,
+    list(
+      miv_nopools = hydrowindow_varcomp_richness_miv_nopools$dt,
+      miv_nopools_ept = hydrowindow_varcomp_richness_miv_nopools_ept$dt,
+      miv_nopools_och = hydrowindow_varcomp_richness_miv_nopools_och$dt,
+      dia_biof_nopools = hydrowindow_varcomp_richness_dia_biof_nopools$dt,
+      dia_sedi_nopools = hydrowindow_varcomp_richness_dia_sedi_nopools$dt,
+      fun_biof_nopools = hydrowindow_varcomp_richness_fun_biof_nopools$dt,
+      fun_sedi_nopools = hydrowindow_varcomp_richness_fun_sedi_nopools$dt,
+      bac_biof_nopools = hydrowindow_varcomp_richness_bac_biof_nopools$dt,
+      bac_sedi_nopools = hydrowindow_varcomp_richness_bac_sedi_nopools$dt
+    ) %>%
+      rbindlist(idcol="organism")
+  )
+  ,
+  
+  #Combine performance tables
+  tar_target(
+    hydrowindow_best_invsimpson_intercept_dt,
+    list(
+      miv_nopools = hydrowindow_perf_tables_invsimpson_miv_nopools$best,
+      miv_nopools_ept = hydrowindow_perf_tables_invsimpson_miv_nopools_ept$best,
+      miv_nopools_och = hydrowindow_perf_tables_invsimpson_miv_nopools_och$best,
+      dia_biof_nopools = hydrowindow_perf_tables_invsimpson_dia_biof_nopools$best,
+      dia_sedi_nopools = hydrowindow_perf_tables_invsimpson_dia_sedi_nopools$best,
+      fun_biof_nopools = hydrowindow_perf_tables_invsimpson_fun_biof_nopools$best,
+      fun_sedi_nopools = hydrowindow_perf_tables_invsimpson_fun_sedi_nopools$best,
+      bac_biof_nopools = hydrowindow_perf_tables_invsimpson_bac_biof_nopools$best,
+      bac_sedi_nopools = hydrowindow_perf_tables_invsimpson_bac_sedi_nopools$best
+    ) %>%
+      rbindlist(idcol='organism') %>%
+      .[, intercept := coef(mod[[1]])[1], by=.(organism, hydro_var_root)] %>%
+      .[, .SD, .SDcols=!c('mod')]
+  )
+  ,
+  
+  tar_target(
+    hydrowindow_varcomp_invsimpson_multiorg,
+    list(
+      miv_nopools = hydrowindow_varcomp_invsimpson_miv_nopools$dt,
+      miv_nopools_ept = hydrowindow_varcomp_invsimpson_miv_nopools_ept$dt,
+      miv_nopools_och = hydrowindow_varcomp_invsimpson_miv_nopools_och$dt,
+      dia_biof_nopools = hydrowindow_varcomp_invsimpson_dia_biof_nopools$dt,
+      dia_sedi_nopools = hydrowindow_varcomp_invsimpson_dia_sedi_nopools$dt,
+      fun_biof_nopools = hydrowindow_varcomp_invsimpson_fun_biof_nopools$dt,
+      fun_sedi_nopools = hydrowindow_varcomp_invsimpson_fun_sedi_nopools$dt,
+      bac_biof_nopools = hydrowindow_varcomp_invsimpson_bac_biof_nopools$dt,
+      bac_sedi_nopools = hydrowindow_varcomp_invsimpson_bac_sedi_nopools$dt
+    ) %>%
+      rbindlist(idcol="organism")
+  )
+  ,
+  
+  tar_target(
+    varcomp_multiorganism_richness,
+    plot_varcomp_multiorganisms(
+      in_hydrowindow_varcomp_multiorg = hydrowindow_varcomp_richness_multiorg,
+      in_hydro_vars_dt = hydro_vars_dt,
+      in_organism_dt = organism_dt)
+  )
+  ,
+  
+  tar_target(
+    varcomp_multiorganism_invsimpson,
+    plot_varcomp_multiorganisms(
+      in_hydrowindow_varcomp_multiorg = hydrowindow_varcomp_invsimpson_multiorg,
+      in_hydro_vars_dt = hydro_vars_dt,
+      in_organism_dt = organism_dt)
+  )
+  ,
+  
+  tar_target(
+    emtrends_multiorganism_richness,
+    plot_emtrends_multiorganisms(emtrends_list = list(
+      miv_nopools = hydrowindow_emtrends_richness_miv_nopools$dt,
+      miv_nopools_ept = hydrowindow_emtrends_richness_miv_nopools_ept$dt,
+      miv_nopools_och = hydrowindow_emtrends_richness_miv_nopools_och$dt,
+      dia_biof_nopools = hydrowindow_emtrends_richness_dia_biof_nopools$dt,
+      dia_sedi_nopools = hydrowindow_emtrends_richness_dia_sedi_nopools$dt,
+      fun_biof_nopools = hydrowindow_emtrends_richness_fun_biof_nopools$dt,
+      fun_sedi_nopools = hydrowindow_emtrends_richness_fun_sedi_nopools$dt,
+      bac_biof_nopools = hydrowindow_emtrends_richness_bac_biof_nopools$dt,
+      bac_sedi_nopools = hydrowindow_emtrends_richness_bac_sedi_nopools$dt
+    ),
+    in_hydrowindow_best_intercept_dt = hydrowindow_best_richness_intercept_dt,
+    in_hydro_vars_dt = hydro_vars_dt,
+    in_organism_dt = organism_dt,
+    in_drn_dt = drn_dt)
+  )
+  ,
+  
+  tar_target(
+    emtrends_multiorganism_invsimpson,
+    plot_emtrends_multiorganisms(emtrends_list = list(
+      miv_nopools = hydrowindow_emtrends_invsimpson_miv_nopools$dt,
+      miv_nopools_ept = hydrowindow_emtrends_invsimpson_miv_nopools_ept$dt,
+      miv_nopools_och = hydrowindow_emtrends_invsimpson_miv_nopools_och$dt,
+      dia_biof_nopools = hydrowindow_emtrends_invsimpson_dia_biof_nopools$dt,
+      dia_sedi_nopools = hydrowindow_emtrends_invsimpson_dia_sedi_nopools$dt,
+      fun_biof_nopools = hydrowindow_emtrends_invsimpson_fun_biof_nopools$dt,
+      fun_sedi_nopools = hydrowindow_emtrends_invsimpson_fun_sedi_nopools$dt,
+      bac_biof_nopools = hydrowindow_emtrends_invsimpson_bac_biof_nopools$dt,
+      bac_sedi_nopools = hydrowindow_emtrends_invsimpson_bac_sedi_nopools$dt
+    ),
+    in_hydrowindow_best_intercept_dt = hydrowindow_best_invsimpson_intercept_dt,
+    in_hydro_vars_dt = hydro_vars_dt,
+    in_organism_dt = organism_dt,
+    in_drn_dt = drn_dt)
+  )
+  ,
+
+  
+  
   ##############################################################################
   # MODEL SITES SUMMARIZED
   ##############################################################################
@@ -1229,7 +1329,7 @@ analysis_targets <- list(
                       in_sites_path = site_snapped_gpkg_list,
                       in_allvars_dt = allvars_summarized$dt,
                       in_local_env_pca = local_env_pca_summarized,
-                      in_barriers_path = barrier_snapped_gpkg_list,
+                      # in_barriers_path = barrier_snapped_gpkg_list,
                       in_hydrostats_net_hist = hydrostats_net_hist,
                       in_pred_pts = ssn_pred_pts,
                       out_dir = file.path(resdir, 'ssn'),
@@ -1265,7 +1365,7 @@ analysis_targets <- list(
   # tar_target(
   #   ssn_mods_miv_yr_diagnose,
   #   diagnose_ssn_mod(in_ssn_mods = ssn_mods_miv_yr,
-  #                    response_var_label = 'Mean richness',
+  #                    response_var_label = 'Mean ,
   #                    write_plots = T,
   #                    out_dir = figdir)
   # ),
@@ -1296,6 +1396,15 @@ analysis_targets <- list(
   #               out_dir = figdir)
   # )
 )
+
+
+analysis_targets
+# ,
+# 
+# tar_target(
+#   varcomp_rbind,
+#   rbindlist(lapply(hydrowindow_varcomp, `[[`, "dt"), idcol = "organism")
+# )
 
 list(preformatting_targets, mapped_hydrotargets, 
      combined_hydrotargets, analysis_targets) %>%
