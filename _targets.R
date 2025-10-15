@@ -1126,7 +1126,8 @@ analysis_targets <- list(
       hydrowindow_emmeans,
       get_hydrowindow_emmeans(
         best_dt = hydrowindow_perf_tables$best,
-        in_hydro_vars_dt = hydro_vars_dt)
+        in_hydro_vars_dt = hydro_vars_dt,
+        in_drn_dt = drn_dt)
     )
     ,
 
@@ -1134,7 +1135,8 @@ analysis_targets <- list(
       hydrowindow_emtrends,
       get_hydrowindow_emtrends(
         best_dt = hydrowindow_perf_tables$best,
-        in_hydro_vars_dt = hydro_vars_dt)
+        in_hydro_vars_dt = hydro_vars_dt,
+        in_drn_dt = drn_dt)
     )
     ,
 
@@ -1310,8 +1312,6 @@ analysis_targets <- list(
   )
   ,
 
-  
-  
   ##############################################################################
   # MODEL SITES SUMMARIZED
   ##############################################################################
