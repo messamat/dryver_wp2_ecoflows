@@ -1259,7 +1259,9 @@ analysis_targets <- list(
     plot_varcomp_multiorganisms(
       in_hydrowindow_varcomp_multiorg = hydrowindow_varcomp_richness_multiorg,
       in_hydro_vars_dt = hydro_vars_dt,
-      in_organism_dt = organism_dt)
+      in_organism_dt = organism_dt,
+      write_plot = T,
+      out_dir = figdir)
   )
   ,
   
@@ -1268,7 +1270,9 @@ analysis_targets <- list(
     plot_varcomp_multiorganisms(
       in_hydrowindow_varcomp_multiorg = hydrowindow_varcomp_invsimpson_multiorg,
       in_hydro_vars_dt = hydro_vars_dt,
-      in_organism_dt = organism_dt)
+      in_organism_dt = organism_dt,
+      write_plot = T,
+      out_dir = figdir)
   )
   ,
   
@@ -1288,7 +1292,9 @@ analysis_targets <- list(
     in_hydrowindow_best_intercept_dt = hydrowindow_best_richness_intercept_dt,
     in_hydro_vars_dt = hydro_vars_dt,
     in_organism_dt = organism_dt,
-    in_drn_dt = drn_dt)
+    in_drn_dt = drn_dt,
+    write_plot = T,
+    out_dir = figdir)
   )
   ,
   
@@ -1308,7 +1314,9 @@ analysis_targets <- list(
     in_hydrowindow_best_intercept_dt = hydrowindow_best_invsimpson_intercept_dt,
     in_hydro_vars_dt = hydro_vars_dt,
     in_organism_dt = organism_dt,
-    in_drn_dt = drn_dt)
+    in_drn_dt = drn_dt,
+    write_plot = T,
+    out_dir = figdir)
   )
   ,
 
