@@ -1359,16 +1359,120 @@ analysis_targets <- list(
     save_ssn_summarized_maps(in_ssn_summarized_maps = ssn_summarized_maps,
                              out_dir = figdir) 
   )
-  # ,
-  # 
-  # tar_target(
-  #   ssn_mods_miv_yr,
-  #   model_miv_yr(in_ssn_eu_summarized = ssn_eu_summarized,
-  #                in_allvars_summarized = allvars_summarized,
-  #                in_cor_matrices = cor_matrices_list_summarized,
-  #                ssn_covtypes = ssn_covtypes)
-  # ),
-  # 
+  ,
+
+  tar_target(
+    ssn_mods_miv_richness_yr,
+    model_miv_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                 in_allvars_summarized = allvars_summarized,
+                 in_cor_matrices = cor_matrices_list_summarized,
+                 ssn_covtypes = ssn_covtypes)
+  ),
+  
+  tar_target(
+    ssn_mods_miv_invsimpson__yr,
+    model_miv_invsimpson_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                 in_allvars_summarized = allvars_summarized,
+                 in_cor_matrices = cor_matrices_list_summarized,
+                 ssn_covtypes = ssn_covtypes)
+  ),
+  
+  tar_target(
+    ssn_mods_ept_richness_yr,
+    model_ept_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                          in_allvars_summarized = allvars_summarized,
+                          in_cor_matrices = cor_matrices_list_summarized,
+                          ssn_covtypes = ssn_covtypes)
+  ),
+  
+  tar_target(
+    ssn_mods_dia_sedi_richness_yr,
+    model_miv_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                          in_allvars_summarized = allvars_summarized,
+                          in_cor_matrices = cor_matrices_list_summarized,
+                          ssn_covtypes = ssn_covtypes)
+  ),
+  
+  tar_target(
+    ssn_mods_dia_sedi_invsimpson_yr,
+    model_miv_invsimpson_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                            in_allvars_summarized = allvars_summarized,
+                            in_cor_matrices = cor_matrices_list_summarized,
+                            ssn_covtypes = ssn_covtypes)
+  ),
+  
+  tar_target(
+    ssn_mods_dia_biof_richness_yr,
+    model_miv_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                          in_allvars_summarized = allvars_summarized,
+                          in_cor_matrices = cor_matrices_list_summarized,
+                          ssn_covtypes = ssn_covtypes)
+  ),
+  
+  tar_target(
+    ssn_mods_fun_sedi_richness_yr,
+    model_miv_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                          in_allvars_summarized = allvars_summarized,
+                          in_cor_matrices = cor_matrices_list_summarized,
+                          ssn_covtypes = ssn_covtypes)
+  ),
+  
+  tar_target(
+    ssn_mods_fun_sedi_invsimpson__yr,
+    model_miv_invsimpson_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                            in_allvars_summarized = allvars_summarized,
+                            in_cor_matrices = cor_matrices_list_summarized,
+                            ssn_covtypes = ssn_covtypes)
+  ),
+  
+  tar_target(
+    ssn_mods_fun_biof_richness_yr,
+    model_miv_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                          in_allvars_summarized = allvars_summarized,
+                          in_cor_matrices = cor_matrices_list_summarized,
+                          ssn_covtypes = ssn_covtypes)
+  ),
+  
+  tar_target(
+    ssn_mods_fun_biof_invsimpson__yr,
+    model_miv_invsimpson_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                            in_allvars_summarized = allvars_summarized,
+                            in_cor_matrices = cor_matrices_list_summarized,
+                            ssn_covtypes = ssn_covtypes)
+  ),
+  
+  tar_target(
+    ssn_mods_bac_sedi_richness_yr,
+    model_miv_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                          in_allvars_summarized = allvars_summarized,
+                          in_cor_matrices = cor_matrices_list_summarized,
+                          ssn_covtypes = ssn_covtypes)
+  ),
+  
+  tar_target(
+    ssn_mods_bac_sedi_invsimpson__yr,
+    model_miv_invsimpson_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                            in_allvars_summarized = allvars_summarized,
+                            in_cor_matrices = cor_matrices_list_summarized,
+                            ssn_covtypes = ssn_covtypes)
+  ),
+  
+  tar_target(
+    ssn_mods_bac_biof_richness_yr,
+    model_miv_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                          in_allvars_summarized = allvars_summarized,
+                          in_cor_matrices = cor_matrices_list_summarized,
+                          ssn_covtypes = ssn_covtypes)
+  ),
+  
+  tar_target(
+    ssn_mods_bac_biof_invsimpson__yr,
+    model_miv_invsimpson_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                            in_allvars_summarized = allvars_summarized,
+                            in_cor_matrices = cor_matrices_list_summarized,
+                            ssn_covtypes = ssn_covtypes)
+  )
+  
   # 
   # tar_target(
   #   ssn_mods_miv_yr_diagnose,
