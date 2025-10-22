@@ -7318,7 +7318,7 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
 # tar_load(ssn_covtypes)
 # in_ssn = tar_read(ssn_eu_summarized)
 # organism = c('bac_biof_nopools')
-# formula_root = ' sqrt(basin_area_km2)'
+# formula_root = ' log10(basin_area_km2)'
 # hydro_var = 'DurD3650past'
 # response_var = 'mean_expshannon'
 # ssn_covtypes = ssn_covtypes[1:10,]
@@ -8200,7 +8200,7 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
 # in_cor_matrices <- tar_read(cor_matrices_list_summarized)
 # tar_load(ssn_covtypes)
 # tar_load(cor_heatmaps_summarized)
-# interactive = T
+# interactive = F
 # scale_predictors = T
 
 #' Macroinvertebrate model for annual data
@@ -8256,11 +8256,15 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
     overwrite = TRUE
   )
   
+  #Transform some variables  
+  ssn_miv$obs$meanQ3650past_sqrt <- sqrt(ssn_miv$obs$meanQ3650past)
+  
   allvars_dt <- as.data.table(ssn_miv$obs) %>%
     setorderv(c('country', 'site')) 
-  
+
   # Define candidate hydrological variables
-  hydro_candidates <- in_allvars_summarized$cols$hydro_con_summarized
+  hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
+                        'meanQ3650past_sqrt')
   
   #Scale predictor data (mean of 0 and SD of 1) -----
   if (scale_predictors) {
@@ -8307,6 +8311,11 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
       geom_smooth(method='lm') +
       scale_x_log10() +
       facet_wrap(~country)
+    
+    ggplot(ssn_miv$obs, aes(x=basin_area_km2, y=get(alpha_var), color=country)) +
+      geom_point() +
+      geom_smooth(method='lm', se=F) +
+      scale_x_log10()
     
     ggplot(ssn_miv$obs, aes(x=meanQ3650past, y=get(alpha_var), color=stream_type)) +
       geom_point() +
@@ -8367,7 +8376,7 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
     ssn_norm_ini <- model_ssn_hydrowindow(
       in_ssn = in_ssn_eu_summarized,
       organism = c('miv_nopools'),
-      formula_root = ' sqrt(basin_area_km2)',
+      formula_root = ' log10(basin_area_km2)',
       hydro_var = 'DurD3650past',
       response_var = alpha_var,
       ssn_covtypes = ssn_covtypes,
@@ -8380,7 +8389,7 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
       in_ssn = in_ssn_eu_summarized,
       family = "poisson",  #Gamma(link = "log"),
       organism = c('miv_nopools'),
-      formula_root = ' sqrt(basin_area_km2)',
+      formula_root = ' log10(basin_area_km2)',
       hydro_var = 'DurD3650past',
       response_var = alpha_var,
       ssn_covtypes = ssn_covtypes,
@@ -8393,7 +8402,7 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
       in_ssn = in_ssn_eu_summarized,
       family = "nbinomial",
       organism = c('miv_nopools'),
-      formula_root = ' sqrt(basin_area_km2)',
+      formula_root = ' log10(basin_area_km2)',
       hydro_var = 'DurD3650past',
       response_var = alpha_var,
       ssn_covtypes = ssn_covtypes,
@@ -8418,7 +8427,7 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
       in_ssn = in_ssn_eu_summarized,
       family = "nbinomial",
       organism = c('miv_nopools'),
-      formula_root = ' sqrt(basin_area_km2)',
+      formula_root = ' log10(basin_area_km2)',
       hydro_var = 'DurD3650past',
       response_var = alpha_var,
       ssn_covtypes = ssn_covtypes,
@@ -8462,89 +8471,89 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
   miv_rich_modlist[['null']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ 1')))
   
   #Initial model
-  miv_rich_modlist[['mod1']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod1']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod2']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ country*sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod2']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ country*log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod3']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ basin_area_km2 + country:sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod3']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ basin_area_km2 + country:log10(basin_area_km2)')))
   
   miv_rich_modlist[['mod4']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ sqrt(meanQ3650past)'))) #Replace by qsim_3650past
   
   miv_rich_modlist[['mod5']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ log10(meanQ3650past)')))
   
-  miv_rich_modlist[['mod5']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ country*sqrt(meanQ3650past)')))
+  miv_rich_modlist[['mod6']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ country*sqrt(meanQ3650past)')))
   
-  miv_rich_modlist[['mod6']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ meanQ3650past + country:sqrt(meanQ3650past)')))
+  miv_rich_modlist[['mod7']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ meanQ3650past + country:sqrt(meanQ3650past)')))
   
-  miv_rich_modlist[['mod7']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country*sqrt(meanQ3650past)')))
+  miv_rich_modlist[['mod8']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country*sqrt(meanQ3650past)')))
   
-  miv_rich_modlist[['mod8']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + country*sqrt(meanQ3650past)')))
+  miv_rich_modlist[['mod9']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + country*sqrt(meanQ3650past)')))
   
-  miv_rich_modlist[['mod9']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ country*DurD3650past + sqrt(meanQ3650past)')))
+  miv_rich_modlist[['mod10']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ country*DurD3650past + sqrt(meanQ3650past)')))
   
-  miv_rich_modlist[['mod10']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ country*DurD3650past + sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod11']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ country*DurD3650past + log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod11']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + country*sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod12']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + country*log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod12']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + sqrt(meanQ3650past)')))
+  miv_rich_modlist[['mod13']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + sqrt(meanQ3650past)')))
   
-  miv_rich_modlist[['mod13']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ FreD3650past + country:FreD3650past + sqrt(meanQ3650past)')))
+  miv_rich_modlist[['mod14']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ FreD3650past + country:FreD3650past + sqrt(meanQ3650past)')))
   
-  miv_rich_modlist[['mod14']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(meanQ3650past)')))
+  miv_rich_modlist[['mod15']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(meanQ3650past)')))
   
-  miv_rich_modlist[['mod15']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod16']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod16']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_avg_samp + country:DurD_avg_samp + sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod17']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_avg_samp + country:DurD_avg_samp + log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod17']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_max_samp + country:DurD_max_samp + sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod18']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_max_samp + country:DurD_max_samp + log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod18']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ FreD_samp + country:FreD_samp + sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod19']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ FreD_samp + country:FreD_samp + log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod19']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ meanConD_yr + country:meanConD_yr + sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod20']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ meanConD_yr + country:meanConD_yr + log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod20']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ PDurD365past + country:PDurD365past + sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod21']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ PDurD365past + country:PDurD365past + log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod21']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + FstDrE_SD30yrpast + country:FstDrE_SD30yrpast + sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod22']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + FstDrE_SD30yrpast + country:FstDrE_SD30yrpast + log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod22']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_avg_samp + country:DurD_avg_samp + FreD_samp + sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod23']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_avg_samp + country:DurD_avg_samp + FreD_samp + log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod23']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sd6_10yrpast + sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod24']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sd6_10yrpast + log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod24']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ Fdist_mean_10past_undirected_avg_samp + country:Fdist_mean_10past_undirected_avg_samp + sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod25']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ Fdist_mean_10past_undirected_avg_samp + country:Fdist_mean_10past_undirected_avg_samp + log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod25']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ STcon_m10_undirected_avg_samp + country:STcon_m10_undirected_avg_samp + sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod26']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ STcon_m10_undirected_avg_samp + country:STcon_m10_undirected_avg_samp + log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod26']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + PFreD365past + sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod27']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + PFreD365past + log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod27']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + STcon_m10_undirected_avg_samp + sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod28']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + STcon_m10_undirected_avg_samp + log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod28']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + STcon_m10_directed_avg_samp + sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod29']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + STcon_m10_directed_avg_samp + log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod29']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp*sd6_10yrpast + country:DurD_samp + sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod30']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp*sd6_10yrpast + country:DurD_samp + log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod30']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + FstDrE + FstDrE:country + sqrt(basin_area_km2)'))) #Overspec
+  miv_rich_modlist[['mod31']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + FstDrE + FstDrE:country + log10(basin_area_km2)'))) #Overspec
   
-  miv_rich_modlist[['mod31']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + RelF_avg_samp + sqrt(basin_area_km2)'))) 
+  miv_rich_modlist[['mod32']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + RelF_avg_samp + log10(basin_area_km2)'))) 
   
-  miv_rich_modlist[['mod32']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + FstDrE + FstDrE:country + sqrt(basin_area_km2)'))) 
+  miv_rich_modlist[['mod33']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + FstDrE + FstDrE:country + log10(basin_area_km2)'))) 
   
-  miv_rich_modlist[['mod33']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + sqrt(meanQ3650past)')))
+  miv_rich_modlist[['mod34']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + sqrt(meanQ3650past)')))
   
-  miv_rich_modlist[['mod34']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + FstDrE + sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod35']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + FstDrE + log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod35']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + FreD3650past + FreD3650past:country + sqrt(meanQ3650past)')))
+  miv_rich_modlist[['mod36']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + FreD3650past + FreD3650past:country + sqrt(meanQ3650past)')))
   
-  miv_rich_modlist[['mod36']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_CV10yrpast + DurD_CV10yrpast:country + sqrt(basin_area_km2)'))) 
+  miv_rich_modlist[['mod37']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_CV10yrpast + DurD_CV10yrpast:country + log10(basin_area_km2)'))) 
   
-  miv_rich_modlist[['mod37']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ FstDrE_SD10yrpast + FstDrE_SD10yrpast:country + sqrt(basin_area_km2)'))) 
+  miv_rich_modlist[['mod38']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ FstDrE_SD10yrpast + FstDrE_SD10yrpast:country + log10(basin_area_km2)'))) 
   
-  miv_rich_modlist[['mod38']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past*PFreD365past + country:DurD3650past + sqrt(meanQ3650past)'))) 
+  miv_rich_modlist[['mod39']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past*PFreD365past + country:DurD3650past + sqrt(meanQ3650past)'))) 
   
-  miv_rich_modlist[['mod39']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + PFreD365past + country:DurD3650past + country:PFreD365past + sqrt(meanQ3650past)'))) 
+  miv_rich_modlist[['mod40']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + PFreD365past + country:DurD3650past + country:PFreD365past + sqrt(meanQ3650past)'))) 
   
   if (interactive) {
     #Check model in additional depth (applied to most models before continuing)
-    chosen_mod <- miv_rich_modlist[['mod35']]
+    chosen_mod <- miv_rich_modlist[['mod36']]
     
     #Check residual correlations to choose variable additions
     check_resid_corr(in_ssn_mod = chosen_mod,
@@ -8590,25 +8599,25 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
   }
   
   #Add environmental variables and "stream_type"
-  miv_rich_modlist[['mod40']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + env_PC1')))
+  miv_rich_modlist[['mod41']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + log10(basin_area_km2) + env_PC1')))
   
-  miv_rich_modlist[['mod41']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + env_PC1 + env_PC2')))
+  miv_rich_modlist[['mod42']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + log10(basin_area_km2) + env_PC1 + env_PC2')))
   
-  miv_rich_modlist[['mod42']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + env_PC2')))
+  miv_rich_modlist[['mod43']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + log10(basin_area_km2) + env_PC2')))
   
-  miv_rich_modlist[['mod43']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + env_PC1*env_PC2')))
+  miv_rich_modlist[['mod44']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + log10(basin_area_km2) + env_PC1*env_PC2')))
   
-  miv_rich_modlist[['mod44']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ stream_type + country:stream_type + DurD_samp + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod45']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ stream_type + country:stream_type + DurD_samp + log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod45']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ stream_type + DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  miv_rich_modlist[['mod46']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ stream_type + DurD_samp + country:DurD_samp + log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
-  miv_rich_modlist[['mod46']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + stream_type + country:stream_type + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)'))) 
+  miv_rich_modlist[['mod47']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + stream_type + country:stream_type + log10(basin_area_km2) + country:log10(basin_area_km2)'))) 
   
-  miv_rich_modlist[['mod47']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + stream_type + country:stream_type + sqrt(meanQ3650past) + country:sqrt(meanQ3650past)'))) 
+  miv_rich_modlist[['mod48']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + stream_type + country:stream_type + sqrt(meanQ3650past) + country:sqrt(meanQ3650past)'))) 
   
-  miv_rich_modlist[['mod48']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + stream_type + sqrt(basin_area_km2) + country:sqrt(basin_area_km2) + env_PC2'))) 
+  miv_rich_modlist[['mod49']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + stream_type + log10(basin_area_km2) + country:log10(basin_area_km2) + env_PC2'))) 
   
-  miv_rich_modlist[['mod49']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + stream_type + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)'))) 
+  miv_rich_modlist[['mod50']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + stream_type + log10(basin_area_km2) + country:log10(basin_area_km2)'))) 
   
   # check_rf <- ranger::ranger(mean_richness ~ ., 
   #                            data= allvars_dt[, c(hydro_candidates, 'mean_richness', 'country'), with=F])
@@ -8634,7 +8643,7 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
   # Refits the selected "best" model using the REML method for better variance estimation.
   ssn_miv_best_final <- quick_miv_ssn(
     as.formula(paste(alpha_var, '~ DurD3650past + stream_type + country:stream_type +
-      sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')),
+      log10(basin_area_km2) + country:log10(basin_area_km2)')),
     estmethod = 'reml'
   )
   ssn_miv_best_preds <- augment(ssn_miv_best_final,
@@ -8694,7 +8703,7 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
   
   #Re-fit final model with REML
   ssn_miv_pred_final <- ssn_glm(
-    formula = mean_richness ~ DurD_samp + FreD3650past + FreD3650past:country + sqrt(meanQ3650past),
+    formula = mean_richness ~ DurD_samp_z + FreD3650past_z + FreD3650past_z:country + meanQ3650past_sqrt_z,
     family = 'nbinomial',
     ssn.object = ssn_miv,
     taildown_type = 'none',
@@ -8872,7 +8881,7 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
       in_ssn = in_ssn_eu_summarized,
       family = 'Gaussian',
       organism = c('miv_nopools'),
-      formula_root = 'sqrt(basin_area_km2)',
+      formula_root = 'log10(basin_area_km2)',
       hydro_var = 'DurD3650past',
       response_var = alpha_var,
       ssn_covtypes = ssn_covtypes,
@@ -8885,7 +8894,7 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
       in_ssn = in_ssn_eu_summarized,
       family = 'Gamma',
       organism = c('miv_nopools'),
-      formula_root = 'sqrt(basin_area_km2)',
+      formula_root = 'log10(basin_area_km2)',
       hydro_var = 'DurD3650past',
       response_var = alpha_var,
       ssn_covtypes = ssn_covtypes,
@@ -8898,7 +8907,7 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
       in_ssn = in_ssn_eu_summarized,
       family = 'Gaussian',
       organism = c('miv_nopools'),
-      formula_root = 'sqrt(basin_area_km2)',
+      formula_root = 'log10(basin_area_km2)',
       hydro_var = 'DurD3650past',
       response_var = paste0('log10(', alpha_var, ')'),
       ssn_covtypes = ssn_covtypes,
@@ -8918,7 +8927,7 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
       in_ssn = in_ssn_eu_summarized,
       family = "Gaussian",
       organism = c('miv_nopools'),
-      formula_root = ' sqrt(basin_area_km2)',
+      formula_root = ' log10(basin_area_km2)',
       hydro_var = 'DurD3650past',
       response_var = paste0('log10(', alpha_var, ')'),
       ssn_covtypes = ssn_covtypes,
@@ -8966,11 +8975,11 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
   miv_simps_modlist[['null']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ 1')))
   
   #Initial model
-  miv_simps_modlist[['mod1']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2)')))
+  miv_simps_modlist[['mod1']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
-  miv_simps_modlist[['mod2']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ country*sqrt(basin_area_km2)')))
+  miv_simps_modlist[['mod2']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ country*log10(basin_area_km2)')))
   
-  miv_simps_modlist[['mod3']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ basin_area_km2 + country:sqrt(basin_area_km2)')))
+  miv_simps_modlist[['mod3']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ basin_area_km2 + country:log10(basin_area_km2)')))
   
   miv_simps_modlist[['mod4']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ sqrt(meanQ3650past)'))) #Replace by qsim_3650past
   
@@ -8986,9 +8995,9 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
   
   miv_simps_modlist[['mod9']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + sqrt(meanQ3650past) + country:sqrt(meanQ3650past)')))
   
-  miv_simps_modlist[['mod10']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  miv_simps_modlist[['mod10']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
-  miv_simps_modlist[['mod11']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ FstDrE + country:FstDrE + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  miv_simps_modlist[['mod11']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ FstDrE + country:FstDrE + log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
   miv_simps_modlist[['mod12']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ FstDrE + country:FstDrE + sqrt(meanQ3650past) + country:sqrt(meanQ3650past)')))
   
@@ -9091,11 +9100,14 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
     overwrite = TRUE
   )
   
+  ssn_miv$obs$basin_area_km2_log10 <- log10(ssn_miv$obs$basin_area_km2)
+  
   allvars_dt <- as.data.table(ssn_miv$obs) %>%
     setorderv(c('country', 'site')) 
   
   # Define candidate hydrological variables
-  hydro_candidates <- in_allvars_summarized$cols$hydro_con_summarized
+  hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
+                        'basin_area_km2_log10')
   
   #Scale predictor data (mean of 0 and SD of 1) -----
   if (scale_predictors) {
@@ -9205,7 +9217,7 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
       in_ssn = in_ssn_eu_summarized,
       family = "nbinomial",
       organism = c(in_organism),
-      formula_root = ' sqrt(basin_area_km2)',
+      formula_root = ' log10(basin_area_km2)',
       hydro_var = 'DurD_samp',
       response_var = alpha_var,
       ssn_covtypes = ssn_covtypes,
@@ -9253,9 +9265,9 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
   ept_rich_modlist[['mod1']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ 1')), in_random=~country)
   
   #Initial model
-  ept_rich_modlist[['mod2']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2)')))
+  ept_rich_modlist[['mod2']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
-  ept_rich_modlist[['mod3']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ basin_area_km2 + country:sqrt(basin_area_km2)')))
+  ept_rich_modlist[['mod3']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ basin_area_km2 + country:log10(basin_area_km2)')))
   
   ept_rich_modlist[['mod4']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ sqrt(meanQ3650past)'))) #Replace by qsim_3650past
   
@@ -9275,18 +9287,18 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
   
   ept_rich_modlist[['mod12']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ FstDrE + country:FstDrE + meanQ3650past + country:sqrt(meanQ3650past)')))
   
-  ept_rich_modlist[['mod13']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + basin_area_km2 + country:sqrt(basin_area_km2)')))
+  ept_rich_modlist[['mod13']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + basin_area_km2 + country:log10(basin_area_km2)')))
   
-  ept_rich_modlist[['mod14']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ FreD3650past + country:FreD3650past + basin_area_km2 + country:sqrt(basin_area_km2)')))
+  ept_rich_modlist[['mod14']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ FreD3650past + country:FreD3650past + basin_area_km2 + country:log10(basin_area_km2)')))
   
-  ept_rich_modlist[['mod15']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + basin_area_km2 + country:sqrt(basin_area_km2)')))
+  ept_rich_modlist[['mod15']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + basin_area_km2 + country:log10(basin_area_km2)')))
   
-  ept_rich_modlist[['mod16']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ FstDrE + country:FstDrE + basin_area_km2 + country:sqrt(basin_area_km2)')))
+  ept_rich_modlist[['mod16']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ FstDrE + country:FstDrE + basin_area_km2 + country:log10(basin_area_km2)')))
   
-  ept_rich_modlist[['mod17']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ FreD3650past + country:FreD3650past +  sd6_30yrpast + basin_area_km2 + country:sqrt(basin_area_km2)')))
+  ept_rich_modlist[['mod17']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ FreD3650past + country:FreD3650past +  sd6_30yrpast + basin_area_km2 + country:log10(basin_area_km2)')))
   #sd6_30yrpast; se too large
   
-  ept_rich_modlist[['mod18']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ FreD3650past + country:FreD3650past + PmeanQ10past_max_samp + country:PmeanQ10past_max_samp + basin_area_km2 + country:sqrt(basin_area_km2)')))
+  ept_rich_modlist[['mod18']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ FreD3650past + country:FreD3650past + PmeanQ10past_max_samp + country:PmeanQ10past_max_samp + basin_area_km2 + country:log10(basin_area_km2)')))
   
   ept_rich_modlist[['mod19']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ FstDrE + country:FstDrE + DurD3650past + meanQ3650past + country:sqrt(meanQ3650past)')))
   
@@ -9294,31 +9306,31 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
   
   ept_rich_modlist[['mod21']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ FstDrE + country:FstDrE + FreD3650past + FreD3650past + country:sqrt(meanQ3650past)')))
   
-  ept_rich_modlist[['mod22']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + PmeanQ10past_max_samp + country:PmeanQ10past_max_samp + basin_area_km2 + country:sqrt(basin_area_km2)')))
+  ept_rich_modlist[['mod22']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + PmeanQ10past_max_samp + country:PmeanQ10past_max_samp + basin_area_km2 + country:log10(basin_area_km2)')))
   #PmeanQ10past_max: standard errors too large
   
-  ept_rich_modlist[['mod23']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + FreD_CV10yrpast + basin_area_km2 + country:sqrt(basin_area_km2)')))
+  ept_rich_modlist[['mod23']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + FreD_CV10yrpast + basin_area_km2 + country:log10(basin_area_km2)')))
   
   #Add environmental variables and "stream_type"
-  ept_rich_modlist[['mod24']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + env_PC1')))
+  ept_rich_modlist[['mod24']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + log10(basin_area_km2) + env_PC1')))
   
-  ept_rich_modlist[['mod25']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + env_PC1 + env_PC2')))
+  ept_rich_modlist[['mod25']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + log10(basin_area_km2) + env_PC1 + env_PC2')))
   
-  ept_rich_modlist[['mod26']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + env_PC2')))
+  ept_rich_modlist[['mod26']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + log10(basin_area_km2) + env_PC2')))
   
-  ept_rich_modlist[['mod27']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + env_PC1*env_PC2')))
+  ept_rich_modlist[['mod27']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + log10(basin_area_km2) + env_PC1*env_PC2')))
   
-  ept_rich_modlist[['mod28']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ stream_type + country:stream_type + DurD_samp + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  ept_rich_modlist[['mod28']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ stream_type + country:stream_type + DurD_samp + log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
-  ept_rich_modlist[['mod29']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ stream_type + DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  ept_rich_modlist[['mod29']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ stream_type + DurD_samp + country:DurD_samp + log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
-  ept_rich_modlist[['mod30']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + stream_type + country:stream_type + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)'))) 
+  ept_rich_modlist[['mod30']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + stream_type + country:stream_type + log10(basin_area_km2) + country:log10(basin_area_km2)'))) 
   
   ept_rich_modlist[['mod31']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + stream_type + country:stream_type + sqrt(meanQ3650past) + country:sqrt(meanQ3650past)'))) 
   
-  ept_rich_modlist[['mod32']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + stream_type + sqrt(basin_area_km2) + country:sqrt(basin_area_km2) + env_PC2'))) 
+  ept_rich_modlist[['mod32']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + stream_type + log10(basin_area_km2) + country:log10(basin_area_km2) + env_PC2'))) 
   
-  ept_rich_modlist[['mod33']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + stream_type + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)'))) 
+  ept_rich_modlist[['mod33']] <- quick_ept_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + stream_type + log10(basin_area_km2) + country:log10(basin_area_km2)'))) 
   
   # check_rf <- ranger::ranger(mean_richness ~ .,
   #                            data= allvars_dt[, c(hydro_candidates, 'mean_richness', 'country'), with=F])
@@ -9389,7 +9401,7 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
   # Refits the selected "best" model using the REML method for better variance estimation.
   # ssn_ept_best_final <- quick_ept_ssn(
   #   as.formula(paste(alpha_var, '~ DurD3650past + stream_type + country:stream_type + 
-  #     sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')),
+  #     log10(basin_area_km2) + country:log10(basin_area_km2)')),
   #   estmethod = 'reml'
   # )
   # ssn_ept_best_preds <- augment(ssn_ept_best_final,
@@ -9407,7 +9419,7 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
   
   #Check Torgegram
   tg_selected <- SSN2::Torgegram(
-    formula = 'mean_richness ~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2)',
+    formula = 'mean_richness ~ DurD_samp + country:DurD_samp + log10(basin_area_km2)',
     ssn.object = ssn_miv,
     type = c("flowcon", "flowuncon", "euclid"),
     partition_factor = as.formula('~ country'),
@@ -9430,7 +9442,7 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
       in_ssn = in_ssn_eu_summarized,
       family = 'nbinomial',
       organism = c(in_organism),
-      formula_root = 'sqrt(basin_area_km2)',
+      formula_root = 'log10(basin_area_km2)',
       hydro_var = 'DurD_samp',
       response_var = alpha_var,
       ssn_covtypes = ssn_covtypes,
@@ -9451,7 +9463,7 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
   #Re-fit final model with REML
   ssn_ept_pred_final <- ssn_glm(
     formula = mean_richness ~ DurD_samp_z + country:DurD_samp_z + 
-      sqrt(basin_area_km2) + country:sqrt(basin_area_km2),
+      basin_area_km2_log10_z + country:basin_area_km2_log10_z,
     family = 'nbinomial',
     ssn.object = ssn_miv,
     taildown_type = 'none',
@@ -9647,7 +9659,7 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
       in_ssn = in_ssn_eu_summarized,
       family = 'Gaussian',
       organism = c('dia_sedi_nopools'),
-      formula_root = 'sqrt(basin_area_km2)',
+      formula_root = 'log10(basin_area_km2)',
       hydro_var = 'DurD3650past',
       response_var = alpha_var,
       ssn_covtypes = ssn_covtypes,
@@ -9660,7 +9672,7 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
       in_ssn = in_ssn_eu_summarized,
       family = 'Gamma',
       organism = c('dia_sedi_nopools'),
-      formula_root = 'sqrt(basin_area_km2)',
+      formula_root = 'log10(basin_area_km2)',
       hydro_var = 'DurD3650past',
       response_var = alpha_var,
       ssn_covtypes = ssn_covtypes,
@@ -9673,7 +9685,7 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
       in_ssn = in_ssn_eu_summarized,
       family = 'Gaussian',
       organism = c('dia_sedi_nopools'),
-      formula_root = 'sqrt(basin_area_km2)',
+      formula_root = 'log10(basin_area_km2)',
       hydro_var = 'DurD3650past',
       response_var = paste0('log10(', alpha_var, ')'),
       ssn_covtypes = ssn_covtypes,
@@ -9741,27 +9753,27 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   dia_sedi_simps_modlist[['null']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ 1')))
   
   #Initial model
-  dia_sedi_simps_modlist[['mod1']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ country*sqrt(basin_area_km2)')))
+  dia_sedi_simps_modlist[['mod1']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ country*log10(basin_area_km2)')))
   
-  dia_sedi_simps_modlist[['mod2']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ basin_area_km2 + country:sqrt(basin_area_km2)')))
+  dia_sedi_simps_modlist[['mod2']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ basin_area_km2 + country:log10(basin_area_km2)')))
   
   dia_sedi_simps_modlist[['mod3']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ country*sqrt(meanQ3650past)')))
   
   dia_sedi_simps_modlist[['mod4']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ meanQ3650past + country:sqrt(meanQ3650past)')))
   
-  dia_sedi_simps_modlist[['mod5']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ FstDrE_SD10yrpast + country:FstDrE_SD10yrpast + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  dia_sedi_simps_modlist[['mod5']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ FstDrE_SD10yrpast + country:FstDrE_SD10yrpast + log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
   dia_sedi_simps_modlist[['mod6']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ FstDrE_SD10yrpast + country:FstDrE_SD10yrpast + sqrt(meanQ3650past) + country:sqrt(meanQ3650past)')))
   
-  dia_sedi_simps_modlist[['mod7']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ FreD_CV30yrpast + country:FreD_CV30yrpast + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  dia_sedi_simps_modlist[['mod7']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ FreD_CV30yrpast + country:FreD_CV30yrpast + log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
   dia_sedi_simps_modlist[['mod8']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ FreD_CV30yrpast + country:FreD_CV30yrpast + sqrt(meanQ3650past) + country:sqrt(meanQ3650past)')))
   
-  dia_sedi_simps_modlist[['mod9']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ FreD_samp + country:FreD_samp + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  dia_sedi_simps_modlist[['mod9']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ FreD_samp + country:FreD_samp + log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
   dia_sedi_simps_modlist[['mod10']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ FreD_samp + country:FreD_samp + sqrt(meanQ3650past) + country:sqrt(meanQ3650past)')))
   
-  dia_sedi_simps_modlist[['mod11']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ PFreD365past + country:PFreD365past + sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  dia_sedi_simps_modlist[['mod11']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ PFreD365past + country:PFreD365past + log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
   dia_sedi_simps_modlist[['mod12']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ FstDrE_SD10yrpast + country:FstDrE_SD10yrpast')))
   
@@ -9842,7 +9854,7 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   # # Refits the selected "best" model using the REML method for better variance estimation.
   # ssn_dia_sedi_best_final <- quick_dia_sedi_ssn(
   #   as.formula(paste(alpha_var, '~ DurD3650past + stream_type + country:stream_type +
-  #     sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')),
+  #     log10(basin_area_km2) + country:log10(basin_area_km2)')),
   #   estmethod = 'reml'
   # )
   # ssn_dia_sedi_best_preds <- augment(ssn_dia_sedi_best_final,
@@ -9902,7 +9914,7 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   
   #Re-fit final model with REML
   ssn_dia_sedi_pred_final <- ssn_glm(
-    formula = log10(mean_invsimpson) ~ FstDrE_SD10yrpast + country:FstDrE_SD10yrpast + meanConD_CV30yrpast,
+    formula = log10(mean_invsimpson) ~ FstDrE_SD10yrpast_z + country:FstDrE_SD10yrpast_z + meanConD_CV30yrpast_z,
     family = 'Gaussian',
     ssn.object = ssn_dia_sedi,
     taildown_type = 'none',
@@ -10005,11 +10017,15 @@ model_dia_sedi_richness_yr <- function(in_ssn_eu_summarized,
     overwrite = TRUE
   )
   
+  ssn_dia_sedi$obs$meanQ3650past_log10 <- log10(ssn_dia_sedi$obs$meanQ3650past)
+  
+  
   allvars_dt <- as.data.table(ssn_dia_sedi$obs) %>%
     setorderv(c('country', 'site')) 
   
   # Define candidate hydrological variables
-  hydro_candidates <- in_allvars_summarized$cols$hydro_con_summarized
+  hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
+                        'meanQ3650past_log10')
   
   #Scale predictor data (mean of 0 and SD of 1) -----
   if (scale_predictors) {
@@ -10220,13 +10236,13 @@ model_dia_sedi_richness_yr <- function(in_ssn_eu_summarized,
   dia_sedi_rich_modlist[['null']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ 1')))
   
   #Initial model
-  dia_sedi_rich_modlist[['mod1']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2)')))
+  dia_sedi_rich_modlist[['mod1']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
   dia_sedi_rich_modlist[['mod2']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
-  dia_sedi_rich_modlist[['mod3']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ country*sqrt(basin_area_km2)')))
+  dia_sedi_rich_modlist[['mod3']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ country*log10(basin_area_km2)')))
   
-  dia_sedi_rich_modlist[['mod4']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  dia_sedi_rich_modlist[['mod4']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
   dia_sedi_rich_modlist[['mod5']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
@@ -10412,7 +10428,7 @@ model_dia_sedi_richness_yr <- function(in_ssn_eu_summarized,
   
   #Re-fit final model with REML
   ssn_dia_sedi_pred_final <- ssn_glm(
-    formula = mean_richness ~ PDurD365past + country:PDurD365past + log10(meanQ3650past) + country:log10(meanQ3650past),
+    formula = mean_richness ~ PDurD365past_z + country:PDurD365past_z + meanQ3650past_log10_z + country:meanQ3650past_log10_z,
     family = 'poisson',
     ssn.object = ssn_dia_sedi,
     taildown_type = 'none',
@@ -10520,11 +10536,14 @@ model_dia_biof_richness_yr <- function(in_ssn_eu_summarized,
     overwrite = TRUE
   )
   
+  ssn_dia_biof$obs$meanQ3650past_log10 <- log10(ssn_dia_biof$obs$meanQ3650past)
+  
   allvars_dt <- as.data.table(ssn_dia_biof$obs) %>%
     setorderv(c('country', 'site')) 
   
   # Define candidate hydrological variables
-  hydro_candidates <- in_allvars_summarized$cols$hydro_con_summarized
+  hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
+                        "meanQ3650past_log10", "particle_size")
   
   #Scale predictor data (mean of 0 and SD of 1) -----
   if (scale_predictors) {
@@ -10743,13 +10762,13 @@ model_dia_biof_richness_yr <- function(in_ssn_eu_summarized,
   dia_biof_rich_modlist[['null']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ 1')))
   
   #Initial model
-  dia_biof_rich_modlist[['mod1']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2)')))
+  dia_biof_rich_modlist[['mod1']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
   dia_biof_rich_modlist[['mod2']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
-  dia_biof_rich_modlist[['mod3']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ country*sqrt(basin_area_km2)')))
+  dia_biof_rich_modlist[['mod3']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ country*log10(basin_area_km2)')))
   
-  dia_biof_rich_modlist[['mod4']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  dia_biof_rich_modlist[['mod4']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
   dia_biof_rich_modlist[['mod5']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
@@ -10926,7 +10945,7 @@ model_dia_biof_richness_yr <- function(in_ssn_eu_summarized,
   
   #Re-fit final model with REML
   ssn_dia_biof_pred_final <- ssn_glm(
-    formula = mean_richness ~ DurD_samp + DurD_samp:country + country*log10(meanQ3650past) + particle_size,
+    formula = mean_richness ~ DurD_samp_z + DurD_samp_z:country + country*meanQ3650past_z + particle_size,
     family = 'poisson',
     ssn.object = ssn_dia_biof,
     taildown_type = 'none',
@@ -10997,11 +11016,15 @@ model_fun_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     overwrite = TRUE
   )
   
+  ssn_fun_sedi$obs$STcon_m10_directed_avg_samp_log10 <- log10(ssn_fun_sedi$obs$STcon_m10_directed_avg_samp)
+  
+
   allvars_dt <- as.data.table(ssn_fun_sedi$obs) %>%
     setorderv(c('country', 'site')) 
   
   # Define candidate hydrological variables
-  hydro_candidates <- in_allvars_summarized$cols$hydro_con_summarized
+  hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
+                        'STcon_m10_directed_avg_samp_log10')
   
   #Scale predictor data (mean of 0 and SD of 1) -----
   if (scale_predictors) {
@@ -11222,13 +11245,13 @@ model_fun_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   fun_sedi_simps_modlist[['null']] <- quick_fun_sedi_ssn(as.formula(paste(alpha_var,  '~ 1')))
   
   #Initial model
-  fun_sedi_simps_modlist[['mod1']] <- quick_fun_sedi_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2)')))
+  fun_sedi_simps_modlist[['mod1']] <- quick_fun_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
   fun_sedi_simps_modlist[['mod2']] <- quick_fun_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
   fun_sedi_simps_modlist[['mod3']] <- quick_fun_sedi_ssn(as.formula(paste(alpha_var,  '~ country*log10(basin_area_km2)')))
   
-  fun_sedi_simps_modlist[['mod4']] <- quick_fun_sedi_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  fun_sedi_simps_modlist[['mod4']] <- quick_fun_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
   fun_sedi_simps_modlist[['mod5']] <- quick_fun_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
@@ -11319,7 +11342,7 @@ model_fun_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   # # Refits the selected "best" model using the REML method for better variance estimation.
   # ssn_fun_sedi_best_final <- quick_fun_sedi_ssn(
   #   as.formula(paste(alpha_var, '~ DurD3650past + stream_type + country:stream_type +
-  #     sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')),
+  #     log10(basin_area_km2) + country:log10(basin_area_km2)')),
   #   estmethod = 'reml'
   # )
   # ssn_fun_sedi_best_preds <- augment(ssn_fun_sedi_best_final,
@@ -11377,7 +11400,7 @@ model_fun_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   
   #Re-fit final model with REML
   ssn_fun_sedi_pred_final <- ssn_glm(
-    formula = mean_invsimpson_log10 ~ country*DurD_samp + log10(STcon_m10_directed_avg_samp),
+    formula = mean_invsimpson_log10 ~ country*DurD_samp_z + STcon_m10_directed_avg_samp_log10_z,
     family = 'Gaussian',
     ssn.object = ssn_fun_sedi,
     taildown_type = 'mariah',
@@ -11478,11 +11501,17 @@ model_fun_sedi_richness_yr <- function(in_ssn_eu_summarized,
     overwrite = TRUE
   )
   
+  ssn_fun_sedi$obs$Fdist_mean_10past_undirected_avg_samp_log10 <- 
+    log10(ssn_fun_sedi$obs$Fdist_mean_10past_undirected_avg_samp + 1)
+  ssn_fun_sedi$obs$basin_area_km2_log10 <- log10(ssn_fun_sedi$obs$basin_area_km2)
+  
   allvars_dt <- as.data.table(ssn_fun_sedi$obs) %>%
     setorderv(c('country', 'site')) 
   
   # Define candidate hydrological variables
-  hydro_candidates <- in_allvars_summarized$cols$hydro_con_summarized
+  hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
+                        "Fdist_mean_10past_undirected_avg_samp_log10",
+                        "basin_area_km2_log10")
   
   #Scale predictor data (mean of 0 and SD of 1) -----
   if (scale_predictors) {
@@ -11702,13 +11731,13 @@ model_fun_sedi_richness_yr <- function(in_ssn_eu_summarized,
   fun_sedi_rich_modlist[['null']] <- quick_fun_sedi_ssn(as.formula(paste(alpha_var,  '~ 1')))
   
   #Initial model
-  fun_sedi_rich_modlist[['mod1']] <- quick_fun_sedi_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2)')))
+  fun_sedi_rich_modlist[['mod1']] <- quick_fun_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
   fun_sedi_rich_modlist[['mod2']] <- quick_fun_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
   fun_sedi_rich_modlist[['mod3']] <- quick_fun_sedi_ssn(as.formula(paste(alpha_var,  '~ country*log10(basin_area_km2)')))
   
-  fun_sedi_rich_modlist[['mod4']] <- quick_fun_sedi_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  fun_sedi_rich_modlist[['mod4']] <- quick_fun_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
   fun_sedi_rich_modlist[['mod5']] <- quick_fun_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
@@ -11884,7 +11913,9 @@ model_fun_sedi_richness_yr <- function(in_ssn_eu_summarized,
   
   #Re-fit final model with REML
   ssn_fun_sedi_pred_final <- ssn_glm(
-    formula = mean_richness ~ log10(Fdist_mean_10past_undirected_avg_samp+1) + country:log10(Fdist_mean_10past_undirected_avg_samp+1) + DurD_CV10yrpast + country*log10(basin_area_km2),
+    formula = (mean_richness ~ Fdist_mean_10past_undirected_avg_samp_log10_z +
+                 country:Fdist_mean_10past_undirected_avg_samp_log10_z +
+                 DurD_CV10yrpast_z + country*basin_area_km2_log10_z),
     family = 'nbinomial',
     ssn.object = ssn_fun_sedi,
     taildown_type = 'none',
@@ -11957,11 +11988,14 @@ model_fun_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
     overwrite = TRUE
   )
   
+  ssn_fun_biof$obs$DurD_CV10yrpast_sqrt <- sqrt(ssn_fun_biof$obs$DurD_CV10yrpast)
+  
   allvars_dt <- as.data.table(ssn_fun_biof$obs) %>%
     setorderv(c('country', 'site')) 
   
   # Define candidate hydrological variables
-  hydro_candidates <- in_allvars_summarized$cols$hydro_con_summarized
+  hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
+                        "DurD_CV10yrpast_sqrt")
   
   #Scale predictor data (mean of 0 and SD of 1) -----
   if (scale_predictors) {
@@ -12183,13 +12217,13 @@ model_fun_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
   fun_biof_simps_modlist[['null']] <- quick_fun_biof_ssn(as.formula(paste(alpha_var,  '~ 1')))
   
   #Initial model
-  fun_biof_simps_modlist[['mod1']] <- quick_fun_biof_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2)')))
+  fun_biof_simps_modlist[['mod1']] <- quick_fun_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
   fun_biof_simps_modlist[['mod2']] <- quick_fun_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
   fun_biof_simps_modlist[['mod3']] <- quick_fun_biof_ssn(as.formula(paste(alpha_var,  '~ country*log10(basin_area_km2)')))
   
-  fun_biof_simps_modlist[['mod4']] <- quick_fun_biof_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  fun_biof_simps_modlist[['mod4']] <- quick_fun_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
   fun_biof_simps_modlist[['mod5']] <- quick_fun_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
@@ -12289,7 +12323,7 @@ model_fun_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
   # # Refits the selected "best" model using the REML method for better variance estimation.
   # ssn_fun_biof_best_final <- quick_fun_biof_ssn(
   #   as.formula(paste(alpha_var, '~ DurD3650past + stream_type + country:stream_type +
-  #     sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')),
+  #     log10(basin_area_km2) + country:log10(basin_area_km2)')),
   #   estmethod = 'reml'
   # )
   # ssn_fun_biof_best_preds <- augment(ssn_fun_biof_best_final,
@@ -12353,7 +12387,7 @@ model_fun_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
   
   #Re-fit final model with REML
   ssn_fun_biof_pred_final <- ssn_glm(
-    formula = mean_invsimpson_log10 ~ country*DurD_samp + sqrt(DurD_CV10yrpast),
+    formula = mean_invsimpson_log10 ~ country*DurD_samp_z + DurD_CV10yrpast_sqrt_z,
     family = 'Gaussian',
     ssn.object = ssn_fun_biof,
     taildown_type = 'none',
@@ -12676,13 +12710,13 @@ model_fun_biof_richness_yr <- function(in_ssn_eu_summarized,
   fun_biof_rich_modlist[['null']] <- quick_fun_biof_ssn(as.formula(paste(alpha_var,  '~ 1')))
   
   #Initial model
-  fun_biof_rich_modlist[['mod1']] <- quick_fun_biof_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2)')))
+  fun_biof_rich_modlist[['mod1']] <- quick_fun_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
   fun_biof_rich_modlist[['mod2']] <- quick_fun_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
   fun_biof_rich_modlist[['mod3']] <- quick_fun_biof_ssn(as.formula(paste(alpha_var,  '~ country*log10(basin_area_km2)')))
   
-  fun_biof_rich_modlist[['mod4']] <- quick_fun_biof_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  fun_biof_rich_modlist[['mod4']] <- quick_fun_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
   fun_biof_rich_modlist[['mod5']] <- quick_fun_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
@@ -12865,7 +12899,7 @@ model_fun_biof_richness_yr <- function(in_ssn_eu_summarized,
   
   #Re-fit final model with REML
   ssn_fun_biof_pred_final <- ssn_glm(
-    formula = mean_richness ~ country*DurD_samp,
+    formula = mean_richness ~ country*DurD_samp_z,
     family = 'poisson',
     ssn.object = ssn_fun_biof,
     taildown_type = 'none',
@@ -12937,11 +12971,14 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     overwrite = TRUE
   )
   
+  ssn_bac_sedi$obs$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_sedi$obs$STcon_m10_directed_avg_samp)
+  
   allvars_dt <- as.data.table(ssn_bac_sedi$obs) %>%
     setorderv(c('country', 'site')) 
   
   # Define candidate hydrological variables
-  hydro_candidates <- in_allvars_summarized$cols$hydro_con_summarized
+  hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
+                        'STcon_m10_directed_avg_samp_log10')
   
   #Scale predictor data (mean of 0 and SD of 1) -----
   if (scale_predictors) {
@@ -13175,13 +13212,13 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   bac_sedi_simps_modlist[['null']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ 1')))
   
   #Initial model
-  bac_sedi_simps_modlist[['mod1']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2)')))
+  bac_sedi_simps_modlist[['mod1']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
   bac_sedi_simps_modlist[['mod2']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
   bac_sedi_simps_modlist[['mod3']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ country*log10(basin_area_km2)')))
   
-  bac_sedi_simps_modlist[['mod4']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  bac_sedi_simps_modlist[['mod4']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
   bac_sedi_simps_modlist[['mod5']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
@@ -13227,9 +13264,9 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   
   bac_sedi_simps_modlist[['mod26']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ country*DurD_samp + log10(STcon_m10_undirected_avg_samp) +   country:log10(STcon_m10_undirected_avg_samp)'))) 
   
-  bac_sedi_simps_modlist[['mod27']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ country*DurD_samp + sqrt(STcon_m10_directed_avg_samp)')))    
+  bac_sedi_simps_modlist[['mod27']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ country*DurD_samp + log10(STcon_m10_directed_avg_samp)')))    
   
-  bac_sedi_simps_modlist[['mod28']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ country*DurD_samp + sqrt(STcon_m10_directed_avg_samp) +      country:log10(STcon_m10_directed_avg_samp)')))
+  bac_sedi_simps_modlist[['mod28']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ country*DurD_samp + log10(STcon_m10_directed_avg_samp) +      country:log10(STcon_m10_directed_avg_samp)')))
   
   mod_perf_tab <- lapply(bac_sedi_simps_modlist, function(x) {
     cbind(Reduce(paste, deparse(x$formula)), 
@@ -13292,7 +13329,7 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   # # Refits the selected "best" model using the REML method for better variance estimation.
   # ssn_bac_sedi_best_final <- quick_bac_sedi_ssn(
   #   as.formula(paste(alpha_var, '~ DurD3650past + stream_type + country:stream_type +
-  #     sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')),
+  #     log10(basin_area_km2) + country:log10(basin_area_km2)')),
   #   estmethod = 'reml'
   # )
   # ssn_bac_sedi_best_preds <- augment(ssn_bac_sedi_best_final,
@@ -13332,7 +13369,7 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
       in_ssn = in_ssn_eu_summarized,
       family = 'Gaussian',
       organism = c('bac_sedi_nopools'),
-      formula_root = 'country + sqrt(STcon_m10_directed_avg_samp)',
+      formula_root = 'country + log10(STcon_m10_directed_avg_samp)',
       hydro_var = 'DurD_samp',
       response_var = alpha_var,
       ssn_covtypes = ssn_covtypes,
@@ -13351,7 +13388,7 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   
   #Re-fit final model with REML
   ssn_bac_sedi_pred_final <- ssn_glm(
-    formula = mean_invsimpson ~ country*DurD_samp + log10(STcon_m10_directed_avg_samp),
+    formula = mean_invsimpson ~ country*DurD_samp_z + STcon_m10_directed_avg_samp_log10_z,
     family = 'Gaussian',
     ssn.object = ssn_bac_sedi,
     taildown_type = 'none',
@@ -13688,13 +13725,13 @@ model_bac_sedi_richness_yr <- function(in_ssn_eu_summarized,
   bac_sedi_rich_modlist[['null']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ 1')))
   
   #Initial model
-  bac_sedi_rich_modlist[['mod1']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2)')))
+  bac_sedi_rich_modlist[['mod1']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
   bac_sedi_rich_modlist[['mod2']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
   bac_sedi_rich_modlist[['mod3']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ country*log10(basin_area_km2)')))
   
-  bac_sedi_rich_modlist[['mod4']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  bac_sedi_rich_modlist[['mod4']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
   bac_sedi_rich_modlist[['mod5']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
@@ -13858,7 +13895,7 @@ model_bac_sedi_richness_yr <- function(in_ssn_eu_summarized,
   
   #Re-fit final model with REML
   ssn_bac_sedi_pred_final <- ssn_glm(
-    formula = mean_richness ~ country*FreD3650past,
+    formula = mean_richness ~ country*FreD3650past_z,
     family = 'Gaussian',
     ssn.object = ssn_bac_sedi,
     taildown_type = 'none',
@@ -13929,11 +13966,14 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
     overwrite = TRUE
   )
   
+  ssn_bac_biof$obs$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_biof$obs$STcon_m10_directed_avg_samp)
+  
   allvars_dt <- as.data.table(ssn_bac_biof$obs) %>%
     setorderv(c('country', 'site')) 
   
   # Define candidate hydrological variables
-  hydro_candidates <- in_allvars_summarized$cols$hydro_con_summarized
+  hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
+                        "STcon_m10_directed_avg_samp_log10")
   
   #Scale predictor data (mean of 0 and SD of 1) -----
   if (scale_predictors) {
@@ -14170,13 +14210,13 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
   bac_biof_simps_modlist[['null']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ 1')))
   
   #Initial model
-  bac_biof_simps_modlist[['mod1']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2)')))
+  bac_biof_simps_modlist[['mod1']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
   bac_biof_simps_modlist[['mod2']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
   bac_biof_simps_modlist[['mod3']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ country*log10(basin_area_km2)')))
   
-  bac_biof_simps_modlist[['mod4']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  bac_biof_simps_modlist[['mod4']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
   bac_biof_simps_modlist[['mod5']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
@@ -14214,17 +14254,17 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
   
   bac_biof_simps_modlist[['mod22']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ country*DurD_samp')))
   
-  bac_biof_simps_modlist[['mod23']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ country + sqrt(STcon_m10_directed_avg_samp)')))
+  bac_biof_simps_modlist[['mod23']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ country + log10(STcon_m10_directed_avg_samp)')))
   
-  bac_biof_simps_modlist[['mod24']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ country*sqrt(STcon_m10_directed_avg_samp)')))
+  bac_biof_simps_modlist[['mod24']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ country*log10(STcon_m10_directed_avg_samp)')))
   
   bac_biof_simps_modlist[['mod25']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ country + PDurD365past*FstDrE')))
   
   bac_biof_simps_modlist[['mod26']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ country + DurD_samp*PFreD365past')))
   
-  bac_biof_simps_modlist[['mod27']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ country + DurD_samp*sqrt(STcon_m10_directed_avg_samp)')))
+  bac_biof_simps_modlist[['mod27']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ country + DurD_samp*log10(STcon_m10_directed_avg_samp)')))
   
-  bac_biof_simps_modlist[['mod28']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ country + PDurD365past*sqrt(STcon_m10_directed_avg_samp)')))
+  bac_biof_simps_modlist[['mod28']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ country + PDurD365past*log10(STcon_m10_directed_avg_samp)')))
   
   mod_perf_tab <- lapply(bac_biof_simps_modlist, function(x) {
     cbind(Reduce(paste, deparse(x$formula)), 
@@ -14287,7 +14327,7 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
   # # Refits the selected "best" model using the REML method for better variance estimation.
   # ssn_bac_biof_best_final <- quick_bac_biof_ssn(
   #   as.formula(paste(alpha_var, '~ DurD3650past + stream_type + country:stream_type +
-  #     sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')),
+  #     log10(basin_area_km2) + country:log10(basin_area_km2)')),
   #   estmethod = 'reml'
   # )
   # ssn_bac_biof_best_preds <- augment(ssn_bac_biof_best_final,
@@ -14302,7 +14342,7 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
   #------ For prediction model -------------------------------------------------
   #Check Torgegram
   tg_selected <- SSN2::Torgegram(
-    formula = 'mean_invsimpson_log10 ~ country + PDurD365past*sqrt(STcon_m10_directed_avg_samp)',
+    formula = 'mean_invsimpson_log10 ~ country + PDurD365past*log10(STcon_m10_directed_avg_samp)',
     ssn.object = ssn_bac_biof,
     type = c("flowcon", "flowuncon", "euclid"),
     partition_factor = as.formula('~ country'),
@@ -14327,7 +14367,7 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
       in_ssn = in_ssn_eu_summarized,
       family = 'Gaussian',
       organism = c('bac_biof_nopools'),
-      formula_root = 'sqrt(STcon_m10_directed_avg_samp)',
+      formula_root = 'log10(STcon_m10_directed_avg_samp)',
       hydro_var = 'PDurD365past',
       response_var = alpha_var,
       ssn_covtypes = ssn_covtypes,
@@ -14347,7 +14387,7 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
   
   #Re-fit final model with REML
   ssn_bac_biof_pred_final <- ssn_glm(
-    formula = mean_invsimpson_log10 ~ country + PDurD365past*sqrt(STcon_m10_directed_avg_samp),
+    formula = mean_invsimpson_log10 ~ country + PDurD365past_z*STcon_m10_directed_avg_samp_log10_z,
     family = 'Gaussian',
     ssn.object = ssn_bac_biof,
     taildown_type = 'none',
@@ -14681,13 +14721,13 @@ model_bac_biof_richness_yr <- function(in_ssn_eu_summarized,
   bac_biof_rich_modlist[['null']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ 1')))
   
   #Initial model
-  bac_biof_rich_modlist[['mod1']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2)')))
+  bac_biof_rich_modlist[['mod1']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
   bac_biof_rich_modlist[['mod2']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
   
   bac_biof_rich_modlist[['mod3']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ country*log10(basin_area_km2)')))
   
-  bac_biof_rich_modlist[['mod4']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')))
+  bac_biof_rich_modlist[['mod4']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
   bac_biof_rich_modlist[['mod5']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
@@ -14863,7 +14903,7 @@ model_bac_biof_richness_yr <- function(in_ssn_eu_summarized,
   
   #Re-fit final model with REML
   ssn_bac_biof_pred_final <- ssn_glm(
-    formula = mean_richness ~ country*DurD_samp,
+    formula = mean_richness ~ country*DurD_samp_z,
     family = 'Gaussian',
     ssn.object = ssn_bac_biof,
     taildown_type = 'none',
@@ -15081,7 +15121,7 @@ plot_ssn_summarized_marginal <- function(
   
   emm_best_areas <- emmeans(in_mod_best, 
                             data=in_ssn$obs,
-                            ~ sqrt(basin_area_km2) | country, 
+                            ~ log10(basin_area_km2) | country, 
                             at = list(basin_area_km2 = newdat_area$basin_area_km2),
                             type='response') %>%
     data.frame() %>%
@@ -15139,7 +15179,7 @@ plot_ssn_summarized_marginal <- function(
   
   emm_predict_areas <- emmeans(in_mod_predict, 
                                data=in_ssn$obs,
-                               ~ sqrt(basin_area_km2) | country, 
+                               ~ log10(basin_area_km2) | country, 
                                at = list(basin_area_km2 = newdat_area$basin_area_km2),
                                type='response') %>%
     data.frame() %>%
