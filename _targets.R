@@ -1479,10 +1479,11 @@ analysis_targets <- list(
     list(
       miv_richness = ssn_mods_miv_richness_yr$ssn_mod_fit,
       miv_invsimpson = ssn_mods_miv_invsimpson_yr$ssn_mod_fit,
+      ept_richness = ssn_mods_ept_richness_yr$ssn_mod_fit,
       dia_sedi_richness = ssn_mods_dia_sedi_richness_yr$ssn_mod_fit,
       dia_sedi_invsimpson = ssn_mods_dia_sedi_invsimpson_yr$ssn_mod_fit,
       dia_biof_richness = ssn_mods_dia_biof_richness_yr$ssn_mod_fit,
-      fun_sedi_richnes = ssn_mods_fun_sedi_richness_yr$ssn_mod_fit,
+      fun_sedi_richness = ssn_mods_fun_sedi_richness_yr$ssn_mod_fit,
       fun_sedi_invsimpson = ssn_mods_fun_sedi_invsimpson_yr$ssn_mod_fit,
       fun_biof_richness = ssn_mods_fun_biof_richness_yr$ssn_mod_fit,
       fun_biof_invsimpson = ssn_mods_fun_biof_invsimpson_yr$ssn_mod_fit,
@@ -1495,32 +1496,42 @@ analysis_targets <- list(
   ,
   
   tar_target(
-    ssn_mod_yr_equations_multiorganism,
-    lapply(ssn_mod_yr_fit_multiorganism, function(mod_fit) {
-      format_ssn_glm_equation(mod_fit, greek = TRUE) 
-    }) %>% setNames(names(ssn_mod_yr_fit_multiorganism))
+    ssn_mod_yr_perf_multiorganism,
+    get_perf_table_multiorganism(in_mod_list=ssn_mod_yr_fit_multiorganism)
   )
+  
   ,
   
   tar_target(
-    ssn_mod_yr_perf_multiorganism,
-    lapply(ssn_mod_yr_fit_multiorganism, function(x) {
-      if (!inherits(in_mod_fit, c('lm','glm','ssn_lm', 'ssn_glm', 'lme', 'merMod'))) {
+    ssn_mod_yr_diagplot_multiorganism,
+    lapply(names(ssn_mod_yr_fit_multiorganism), function(mod_name) {
+      if (!inherits(ssn_mod_yr_fit_multiorganism[[mod_name]], 
+                    c('lm','glm','ssn_lm', 'ssn_glm', 'lme', 'merMod'))) {
         return(NULL)
       }
-      # print(x)
-      perf_table <- cbind(
-        Reduce(paste, deparse(x$formula)), 
-        glance(x), 
-        ifelse(length(attr(x$terms, "term.labels"))>=2,
-               max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), 
-               NA),
-        loocv(x))
-      return(perf_table)
-    }) %>% 
-      rbindlist %>%
-      .[, mod := names(ssn_mod_yr_fit_multiorganism)]
+      
+      var_label  <- ifelse(str_split_1(mod_name, '_')[2] == 'richness',
+                           'Mean richness', 
+                           'Inverse simpson index'
+      )
+      
+      plot_ssn_mod_diagplot(in_mod_fit = ssn_mod_yr_fit_multiorganism[[mod_name]],
+                            in_drn_dt = drn_dt,
+                            in_hydro_vars_dt = hydro_vars_dt,
+                            write_plots=T,
+                            response_var_label = var_label,
+                            plot_path_prefix = mod_name,
+                            out_dir = figdir) 
+    })
   )
+
+  # in_mod_fit <- tar_read(ssn_mods_miv_richness_yr)$ssn_mod_fit
+  # write_plots=T
+  # out_dir = figdir
+  # response_var_label = 'Mean richness'
+  # in_drn_dt = drn_dt
+  # in_hydro_vars_dt = tar_read(hydro_vars_dt)
+  # plot_path_prefix <- 'ssn_mod_yr_miv_diagplot'
   
   
   
@@ -1560,8 +1571,6 @@ analysis_targets <- list(
   # )
 )
 
-
-analysis_targets
 # ,
 # 
 # tar_target(

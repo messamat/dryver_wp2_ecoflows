@@ -1497,6 +1497,353 @@ check_resid_corr <- function(in_ssn_mod, in_idcol='site',
   
   return(resid_corr_plot)
 }
+#------ format_ssn_glm_equation ------------------------------------------------
+# in_mod_fit <- tar_read(ssn_mods_miv_invsimpson_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_miv_richness_yr)$ssn_mod_fit
+
+# in_mod_fit <- tar_read(ssn_mods_miv_richness_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_miv_invsimpson_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_dia_sedi_richness_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_dia_sedi_invsimpson_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_dia_biof_richness_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_fun_sedi_richness_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_fun_sedi_invsimpson_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_fun_biof_richness_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_fun_biof_invsimpson_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_bac_sedi_richness_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_bac_sedi_invsimpson_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_bac_biof_richness_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_bac_biof_invsimpson_yr)$ssn_mod_fit
+# 
+# greek=T
+# format_ssn_glm_equation(in_mod_fit, greek = TRUE)
+
+format_ssn_glm_equation <- function(in_mod_fit, greek = TRUE) {
+  if (!inherits(in_mod_fit, c('lm','glm','ssn_lm', 'ssn_glm', 'lme', 'merMod'))) {
+    return(NULL)
+  }
+  
+  # Extract response and predictors
+  f <- formula(in_mod_fit)
+  y <- as.character(f[[2]])
+  x <- attr(terms(in_mod_fit), "term.labels")
+  
+  # Define coefficient names
+  coefs <- if (greek) paste0("β_", seq_along(x)) else paste0("b", seq_along(x))
+  intercept <- if (greek) "β₀" else "b0"
+  
+  # Detect family (for SSN2)
+  fam <- in_mod_fit$family
+  if (!is.null(fam)) {
+    link <- switch(
+      fam,
+      "Gaussian"   = "identity",
+      "gaussian"   = "identity",
+      "poisson"    = "log",
+      "nbinomial"  = "log",
+      "binomial"   = "logit",
+      "gamma"      = "inverse",
+      "lognormal"  = "log",
+      "exponential"= "log",
+      "identity"   = "identity",
+      NA_character_
+    )
+  } else {
+    link <- 'identity'
+  }
+  
+  if (length(y) > 1) {
+    if (y[[1]]=='log10') {
+      link <- "log"
+    }
+    y <- y[[2]]
+  }
+  
+  # --- Pretty formatting for variable terms ---
+  pretty_terms <- x
+  
+  # Replace I(var^2) → var²
+  pretty_terms <- gsub("I\\(([^\\^]+)\\^2\\)", "\\1²", pretty_terms)
+  # Replace I(var^3) → var³
+  pretty_terms <- gsub("I\\(([^\\^]+)\\^3\\)", "\\1³", pretty_terms)
+  # Replace interactions x1:x2 → x₁ × x₂
+  pretty_terms <- gsub(":", " × ", pretty_terms)
+  # Optional cleanup for nicer rendering
+  pretty_terms <- gsub("\\s+", "", pretty_terms)
+  
+  # Build the right-hand side
+  rhs <- paste(c(intercept, paste0(coefs, "*", pretty_terms)), collapse = " + ")
+  
+  # Construct the full equation
+  if (is.na(link) || link == "identity") {
+    eq <- paste0(y, " = ", rhs)
+  } else {
+    eq <- paste0(link, "(", y, ") = ", rhs)
+  }
+  
+  return(eq)
+}
+
+#------ plot_ssn_obs_pred ------------------------------------------------------
+plot_ssn_obs_pred <- function(in_mod_fit, 
+                              in_drn_dt,
+                              response_var_label) {
+  
+  response_var <- all.vars(in_mod_fit$formula)[[1]]
+  
+  pred_final <- setDT(augment(in_mod_fit, drop=F, type.predict = 'response')) %>%
+    merge(in_drn_dt, by='country')  %>%
+    .[, country := factor(
+      country,
+      levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain" ),
+      ordered=T)
+    ]
+  
+  color_vec <- pred_final[!duplicated(country),
+                          setNames(color, country)]
+  
+  #Check predictions for final model
+  predobs_plot <- ggplot(pred_final, aes(x=.fitted, y=get(response_var))) +
+    geom_point(aes(color=country, shape=stream_type), alpha=0.7) +
+    # geom_smooth(method = 'gam',
+    #             color = 'black', se = FALSE) +
+    geom_abline(linetype='dashed') +
+    scale_x_continuous(name=paste('Predicted', response_var_label)) +
+    scale_y_continuous(name=paste('Observed', response_var_label)) +
+    scale_color_manual(name='Country', values=color_vec ) +
+    scale_shape_discrete(name='Stream type', 
+                         labels = c('Perennial', 'Non-perennial')) +
+    # scale_color_manual(
+    #   name = 'Stream type',
+    #   labels = c('Perennial', 'Non-perennial'),
+    #   values=c('#2b8cbe', '#feb24c')) +
+    # facet_wrap(~country) +
+    coord_fixed() +
+    theme_classic()
+  
+  return(predobs_plot)
+}
+
+#------ plot_formula_emtrends ------------------------------------------------
+# in_mod_fit <- tar_read(ssn_mods_miv_richness_yr)$ssn_mod_fit
+# in_drn_dt = drn_dt
+# in_hydro_vars_dt = tar_read(hydro_vars_dt)
+# plot=T
+# verbose=T
+
+plot_formula_emtrends <- function(in_mod_fit,
+                                  in_drn_dt,
+                                  in_hydro_vars_dt,
+                                  plot = TRUE,
+                                  verbose = TRUE) {
+  
+  mf <- model.frame(in_mod_fit)  # model frame to check variable types
+  term_labels <- attr(terms(in_mod_fit), "term.labels")
+  if (length(term_labels) == 0) {
+    stop("No predictor terms found in model.")
+  }
+  
+  # --- helper: pick the best candidate continuous predictor from vars_in_term ---
+  pick_continuous <- function(vars_in_term, mf) {
+    candidates <- intersect(vars_in_term, names(mf))
+    if (length(candidates) > 0) {
+      numeric_cand <- candidates[vapply(mf[candidates], is.numeric, logical(1))]
+      if (length(numeric_cand) > 0) return(numeric_cand[[1]])
+      return(candidates[[1]])  # fallback if none numeric
+    }
+    return(vars_in_term[[1]])  # fallback if none in mf
+  }
+  
+  # --- helper: pick a factor/grouping variable (if any) ---
+  pick_factor_spec <- function(vars_in_term, mf) {
+    candidate_vars <- intersect(vars_in_term, names(mf))
+    facs <- candidate_vars[vapply(mf[candidate_vars], function(x)
+      is.factor(x) || is.character(x), logical(1))]
+    if (length(facs) > 0) return(facs[[1]])
+    return(NULL)
+  }
+  
+  results <- list()
+  skipped <- list()
+  
+  for (term in term_labels) {
+    vars_in_term <- all.vars(as.formula(paste("~", term)))
+    vars_in_term <- setdiff(vars_in_term, all.vars(formula(in_mod_fit))[1])
+    
+    if (length(vars_in_term) == 0) {
+      skipped[[term]] <- "no variables parsed from term"
+      if (verbose) message("Skipping term '", term, "': no vars parsed.")
+      next
+    }
+    
+    pred_var <- pick_continuous(vars_in_term, mf)
+    spec_factor <- pick_factor_spec(vars_in_term, mf)
+    
+    # skip pure factors (no slope to estimate)
+    if (pred_var %in% names(mf) && is.factor(mf[[pred_var]])) {
+      skipped[[term]] <- paste0("predictor '", pred_var, "' is factor; no slope to estimate")
+      if (verbose) message("Skipping term '", term, "': predictor is a factor.")
+      next
+    }
+    
+    specs_formula <- if (!is.null(spec_factor)) {
+      as.formula(paste("~", spec_factor))
+    } else {
+      as.formula("~ 1")
+    }
+    
+    # --- Try emtrends extraction ---
+    this_dt <- tryCatch({
+      out <- get_ssn_emtrends(
+        in_mod = in_mod_fit,
+        in_pred_var = pred_var,
+        in_pred_var_label = pred_var,
+        interaction_var = if (!is.null(spec_factor)) spec_factor else "",
+        in_drn_dt = in_drn_dt,
+        in_emtrends_dt = NULL,
+        plot = FALSE
+      )
+      dt <- copy(out$dt)
+      dt[, `:=`(source_term = term,
+                predictor = pred_var,
+                spec_factor = ifelse(is.null(spec_factor), NA_character_, spec_factor))]
+      dt
+    }, error = function(e) {
+      # fallback: direct emtrends call
+      try_direct <- try({
+        emtr <- emtrends(object = in_mod_fit,
+                         specs = specs_formula,
+                         var = pred_var,
+                         data = in_mod_fit$ssn.object$obs)
+        dt2 <- as.data.frame(emtr) %>% setDT()
+        setnames(dt2, paste0(pred_var, ".trend"), "trend", skip_absent = TRUE)
+        dt2[, `:=`(
+          response_var = all.vars(formula(in_mod_fit))[[1]],
+          pred_var_name = pred_var,
+          source_term = term,
+          predictor = pred_var,
+          spec_factor = ifelse(is.null(spec_factor), NA_character_, spec_factor)
+        )]
+        dt2
+      }, silent = TRUE)
+      
+      if (inherits(try_direct, "try-error")) {
+        if (verbose) message("Failed emtrends for term '", term, "': ", e$message)
+        skipped[[term]] <- paste("emtrends failed:", e$message)
+        NULL
+      } else {
+        try_direct
+      }
+    })
+    
+    if (!is.null(this_dt) && nrow(this_dt) > 0) {
+      results[[term]] <- this_dt
+      if (verbose) message("Succeeded for term '", term, "' -> predictor '", pred_var,
+                           if (!is.null(spec_factor)) paste0(" | specs: ", spec_factor) else " | specs: ~1")
+    } else {
+      if (is.null(skipped[[term]])) skipped[[term]] <- "no rows returned"
+      if (verbose) message("No rows returned for term '", term, "'.")
+    }
+  }
+  
+  if (length(results) == 0) {
+    stop("No emtrends results produced for any term. See `skipped` for reasons.")
+  }
+  
+  emtrends_all <- rbindlist(results, fill = TRUE, use.names = TRUE)
+  
+  # normalize uncertainty column names
+  if (all(c("lcl_capped", "ucl_capped") %in% names(emtrends_all))) {
+    p_rangemin <- "lcl_capped"; p_rangemax <- "ucl_capped"
+  } else {
+    p_rangemin <- "asymp.LCL"; p_rangemax <- "asymp.UCL"
+  }
+  
+  # --- get formatted variable names -----------------
+  emtrends_all[, pred_var_label := get_full_hydrolabel(in_hydro_vars_dt, 
+                                                       pred_var_name),
+               by=.I]
+  
+  # --- Build summary plot -----
+  summary_plot <- NULL
+  if (plot) {
+    color_by <- if ("spec_factor" %in% names(emtrends_all) && any(!is.na(emtrends_all$spec_factor))) {
+      possible_group_cols <- setdiff(
+        names(emtrends_all),
+        c("trend", "asymp.LCL", "asymp.UCL", p_rangemin, p_rangemax,
+          "response_var", "pred_var_name", "source_term", "predictor",
+          "spec_factor", "SE", "df")
+      )
+      
+      group_col <- NULL
+      for (nc in possible_group_cols) {
+        if (nc %in% names(in_drn_dt) &&
+            any(emtrends_all[[nc]] %in% unique(in_drn_dt[[nc]]), na.rm = TRUE)) {
+          group_col <- nc; break
+        }
+      }
+      if (is.null(group_col) && length(possible_group_cols) > 0) {
+        group_col <- possible_group_cols[[1]]
+      }
+      group_col
+    } else {
+      "source_term"
+    }
+    
+    # --- build color vector ---
+    color_vec <- NULL
+    if (color_by %in% names(in_drn_dt) && "color" %in% names(in_drn_dt)) {
+      color_vec <- in_drn_dt[!duplicated(get(color_by)),
+                             setNames(color, get(color_by))]
+    } else if (color_by %in% names(emtrends_all) && is.character(emtrends_all[[color_by]])) {
+      vals <- unique(emtrends_all[[color_by]])
+      color_vec <- setNames(scales::hue_pal()(length(vals)), vals)
+    }
+    
+    # clean up missing colors
+    if (!color_by %in% names(emtrends_all)) color_by <- "source_term"
+    emtrends_all[is.na(get(color_by)), (color_by) := "All"]
+    
+    if (exists("color_vec") && is.character(emtrends_all[[color_by]])) {
+      if ("All" %in% emtrends_all[[color_by]]) {
+        color_vec[["All"]] <- "black"
+      }
+      missing_cols <- setdiff(unique(emtrends_all[[color_by]]), names(color_vec))
+      if (length(missing_cols) > 0) {
+        extra_cols <- scales::hue_pal()(length(missing_cols))
+        names(extra_cols) <- missing_cols
+        color_vec <- c(color_vec, extra_cols)
+      }
+      if (anyNA(names(color_vec))) color_vec <- color_vec[!is.na(names(color_vec))]
+    }
+    
+    summary_plot <- ggplot(emtrends_all, aes(x = pred_var_label, y = trend)) +
+      geom_pointrange(aes_string(ymin = p_rangemin, ymax = p_rangemax, color = color_by),
+                      position = position_dodge(width = 0.6), alpha = 0.6) +
+      geom_hline(yintercept = 0, linetype = 2) +
+      scale_x_discrete(labels=label_wrap_gen(width = 25)) +
+      facet_wrap(~ predictor, scales = "free_y", ncol = 1) +
+      coord_flip() +
+      labs(
+        x = "Predictor (term)",
+        y = paste("Estimated slope of", all.vars(formula(in_mod_fit))[[1]]),
+        color = Hmisc::capitalize(color_by)
+      ) +
+      theme_minimal() +
+      theme(strip.text = element_blank())
+    
+    if (!is.null(color_vec)) {
+      summary_plot <- summary_plot + scale_color_manual(values = color_vec)
+    }
+  }
+  
+  return(list(
+    dt = emtrends_all,
+    plot = summary_plot,
+    skipped = skipped
+  ))
+}
+
 ################################################################################
 #---------------------------------- workflow functions ---------------------------------------------
 # path_list = tar_read(bio_data_paths)
@@ -14565,105 +14912,41 @@ model_bac_biof_richness_yr <- function(in_ssn_eu_summarized,
 }
 
 ################################################################################
-# Format theoretical model equation (without the numbers) ----------------------
-# Get summary statistics--------------------------------------------------------
-# Display emtrends + obs-preds -------------------------------------------------
 # Sub-select models (richness vs invsimpson)------------------------------------
 # Choose models to project under climate change --------------------------------
 ################################################################################
 
+#------ get_perf_table_multiorganism-------------------------------------------
 
-#------ format_ssn_glm_equation ------------------------------------------------
-# in_mod_fit <- tar_read(ssn_mods_miv_invsimpson_yr)$ssn_mod_fit
-# in_mod_fit <- tar_read(ssn_mods_miv_richness_yr)$ssn_mod_fit
-
-# in_mod_fit <- tar_read(ssn_mods_miv_richness_yr)$ssn_mod_fit
-# in_mod_fit <- tar_read(ssn_mods_miv_invsimpson_yr)$ssn_mod_fit
-# in_mod_fit <- tar_read(ssn_mods_dia_sedi_richness_yr)$ssn_mod_fit
-# in_mod_fit <- tar_read(ssn_mods_dia_sedi_invsimpson_yr)$ssn_mod_fit
-# in_mod_fit <- tar_read(ssn_mods_dia_biof_richness_yr)$ssn_mod_fit
-# in_mod_fit <- tar_read(ssn_mods_fun_sedi_richness_yr)$ssn_mod_fit
-# in_mod_fit <- tar_read(ssn_mods_fun_sedi_invsimpson_yr)$ssn_mod_fit
-# in_mod_fit <- tar_read(ssn_mods_fun_biof_richness_yr)$ssn_mod_fit
-# in_mod_fit <- tar_read(ssn_mods_fun_biof_invsimpson_yr)$ssn_mod_fit
-# in_mod_fit <- tar_read(ssn_mods_bac_sedi_richness_yr)$ssn_mod_fit
-# in_mod_fit <- tar_read(ssn_mods_bac_sedi_invsimpson_yr)$ssn_mod_fit
-# in_mod_fit <- tar_read(ssn_mods_bac_biof_richness_yr)$ssn_mod_fit
-# in_mod_fit <- tar_read(ssn_mods_bac_biof_invsimpson_yr)$ssn_mod_fit
-# 
-# greek=T
-# format_ssn_glm_equation(in_mod_fit, greek = TRUE)
-
-format_ssn_glm_equation <- function(in_mod_fit, greek = TRUE) {
-  if (!inherits(in_mod_fit, c('lm','glm','ssn_lm', 'ssn_glm', 'lme', 'merMod'))) {
-    return(NULL)
-  }
+get_perf_table_multiorganism <- function(in_mod_list) {
   
-  # Extract response and predictors
-  f <- formula(in_mod_fit)
-  y <- as.character(f[[2]])
-  x <- attr(terms(in_mod_fit), "term.labels")
-  
-  # Define coefficient names
-  coefs <- if (greek) paste0("β_", seq_along(x)) else paste0("b", seq_along(x))
-  intercept <- if (greek) "β₀" else "b0"
-  
-  # Detect family (for SSN2)
-  fam <- in_mod_fit$family
-  if (!is.null(fam)) {
-    link <- switch(
-      fam,
-      "Gaussian"   = "identity",
-      "gaussian"   = "identity",
-      "poisson"    = "log",
-      "nbinomial"  = "log",
-      "binomial"   = "logit",
-      "gamma"      = "inverse",
-      "lognormal"  = "log",
-      "exponential"= "log",
-      "identity"   = "identity",
-      NA_character_
-    )
-  } else {
-    link <- 'identity'
-  }
-  
-  if (length(y) > 1) {
-    if (y[[1]]=='log10') {
-      link <- "log"
+  out_tab <- lapply(in_mod_list, function(in_mod_fit) {
+    if (!inherits(in_mod_fit, c('lm','glm','ssn_lm', 'ssn_glm', 'lme', 'merMod'))) {
+      return(data.table(formula=NULL))
     }
-    y <- y[[2]]
-  }
-
-  # --- Pretty formatting for variable terms ---
-  pretty_terms <- x
+    # print(in_mod_fit)
+    perf_table <- cbind(
+      formula = format_ssn_glm_equation(in_mod_fit, greek = TRUE), 
+      glance(in_mod_fit), 
+      GVIF = ifelse(length(attr(in_mod_fit$terms, "term.labels"))>=2,
+                    max(as.data.frame(vif(in_mod_fit))[['GVIF^(1/(2*Df))']]), 
+                    NA),
+      loocv(in_mod_fit))
+    return(perf_table)
+  }) %>% 
+    rbindlist(fill=T, idcol='organism') 
   
-  # Replace I(var^2) → var²
-  pretty_terms <- gsub("I\\(([^\\^]+)\\^2\\)", "\\1²", pretty_terms)
-  # Replace I(var^3) → var³
-  pretty_terms <- gsub("I\\(([^\\^]+)\\^3\\)", "\\1³", pretty_terms)
-  # Replace interactions x1:x2 → x₁ × x₂
-  pretty_terms <- gsub(":", " × ", pretty_terms)
-  # Optional cleanup for nicer rendering
-  pretty_terms <- gsub("\\s+", "", pretty_terms)
-  
-  # Build the right-hand side
-  rhs <- paste(c(intercept, paste0(coefs, "*", pretty_terms)), collapse = " + ")
-  
-  # Construct the full equation
-  if (is.na(link) || link == "identity") {
-    eq <- paste0(y, " = ", rhs)
-  } else {
-    eq <- paste0(link, "(", y, ") = ", rhs)
-  }
-  
-  return(eq)
+  return(out_tab)
 }
 
 #------ diagnose_ssn_mod -----------------------------------------------------
-# in_ssn_mods <- tar_read(ssn_mods_miv_richness_yr)
+# in_mod_fit <- tar_read(ssn_mods_miv_richness_yr)$ssn_mod_fit
 # write_plots=T
 # out_dir = figdir
+# response_var_label = 'Mean richness'
+# in_drn_dt = drn_dt
+# in_hydro_vars_dt = tar_read(hydro_vars_dt)
+# plot_path_prefix <- 'ssn_mod_yr_miv_diagplot'
 
 #' Diagnose SSN Model Performance and Create Diagnostic Plots
 #'
@@ -14685,86 +14968,44 @@ format_ssn_glm_equation <- function(in_mod_fit, greek = TRUE) {
 #'     \item \strong{varcomp_best}: Variance components for the best-fit model.
 #'     \item \strong{varcomp_final}: Variance components for the final prediction model.
 #'   }
-diagnose_ssn_mod <- function(in_ssn_mods,
-                             write_plots=T,
-                             response_var_label,
-                             plot_path_prefix='miv_predobs_plot_',
-                             out_dir) {
+plot_ssn_mod_diagplot <- function(in_mod_fit,
+                                  in_drn_dt,
+                                  in_hydro_vars_dt,
+                                  write_plots=T,
+                                  response_var_label,
+                                  plot_path_prefix=NULL,
+                                  out_dir) {
+  response_var <- all.vars(in_mod_fit$formula)[[1]]
   
-  alpha_var <- all.vars(in_ssn_mods$ssn_mod_fit_best$formula)[[1]]
+  p_obs_pred <- plot_ssn_obs_pred(in_mod_fit, 
+                                  in_drn_dt,
+                                  response_var_label)
   
-  #Check predictions for best model
-  # predobs_plot_best <- setDT(in_ssn_mods$ssn_pred_best) %>%
-  #   .[, country := factor(
-  #     country, 
-  #     levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain" ),
-  #     ordered=T)
-  #   ] %>% 
-  #   ggplot(aes(x=.fitted, y=get(alpha_var))) +
-  #   geom_point(aes(color=stream_type)) +
-  #   geom_smooth(method = 'lm',
-  #               color = 'black', se = FALSE) +
-  #   geom_abline(linetype='dashed') +
-  #   scale_x_continuous(name=paste('Predicted', response_var_label)) +
-  #   scale_y_continuous(name=paste('Observed', response_var_label)) +
-  #   scale_color_manual(
-  #     name = 'Stream type',
-  #     labels = c('Perennial', 'Non-perennial'),
-  #     values=c('#2b8cbe', '#feb24c')) +
-  #   coord_fixed() +
-  #   facet_wrap(~country) +
-  #   theme_classic() 
+  p_emtrends <- plot_formula_emtrends(in_mod_fit,
+                                      in_drn_dt,
+                                      in_hydro_vars_dt,
+                                      plot = TRUE,
+                                      verbose = FALSE) 
   
-  #Check predictions for final model
-  predobs_plot_final <- setDT(in_ssn_mods$ssn_pred_final)[, country := factor(
-    country, 
-    levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain" ),
-    ordered=T)
-  ] %>% 
-    ggplot(aes(x=.fitted, y=mean_invsimpson)) +
-    geom_point(aes(color=stream_type)) +
-    geom_smooth(method = 'lm',
-                color = 'black', se = FALSE) +
-    geom_abline(linetype='dashed') +
-    scale_x_continuous(name=paste('Predicted', response_var_label)) +
-    scale_y_continuous(name=paste('Observed', response_var_label)) +
-    scale_color_manual(
-      name = 'Stream type',
-      labels = c('Perennial', 'Non-perennial'),
-      values=c('#2b8cbe', '#feb24c')) +
-    coord_fixed() +
-    facet_wrap(~country) +
-    theme_classic()
+  out_p <- ((p_emtrends$plot + theme(legend.position = 'none') 
+             | p_obs_pred)) +
+    plot_layout(guides = "collect") 
+  
   
   if (write_plots) {
     ggsave(
       filename = file.path(
         out_dir, 
-        paste0(plot_path_prefix, '_', alpha_var, '_best.png')),
-      plot = predobs_plot_best,
+        paste0(plot_path_prefix, '_', response_var, '.pdf')),
+      plot = out_p,
       width = 8,
-      height = 6,
-      units='in',
-      dpi=600
-    )
-    
-    ggsave(
-      filename = file.path(
-        out_dir, 
-        paste0(plot_path_prefix, '_', alpha_var, '_final.png')),
-      plot = predobs_plot_final,
-      width = 8,
-      height = 6,
+      height = 4,
       units='in',
       dpi=600
     )
   }
   
-  return(list(
-    varcomp_best = SSN2::varcomp(in_ssn_mods$ssn_mod_fit_best),
-    varcomp_final = SSN2::varcomp((in_ssn_mods$ssn_mod_fit))
-  )
-  )
+  return(out_p)
 }
 
 #------ plot_ssn2_marginal_effects ---------------------------------------------
