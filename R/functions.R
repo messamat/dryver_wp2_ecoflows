@@ -338,22 +338,22 @@ compute_ecdf_multimerge <- function(in_dt, ecdf_columns, grouping_columns,
 
 #------ identify_drywet6mo   ------------------------------------------------
 identify_drywet6mo <- function(in_dt, flow_col='isflowing', jday_col = 'doy') {
-
+  
   #Add 3 months before and after record to avoid having NAs on the edges
   fill_dt <- data.table(rep(NA,91)) %>% setnames(flow_col)
-
+  
   in_dt <- rbind(fill_dt,
                  rbind(in_dt, fill_dt,
                        fill=T),
                  fill=T)
-
+  
   #Computer total number of no-flow days in the 6-month period centered around
   #each day in the record
   in_dt <- in_dt[, noflow_6morollsum := frollsum(
     isflowing==0,
     n=183, align='center', hasNA=T, na.rm=T)] %>%
     .[ 92:(.N-91), ]
-
+  
   #Find the Julian day with the most number of no-flow days on interannual average
   driest_6mocenter <- in_dt[get(jday_col) < 366 #can lead to artefacts if drying was infrequent but occurred during that time
                             , as.Date(
@@ -361,21 +361,21 @@ identify_drywet6mo <- function(in_dt, flow_col='isflowing', jday_col = 'doy') {
                                 which.max(.SD[, mean(noflow_6morollsum, na.rm=T),by=jday_col]$V1)],
                               origin=as.Date("1970-01-01"))
   ]
-
+  
   #Identify the 6-month period centered on that julian day as the dry period
   driest_6moperiod <- data.table(
     dry_6mo = T,
     jday = as.numeric(format(
       seq(driest_6mocenter-91, driest_6mocenter+91, by='day'), '%j'))
   )
-
+  
   #Identify the other julian days as the wet period
   in_dt <- merge(in_dt, driest_6moperiod,
                  by.x=jday_col, by.y='jday', all.x=T) %>%
     .[is.na(dry_6mo), dry_6mo := F]
-
+  
   in_dt[, noflow_6morollsum := NULL]
-
+  
   return(in_dt[order(date),])
 }
 
@@ -1304,8 +1304,8 @@ get_full_hydrolabel <- function(in_hydro_vars_dt,
   } else {
     # scaled_ext <- ''
   }
-   
-       
+  
+  
   if (in_hydro_var %in% in_hydro_vars_dt$hydro_var) {
     out_label <- in_hydro_vars_dt[hydro_var == in_hydro_var,] %>%
       .[1, paste(hydro_label, ': past', window_d, h_unit)] 
@@ -1316,7 +1316,7 @@ get_full_hydrolabel <- function(in_hydro_vars_dt,
       out_label <- 'Basin area - square kilometers'
     }
   }
-
+  
   return(out_label)
 }
 
@@ -1365,13 +1365,13 @@ get_ssn_emmeans <- function(in_mod,
     
   } else if (is.data.table(in_emm_dt) && 
              all(c('pred_var', interaction_var, 'emmean')  %in% names(in_emm_dt))
-             ){
+  ){
     emm_dt <- in_emm_dt
     response_var <- emm_dt[1, response_var]
   }
   
   setnames(emm_dt, c('prob', 'rate'), rep('emmean', 2), skip_absent=TRUE)
-
+  
   color_vec <- emm_dt[!duplicated(get(interaction_var)),
                       setNames(color, get(interaction_var))]
   
@@ -1439,7 +1439,7 @@ get_ssn_emtrends <- function(in_mod, in_pred_var,
     p_rangemin <- 'asymp.LCL'
     p_rangemax <- 'asymp.UCL'
   }
-
+  
   color_vec <- emtrends_dt[!duplicated(get(interaction_var)),
                            setNames(color, get(interaction_var))]
   
@@ -1448,7 +1448,7 @@ get_ssn_emtrends <- function(in_mod, in_pred_var,
                                              y = trend)) +
       geom_pointrange(aes(ymin = get(p_rangemin), ymax = get(p_rangemax),
                           color=get(interaction_var)),
-                        alpha=0.5, fatten=6) +
+                      alpha=0.5, fatten=6) +
       geom_hline(yintercept=0, linetype=2) +
       scale_color_manual(name=Hmisc::capitalize(interaction_var),
                          values=color_vec ) +
@@ -1460,7 +1460,7 @@ get_ssn_emtrends <- function(in_mod, in_pred_var,
   } else {
     emtrends_plot <- NULL
   }
-
+  
   return(list(
     dt = emtrends_dt,
     plot = emtrends_plot
@@ -1959,20 +1959,20 @@ read_biodt <- function(path_list, in_metadata_edna,
                              ,"site", "country", "date", "sample.id" ),
                    variable.name = "taxon_name",
                    value.name = 'density'
-                   )
+  )
   #Check that can safely clean
   gsub('[.]', '', gsub('(gen[.])|(sp[.])', '', names(dt_list$miv_nopools))) %>% 
     duplicated %>% sum
   #Clean name for joining
   miv_melt[, taxon_name_format := gsub('[.]|([.]sp)|\\s', '',
                                        gsub('(sp)[.]', '', taxon_name))
-           ]
+  ]
   
   #Clean raw data
   taxo_info <- setDT(in_miv_full_dt) %>%
     .[, taxon_name := tolower(`Genus / Higher taxonomic group`)] %>%
     .[, taxon_name_format := gsub('[.]|([.]sp)|[//]|\\s', '',
-                           gsub('(sp|lv|ad)[.]', '', taxon_name))
+                                  gsub('(sp|lv|ad)[.]', '', taxon_name))
     ] %>%
     .[!duplicated(taxon_name_format), 
       .(taxon_name_format, Taxagroup, Family, Subfamily)] %>%
@@ -1981,11 +1981,11 @@ read_biodt <- function(path_list, in_metadata_edna,
   
   #Merge them
   miv_full <- merge(miv_melt, taxo_info, by='taxon_name_format', all.x=T)
-
+  
   #check that everything was matched
   check <- miv_full[is.na(Taxagroup),]
   check[!duplicated(taxon_name_format), .(taxon_name_format, taxon_name)]
-
+  
   #Divide OCH and EPT
   no_ept_taxon_list <- miv_full[
     !(Taxagroup %in% c('Ephemeroptera', 'Plecoptera', 'Trichoptera')),
@@ -2067,7 +2067,7 @@ read_biodt <- function(path_list, in_metadata_edna,
                                                     metacols_toget, with=F],
                                    by='running_id') 
     
-
+    
     if (org=='fun') {
       print('Correcting fungi dates')
       dt_list[[org_medium]][date == as.Date("2012-02-25"), 
@@ -2079,7 +2079,7 @@ read_biodt <- function(path_list, in_metadata_edna,
       .[habitat!='pool',] %>%
       .[, `:=`(habitat = NULL,
                organism = new_org_medium)]
-
+    
     dt_list[[org_medium]][, habitat := NULL]
   } %>% invisible
   
@@ -2168,7 +2168,7 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
                              structure = bio_structure[rowSums(spxp > 0) > 0,], 
                              phy = NULL, weight = NULL, check = TRUE, q = 1)) 
     localdiv_decomp <- as.data.table(decomp$tab_by_site) %>%
-        setnames(c('nsite'), 'ncampaigns')
+      setnames(c('nsite'), 'ncampaigns')
     localdiv_decomp$site <- unique(as.character(bio_structure[rowSums(spxp > 0) > 0,]$space))
     
     # Add missing sites with NA
@@ -2319,7 +2319,7 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
       )
     }
   }
-
+  
   return(out_dt)
 }
 #------ sprich_plot ------------------------------------------------------------
@@ -2602,7 +2602,7 @@ clean_network <- function(rivnet_path, idcol,
   #Convert those without match to points every 10 meters
   rivnet_nomatch_lines <- rivnet_clustered_joinini %>%
     .[is.na(rivnet_clustered_joinini[[idcol]]),] 
-
+  
   if (nrow(rivnet_nomatch_lines) > 0) {
     rivnet_nomatch_pts <- rivnet_nomatch_lines %>%
       st_line_sample(density = 1/5) %>%
@@ -2635,9 +2635,9 @@ clean_network <- function(rivnet_path, idcol,
   } else {
     rivnet_clustered_joinall <- rivnet_clustered_joinini
   }
-
+  
   #Fill NAs with those
-
+  
   rivnet_clustered_joinall[[idcol]] <- dplyr::coalesce(
     rivnet_clustered_joinall[[idcol]],
     rivnet_clustered_joinall$nearest_id)
@@ -3572,11 +3572,11 @@ compute_hydrostats_drn <- function(in_network_path,
       q_stats <- list()
       #Compute hydrological statistics at the DRN scale (Relative flowing length)
       q_stats$country <- intermod_dt[, 
-                                 compute_hydrostats_intermittence(
-                                   in_hydromod_dt = .SD,
-                                   in_sites_dt = in_sites_dt,
-                                   scale = 'drn')$country, 
-                                 by = nsim] 
+                                     compute_hydrostats_intermittence(
+                                       in_hydromod_dt = .SD,
+                                       in_sites_dt = in_sites_dt,
+                                       scale = 'drn')$country, 
+                                     by = nsim] 
       
       #Compute hydrological statistics at the scale of individual sites
       q_stats$site <- intermod_dt[, 
@@ -4814,7 +4814,7 @@ summarize_env <- function(in_env_dt,
   
   # Fill basin area NAs for Genal basin
   in_env_dt[is.na(basin_area_km2),  
-      basin_area_km2 := in_genal_upa[.SD, on="site", x.basin_area_km2]]
+            basin_area_km2 := in_genal_upa[.SD, on="site", x.basin_area_km2]]
   
   # calculate mean for each data column, excluding dry sites
   env_summarized <- in_env_dt[state_of_flow != 'D', 
@@ -5077,7 +5077,7 @@ merge_allvars_summarized <- function(in_spdiv_local,
   spdiv_summarized <- in_spdiv_local[
     !duplicated(paste(site, organism)), 
     intersect(c(dtcols_sites$group_cols, dtcols$div_summarized),
-           names(in_spdiv_local)), 
+              names(in_spdiv_local)), 
     with=FALSE] %>%
     .[, mean_richness := as.integer(round(mean_richness))]
   
@@ -5925,7 +5925,7 @@ create_ssn_europe <- function(in_network_path,
       sites_list$barriers <- barriers_lsn
     }
   }
-
+  
   
   # 5. Calculate upstream distance -----
   edges_lsn <- updist_edges(
@@ -7436,7 +7436,7 @@ get_hydrowindow_emtrends <- function(best_dt, in_hydro_vars_dt, in_drn_dt) {
     print(in_pred_var)
     in_mod <- best_dt[hydro_var == in_pred_var, mod][[1]]
     if (in_pred_var == "null") in_pred_var <- all.vars(in_mod$formula)[2]
-
+    
     get_ssn_emtrends(in_mod, in_pred_var, in_pred_var, in_drn_dt,
                      interaction_var = "country", plot = FALSE)$dt
     
@@ -7449,7 +7449,7 @@ get_hydrowindow_emtrends <- function(best_dt, in_hydro_vars_dt, in_drn_dt) {
                            .(hydro_var_root, hydro_class)], 
           by='hydro_var_root') %>%
     .[!(pred_var_label %in% c('Null', 'Mean flow percentile')),]
-
+  
   
   emtrends_dt_all[, `:=`(
     lcl_capped = fifelse(asymp.LCL < min(trend), min(trend), asymp.LCL),
@@ -7587,7 +7587,7 @@ save_ssn_div_hydrowindow_plots <- function(
   fwrite(perf_table$all[, .SD, .SDcols=!c('mod')], table_path)
   
   out_paths <- list(table = table_path)
-
+  
   # Variance decomposition: multi-page
   if (!is.null(plot_varcomp)) {
     vc_paths <- vapply(seq_along(plot_varcomp$plots), function(i) {
@@ -7659,8 +7659,8 @@ plot_varcomp_multiorganisms <- function(in_hydrowindow_varcomp_multiorg,
                                         in_organism_dt,
                                         write_plot=F,
                                         out_dir=NULL
-                                        ) {
-
+) {
+  
   varcomp_best <- in_hydrowindow_varcomp_multiorg %>%
     .[varcomp=="Covariates (PR-sq)", 
       .SD[which.max(proportion),],
@@ -7673,7 +7673,7 @@ plot_varcomp_multiorganisms <- function(in_hydrowindow_varcomp_multiorg,
                            .(hydro_label, hydro_class, metric_num)], 
           by='hydro_label') %>%
     .[, h_unit := fifelse(grepl(pattern='.*yrpast.*', hydro_var), 'y', 'd')]
-
+  
   
   varcomp_plot <- ggplot(varcomp_best, 
                          aes(x=organism_class, y=marginal_R2, fill=organism_sub)) +
@@ -7686,7 +7686,7 @@ plot_varcomp_multiorganisms <- function(in_hydrowindow_varcomp_multiorg,
     scale_x_discrete(name='Organism') +
     scale_fill_manual(name='Subset',
                       values= c('#666666', '#7570b3', '#66a61e', '#a6761d', '#1b9e77')
-                     ) + 
+    ) + 
     coord_flip(clip='off') +
     facet_wrap(~ hydro_class + str_wrap(hydro_label, 30), ncol = 4, 
                labeller = function (labels) {
@@ -7779,7 +7779,7 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
     lcl_rel_capped = fifelse(lcl_rel < min(trend_rel), min(trend_rel), lcl_rel),
     ucl_rel_capped = fifelse(ucl_rel > max(trend_rel), max(trend_rel), ucl_rel)
   ), by = hydro_label]
-    
+  
   #Format country and labels for plotting
   emtrends_all <- emtrends_all  %>%
     .[!(hydro_label %in% c('Null', 'Mean flow percentile')),] %>% #Remove to have 16 facets
@@ -7788,13 +7788,16 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
     .[, organism_sub := gsub('Sediment', 'Sedi.', organism_sub)] %>%
     .[, organism_sub := gsub('Biofilm', 'Biof.', organism_sub)] %>%
     setorder('organism') 
-    
+  
   response_var <- unique(emtrends_all$response_var)
+  
+  color_vec <- emtrends_all[!duplicated(country),
+                            setNames(color, country)]
   
   #Plot trend coefficients
   emtrends_plot <- ggplot(emtrends_all, aes(x = organism_class, 
-                                           y = trend_rel,
-                                           group = organism_label)) +
+                                            y = trend_rel,
+                                            group = organism_label)) +
     geom_pointrange(aes(ymin = lcl_rel_capped, ymax = ucl_rel_capped, color= country),
                     alpha=0.5, fatten=4, position = position_dodge(0.7)) +
     geom_hline(yintercept=0, linetype=2) +
@@ -7802,7 +7805,7 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
                   label=paste(organism_sub, '|', window_d, h_unit)), 
               position = position_dodge(width = .7), size=3, color="darkgrey") +
     scale_color_manual(name='Country',
-                       values=unique(emtrends_all$color)) +
+                       values=color_vec) +
     labs(y = paste("Estimated slope of", response_var),
          x = 'Organism') +
     coord_flip(clip='off') +
@@ -7833,10 +7836,10 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
     message("Saving ", out_path)
     ggsave(out_path, 
            plot = emtrends_plot, 
-           width = 14, height = 9, units = "in", 
+           width = 14, height = 11, units = "in", 
            dpi = 600)
   }
-
+  
   return(list(
     dt=emtrends_all,
     plot=emtrends_plot
@@ -7989,33 +7992,31 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
       geom_smooth(method='lm', se=F, color='black') +
       facet_wrap(~variable, scales='free_x') +
       theme_bw()
-  }
-  
-  #Settle on a basic covariance structure to start  with -----
-  #Check correlation
-  topcors_overall <- in_cor_matrices$div[
-    variable1 == alpha_var & organism == 'miv_nopools' 
-    # & variable2 %in% hydro_candidates 
-    & !is.na(correlation),] %>%
-    .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor)
-  
-  topcors_bydrn <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'miv_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
-             var_label = paste(variable2, round(correlation, 2))
-    ), by=country] %>%
-    dcast(cor_order~country, value.var = 'var_label', fill=NA)
-  
-  topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'miv_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, mean(correlation), by=variable2] %>%
-    .[order(V1),]
-  
-  #Test all possible covariance structures
-  if (interactive) {
+    
+    #Settle on a basic covariance structure to start  with -----
+    #Check correlation
+    topcors_overall <- in_cor_matrices$div[
+      variable1 == alpha_var & organism == 'miv_nopools' 
+      # & variable2 %in% hydro_candidates 
+      & !is.na(correlation),] %>%
+      .[, abs_cor := abs(correlation)] %>%
+      setorder(-abs_cor)
+    
+    topcors_bydrn <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'miv_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+               var_label = paste(variable2, round(correlation, 2))
+      ), by=country] %>%
+      dcast(cor_order~country, value.var = 'var_label', fill=NA)
+    
+    topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'miv_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, mean(correlation), by=variable2] %>%
+      .[order(V1),]
+    
+    #Test all possible covariance structures
     ssn_norm_ini <- model_ssn_hydrowindow(
       in_ssn = in_ssn_eu_summarized,
       organism = c('miv_nopools'),
@@ -8064,7 +8065,7 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
     # plot(ssn_norm_ini[[1]][[1]])
     # plot(ssn_nbin_ini[[1]][[1]])
     # varcomp(ssn_norm_ini[[1]][[10]])
-
+    
     #CHoose negative binomial based on the AIC scores
     ssn_nbin_cov <- model_ssn_hydrowindow(
       in_ssn = in_ssn_eu_summarized,
@@ -8141,7 +8142,7 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
   miv_rich_modlist[['mod12']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + sqrt(meanQ3650past)')))
   
   miv_rich_modlist[['mod13']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ FreD3650past + country:FreD3650past + sqrt(meanQ3650past)')))
-
+  
   miv_rich_modlist[['mod14']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(meanQ3650past)')))
   
   miv_rich_modlist[['mod15']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2)')))
@@ -8157,7 +8158,7 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
   miv_rich_modlist[['mod20']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ PDurD365past + country:PDurD365past + sqrt(basin_area_km2)')))
   
   miv_rich_modlist[['mod21']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + FstDrE_SD30yrpast + country:FstDrE_SD30yrpast + sqrt(basin_area_km2)')))
-
+  
   miv_rich_modlist[['mod22']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_avg_samp + country:DurD_avg_samp + FreD_samp + sqrt(basin_area_km2)')))
   
   miv_rich_modlist[['mod23']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sd6_10yrpast + sqrt(basin_area_km2)')))
@@ -8175,7 +8176,7 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
   miv_rich_modlist[['mod29']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp*sd6_10yrpast + country:DurD_samp + sqrt(basin_area_km2)')))
   
   miv_rich_modlist[['mod30']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + FstDrE + FstDrE:country + sqrt(basin_area_km2)'))) #Overspec
-
+  
   miv_rich_modlist[['mod31']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + RelF_avg_samp + sqrt(basin_area_km2)'))) 
   
   miv_rich_modlist[['mod32']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + FstDrE + FstDrE:country + sqrt(basin_area_km2)'))) 
@@ -8194,50 +8195,52 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
   
   miv_rich_modlist[['mod39']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + PFreD365past + country:DurD3650past + country:PFreD365past + sqrt(meanQ3650past)'))) 
   
-  #Check model in additional depth (applied to most models before continuing)
-  chosen_mod <- miv_rich_modlist[['mod35']]
-  
-  #Check residual correlations to choose variable additions
-  check_resid_corr(in_ssn_mod = chosen_mod,
-                   in_idcol = 'site',
-                   in_response_var = alpha_var,
-                   in_candidates = hydro_candidates)
-  
-  #Check residuals, variance decomposition, summary, and predictions
-  plot(chosen_mod)
-  varcomp(chosen_mod)
-  summary(chosen_mod)
-  
-  ggplot(data=  augment(chosen_mod, drop=F, type.predict = 'response'), 
-         aes(x=.fitted, y=get(alpha_var))) +
-    geom_point(aes(color=stream_type)) +
-    geom_smooth(method='lm') +
-    geom_abline() +
-    facet_wrap(~country)
-  
-  get_ssn_emmeans(in_mod=chosen_mod , 
-                  in_pred_var = 'FreD3650past',
-                  interaction_var = 'country', 
-                  in_drn_dt = drn_dt,
-                  plot=T, label_pred_var=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                  in_pred_var = 'FreD3650past',
-                  interaction_var = 'country', 
-                  in_drn_dt = drn_dt,
-                  plot=T)
-  
-  # get_ssn_emtrends(in_mod=chosen_mod , 
-  #                  in_pred_var = 'sd6_10yrpast',
-  #                  interaction_var = 'country', 
-  #                  in_drn_dt = drn_dt,
-  #                  plot=T)
-  # 
-  # get_ssn_emmeans(in_mod=chosen_mod , 
-  #                 in_pred_var = 'FstDrE',
-  #                 interaction_var = 'DurD_samp', 
-  #                 in_drn_dt = drn_dt,
-  #                 plot=T, label_pred_var=T)
+  if (interactive) {
+    #Check model in additional depth (applied to most models before continuing)
+    chosen_mod <- miv_rich_modlist[['mod35']]
+    
+    #Check residual correlations to choose variable additions
+    check_resid_corr(in_ssn_mod = chosen_mod,
+                     in_idcol = 'site',
+                     in_response_var = alpha_var,
+                     in_candidates = hydro_candidates)
+    
+    #Check residuals, variance decomposition, summary, and predictions
+    plot(chosen_mod)
+    varcomp(chosen_mod)
+    summary(chosen_mod)
+    
+    ggplot(data=  augment(chosen_mod, drop=F, type.predict = 'response'), 
+           aes(x=.fitted, y=get(alpha_var))) +
+      geom_point(aes(color=stream_type)) +
+      geom_smooth(method='lm') +
+      geom_abline() +
+      facet_wrap(~country)
+    
+    get_ssn_emmeans(in_mod=chosen_mod , 
+                    in_pred_var = 'FreD3650past',
+                    interaction_var = 'country', 
+                    in_drn_dt = drn_dt,
+                    plot=T, label_pred_var=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'FreD3650past',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+    
+    # get_ssn_emtrends(in_mod=chosen_mod , 
+    #                  in_pred_var = 'sd6_10yrpast',
+    #                  interaction_var = 'country', 
+    #                  in_drn_dt = drn_dt,
+    #                  plot=T)
+    # 
+    # get_ssn_emmeans(in_mod=chosen_mod , 
+    #                 in_pred_var = 'FstDrE',
+    #                 interaction_var = 'DurD_samp', 
+    #                 in_drn_dt = drn_dt,
+    #                 plot=T, label_pred_var=T)
+  }
   
   #Add environmental variables and "stream_type"
   miv_rich_modlist[['mod40']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(basin_area_km2) + env_PC1')))
@@ -8283,7 +8286,7 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
   #------ For "best" model -------------------------------------------------
   # Refits the selected "best" model using the REML method for better variance estimation.
   ssn_miv_best_final <- quick_miv_ssn(
-    as.formula(paste(alpha_var, '~ DurD3650past + stream_type + country:stream_type + 
+    as.formula(paste(alpha_var, '~ DurD3650past + stream_type + country:stream_type +
       sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')),
     estmethod = 'reml'
   )
@@ -8299,23 +8302,6 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
   #------ For prediction model -------------------------------------------------
   # This section focuses on creating a model suitable for prediction to new reaches,
   # using only variables available for all reaches.
-  
-  #Test covariance structures again, this time with REML 
-  ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
-    in_ssn = in_ssn_eu_summarized,
-    family = 'nbinomial',
-    organism = c('miv_nopools'),
-    formula_root = 'sqrt(meanQ3650past)',
-    hydro_var = 'FreD3650past',
-    response_var = alpha_var,
-    ssn_covtypes = ssn_covtypes,
-    partition_formula = as.formula('~ country'),
-    random_formula = NULL,
-    estmethod='reml'
-  )
-  
-  selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
-
   #Check Torgegram
   tg_selected <- SSN2::Torgegram(
     formula = 'mean_richness ~ DurD_samp + FreD3650past + FreD3650past:country + sqrt(meanQ3650past)',
@@ -8335,11 +8321,29 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
     theme_classic() +
     facet_wrap(~dist_type)
   
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
-  
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  if (interactive) {
+    #Test covariance structures again, this time with REML 
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'nbinomial',
+      organism = c('miv_nopools'),
+      formula_root = 'sqrt(meanQ3650past)',
+      hydro_var = 'FreD3650past',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
+    )
+    
+    selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  }
   
   #Re-fit final model with REML
   ssn_miv_pred_final <- ssn_glm(
@@ -8393,11 +8397,11 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
 # scale_predictors = T
 
 model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
-                                  in_allvars_summarized,
-                                  in_cor_matrices, 
-                                  ssn_covtypes,
-                                  scale_predictors = T,
-                                  interactive = F) {
+                                    in_allvars_summarized,
+                                    in_cor_matrices, 
+                                    ssn_covtypes,
+                                    scale_predictors = T,
+                                    interactive = F) {
   
   #Subset SSN and create distance matrices-----
   ssn_miv <- in_ssn_eu_summarized$miv_nopools$ssn
@@ -8492,33 +8496,31 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
       geom_smooth(method='lm', se=F, color='black') +
       facet_wrap(~variable, scales='free_x') +
       theme_bw()
-  }
-  
-  #Settle on a basic covariance structure to start  with -----
-  #Check correlation
-  topcors_overall <- in_cor_matrices$div[
-    variable1 == alpha_var & organism == 'miv_nopools' 
-    # & variable2 %in% hydro_candidates 
-    & !is.na(correlation),] %>%
-    .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor)
-  
-  topcors_bydrn <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'miv_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
-             var_label = paste(variable2, round(correlation, 2))
-    ), by=country] %>%
-    dcast(cor_order~country, value.var = 'var_label', fill=NA)
-  
-  topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'miv_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, mean(correlation), by=variable2] %>%
-    .[order(V1),]
-  
-  #Test all possible covariance structures
-  if (interactive) {
+    
+    #Settle on a basic covariance structure to start  with -----
+    #Check correlation
+    topcors_overall <- in_cor_matrices$div[
+      variable1 == alpha_var & organism == 'miv_nopools' 
+      # & variable2 %in% hydro_candidates 
+      & !is.na(correlation),] %>%
+      .[, abs_cor := abs(correlation)] %>%
+      setorder(-abs_cor)
+    
+    topcors_bydrn <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'miv_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+               var_label = paste(variable2, round(correlation, 2))
+      ), by=country] %>%
+      dcast(cor_order~country, value.var = 'var_label', fill=NA)
+    
+    topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'miv_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, mean(correlation), by=variable2] %>%
+      .[order(V1),]
+    
+    #Test all possible covariance structures
     ssn_norm_ini <- model_ssn_hydrowindow(
       in_ssn = in_ssn_eu_summarized,
       family = 'Gaussian',
@@ -8651,10 +8653,10 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
   miv_simps_modlist[['mod15']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ FstDrE + country:FstDrE + sqrt(meanQ3650past) + country:sqrt(meanQ3650past) + env_PC2')))
   
   miv_simps_modlist[['mod16']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ stream_type + country:stream_type + sqrt(meanQ3650past) + country:sqrt(meanQ3650past)')))
- 
+  
   miv_simps_modlist[['mod17']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ stream_type + country:stream_type + sqrt(meanQ3650past) + country:sqrt(meanQ3650past)')))
   
-   
+  
   #Summary table
   mod_perf_tab <- lapply(miv_simps_modlist, function(x) {
     cbind(Reduce(paste, deparse(x$formula)), 
@@ -8665,50 +8667,51 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
     rbindlist %>%
     .[, mod := names(miv_simps_modlist)]
   
-  #Check model in additional depth (applied to most models before continuing)
-  chosen_mod <- miv_simps_modlist[['mod7']]
-  
-  #Check residual correlations to choose variable additions
-  check_resid_corr(in_ssn_mod = chosen_mod,
-                   in_idcol = 'site',
-                   in_response_var = alpha_var,
-                   in_candidates = hydro_candidates)
-  
-  #Check residuals, variance decomposition, summary, and predictions
-  plot(chosen_mod)
-  varcomp(chosen_mod)
-  summary(chosen_mod)
-  
-  ggplot(data=  augment(chosen_mod, drop=F, type.predict = 'response'), 
-         aes(x=.fitted, y=log10(mean_invsimpson))) +
-    geom_point(aes(color=stream_type)) +
-    geom_smooth(method='lm') +
-    geom_abline() +
-    facet_wrap(~country)
-  
-  get_ssn_emmeans(in_mod=chosen_mod , 
-                  in_pred_var = 'FreD_samp',
-                  interaction_var = 'country', 
-                  in_drn_dt = drn_dt,
-                  plot=T, label_pred_var=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                   in_pred_var = 'FreD_samp',
-                   interaction_var = 'country', 
-                   in_drn_dt = drn_dt,
-                   plot=T)
-  
-  #RF does not do so well
-  check_rf <- ranger::ranger(mean_invsimpson ~ .,
-                             data= allvars_dt[, c(hydro_candidates, 'mean_invsimpson', 'country'), with=F])
-  allvars_dt[, mean_rich_preds := ranger::predictions(check_rf)]
-  ggplot(allvars_dt, aes(x=mean_rich_preds, y=mean_richness)) +
-    geom_point(aes(color=stream_type)) + 
-    geom_smooth(method='gam') +
-    facet_wrap(~country)
-  
-  #Cannot find a suitable model, give up
-
+  if (interactive) {
+    #Check model in additional depth (applied to most models before continuing)
+    chosen_mod <- miv_simps_modlist[['mod7']]
+    
+    #Check residual correlations to choose variable additions
+    check_resid_corr(in_ssn_mod = chosen_mod,
+                     in_idcol = 'site',
+                     in_response_var = alpha_var,
+                     in_candidates = hydro_candidates)
+    
+    #Check residuals, variance decomposition, summary, and predictions
+    plot(chosen_mod)
+    varcomp(chosen_mod)
+    summary(chosen_mod)
+    
+    ggplot(data=  augment(chosen_mod, drop=F, type.predict = 'response'), 
+           aes(x=.fitted, y=log10(mean_invsimpson))) +
+      geom_point(aes(color=stream_type)) +
+      geom_smooth(method='lm') +
+      geom_abline() +
+      facet_wrap(~country)
+    
+    get_ssn_emmeans(in_mod=chosen_mod , 
+                    in_pred_var = 'FreD_samp',
+                    interaction_var = 'country', 
+                    in_drn_dt = drn_dt,
+                    plot=T, label_pred_var=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'FreD_samp',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+    
+    #RF does not do so well
+    check_rf <- ranger::ranger(mean_invsimpson ~ .,
+                               data= allvars_dt[, c(hydro_candidates, 'mean_invsimpson', 'country'), with=F])
+    allvars_dt[, mean_rich_preds := ranger::predictions(check_rf)]
+    ggplot(allvars_dt, aes(x=mean_rich_preds, y=mean_richness)) +
+      geom_point(aes(color=stream_type)) + 
+      geom_smooth(method='gam') +
+      facet_wrap(~country)
+    
+    #Cannot find a suitable model, give up
+  }
   #------ Write out results ----------------------------------------------------
   return(mod_perf_tab)
 }
@@ -8823,33 +8826,31 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
       geom_smooth(method='lm', se=F, color='black') +
       facet_wrap(~variable, scales='free_x') +
       theme_bw()
-  }
-  
-  #Settle on a basic covariance structure to start  with -----
-  #Check correlation
-  topcors_overall <- in_cor_matrices$div[
-    variable1 == alpha_var & organism == in_organism 
-    # & variable2 %in% hydro_candidates 
-    & !is.na(correlation),] %>%
-    .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor)
-  
-  topcors_bydrn <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == in_organism &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
-             var_label = paste(variable2, round(correlation, 2))
-    ), by=country] %>%
-    dcast(cor_order~country, value.var = 'var_label', fill=NA)
-  
-  topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == in_organism &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, mean(correlation), by=variable2] %>%
-    .[order(V1),]
-  
-  #Test all possible covariance structures
-  if (interactive) {
+    
+    #Settle on a basic covariance structure to start  with -----
+    #Check correlation
+    topcors_overall <- in_cor_matrices$div[
+      variable1 == alpha_var & organism == in_organism 
+      # & variable2 %in% hydro_candidates 
+      & !is.na(correlation),] %>%
+      .[, abs_cor := abs(correlation)] %>%
+      setorder(-abs_cor)
+    
+    topcors_bydrn <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == in_organism &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+               var_label = paste(variable2, round(correlation, 2))
+      ), by=country] %>%
+      dcast(cor_order~country, value.var = 'var_label', fill=NA)
+    
+    topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == in_organism &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, mean(correlation), by=variable2] %>%
+      .[order(V1),]
+    
+    #Test all possible covariance structures
     #Use negative binomial, like for all miv
     
     #CHoose negative binomial based on the AIC scores
@@ -8989,47 +8990,49 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
     rbindlist %>%
     .[, mod := names(ept_rich_modlist)]
   
+  if (interactive) {
+    #Check model in additional depth (applied to most models before continuing)
+    chosen_mod <- ept_rich_modlist[['mod9']]
+    
+    #Check residual correlations to choose variable additions
+    check_resid_corr(in_ssn_mod = chosen_mod,
+                     in_idcol = 'site',
+                     in_response_var = alpha_var,
+                     in_candidates = hydro_candidates)
+    
+    #Check residuals, variance decomposition, summary, and predictions
+    plot(chosen_mod)
+    varcomp(chosen_mod)
+    summary(chosen_mod)
+    
+    
+    get_ssn_emmeans(in_mod=chosen_mod , 
+                    in_pred_var = 'DurD_samp',
+                    interaction_var = 'country', 
+                    in_drn_dt = drn_dt,
+                    plot=T, label_pred_var=T)$plot
+    
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'DurD_samp',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)$plot
+    
+    get_ssn_emtrends(chosen_mod, 
+                     in_pred_var = 'meanQ3650past', 
+                     interaction_var='country',
+                     in_drn_dt = drn_dt)$plot
+    
+    
+    ggplot(data=  augment(chosen_mod, drop=F, type.predict = 'response'), 
+           aes(x=.fitted, y=get(alpha_var))) +
+      geom_point(aes(color=stream_type)) +
+      geom_smooth(method='lm') +
+      geom_abline() +
+      facet_wrap(~country)
+  }
   
-  #Check model in additional depth (applied to most models before continuing)
-  chosen_mod <- ept_rich_modlist[['mod9']]
-  
-  #Check residual correlations to choose variable additions
-  check_resid_corr(in_ssn_mod = chosen_mod,
-                   in_idcol = 'site',
-                   in_response_var = alpha_var,
-                   in_candidates = hydro_candidates)
-  
-  #Check residuals, variance decomposition, summary, and predictions
-  plot(chosen_mod)
-  varcomp(chosen_mod)
-  summary(chosen_mod)
-  
-  
-  get_ssn_emmeans(in_mod=chosen_mod , 
-                  in_pred_var = 'DurD_samp',
-                  interaction_var = 'country', 
-                  in_drn_dt = drn_dt,
-                  plot=T, label_pred_var=T)$plot
-  
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                  in_pred_var = 'DurD_samp',
-                  interaction_var = 'country', 
-                  in_drn_dt = drn_dt,
-                  plot=T)$plot
-  
-  get_ssn_emtrends(chosen_mod, 
-                   in_pred_var = 'meanQ3650past', 
-                   interaction_var='country',
-                   in_drn_dt = drn_dt)$plot
-  
-  
-  ggplot(data=  augment(chosen_mod, drop=F, type.predict = 'response'), 
-         aes(x=.fitted, y=get(alpha_var))) +
-    geom_point(aes(color=stream_type)) +
-    geom_smooth(method='lm') +
-    geom_abline() +
-    facet_wrap(~country)
   
   #####CHOOSE MOD 30 for "absolute" best model###############"
   #####CHOOSE MOD 15 for continuous predictions###########
@@ -9037,39 +9040,23 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
   
   #------ For "best" model -------------------------------------------------
   # Refits the selected "best" model using the REML method for better variance estimation.
-  ssn_ept_best_final <- quick_ept_ssn(
-    as.formula(paste(alpha_var, '~ DurD3650past + stream_type + country:stream_type + 
-      sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')),
-    estmethod = 'reml'
-  )
-  ssn_ept_best_preds <- augment(ssn_ept_best_final,
-                                drop=F)
-  
-  if (interactive) {
-    summary(ssn_ept_best_final)
-    SSN2::varcomp(ssn_ept_best_final)
-    plot(ssn_ept_best_final)
-  }
-  
+  # ssn_ept_best_final <- quick_ept_ssn(
+  #   as.formula(paste(alpha_var, '~ DurD3650past + stream_type + country:stream_type + 
+  #     sqrt(basin_area_km2) + country:sqrt(basin_area_km2)')),
+  #   estmethod = 'reml'
+  # )
+  # ssn_ept_best_preds <- augment(ssn_ept_best_final,
+  #                               drop=F)
+  # 
+  # if (interactive) {
+  #   summary(ssn_ept_best_final)
+  #   SSN2::varcomp(ssn_ept_best_final)
+  #   plot(ssn_ept_best_final)
+  # }
+  # 
   #------ For prediction model -------------------------------------------------
   # This section focuses on creating a model suitable for prediction to new reaches,
   # using only variables available for all reaches.
-  
-  #Test covariance structures again, this time with REML 
-  ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
-    in_ssn = in_ssn_eu_summarized,
-    family = 'nbinomial',
-    organism = c(in_organism),
-    formula_root = 'sqrt(basin_area_km2)',
-    hydro_var = 'DurD_samp',
-    response_var = alpha_var,
-    ssn_covtypes = ssn_covtypes,
-    partition_formula = as.formula('~ country'),
-    random_formula = NULL,
-    estmethod='reml'
-  )
-  
-  selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
   
   #Check Torgegram
   tg_selected <- SSN2::Torgegram(
@@ -9090,11 +9077,29 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
     theme_classic() +
     facet_wrap(~dist_type)
   
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
-  
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
+  if (interactive) {
+    #Test covariance structures again, this time with REML 
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'nbinomial',
+      organism = c(in_organism),
+      formula_root = 'sqrt(basin_area_km2)',
+      hydro_var = 'DurD_samp',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
+    )
+    
+    selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
+  }
   
   #Re-fit final model with REML
   ssn_ept_pred_final <- ssn_glm(
@@ -9146,9 +9151,9 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
     model_selection_table = mod_perf_tab,
     ssn_mod_fit = ssn_ept_pred_final, #Prediction model fit with REML
     ssn_pred_final = ssn_ept_mod_preds, #AUgmented data with prediction model
-    torgegram_mod_pred = tg_plot, #Torgegram for prediction model 
-    ssn_mod_fit_best = ssn_ept_best_final, #"Best" model fit with REML
-    ssn_pred_best = ssn_ept_best_preds #Augmented data for "best" model
+    torgegram_mod_pred = tg_plot #Torgegram for prediction model 
+    # , ssn_mod_fit_best = ssn_ept_best_final, #"Best" model fit with REML
+    # ssn_pred_best = ssn_ept_best_preds #Augmented data for "best" model
   ))
 }
 
@@ -9162,11 +9167,11 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
 # scale_predictors = T
 
 model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
-                                  in_allvars_summarized,
-                                  in_cor_matrices, 
-                                  ssn_covtypes,
-                                  scale_predictors = T,
-                                  interactive = F) {
+                                         in_allvars_summarized,
+                                         in_cor_matrices, 
+                                         ssn_covtypes,
+                                         scale_predictors = T,
+                                         interactive = F) {
   
   #Subset SSN and create distance matrices-----
   ssn_dia_sedi <- in_ssn_eu_summarized$dia_sedi_nopools$ssn
@@ -9266,33 +9271,31 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
       geom_smooth(method='lm', se=F, color='black') +
       facet_wrap(~variable, scales='free_x') +
       theme_bw()
-  }
-  
-  #Settle on a basic covariance structure to start  with -----
-  #Check correlation
-  topcors_overall <- in_cor_matrices$div[
-    variable1 == alpha_var & organism == 'dia_sedi_nopools' 
-    # & variable2 %in% hydro_candidates 
-    & !is.na(correlation),] %>%
-    .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor)
-  
-  topcors_bydrn <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'dia_sedi_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
-             var_label = paste(variable2, round(correlation, 2))
-    ), by=country] %>%
-    dcast(cor_order~country, value.var = 'var_label', fill=NA)
-  
-  topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'dia_sedi_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, mean(correlation), by=variable2] %>%
-    .[order(V1),]
-  
-  #Test all possible covariance structures
-  if (interactive) {
+    
+    #Settle on a basic covariance structure to start  with -----
+    #Check correlation
+    topcors_overall <- in_cor_matrices$div[
+      variable1 == alpha_var & organism == 'dia_sedi_nopools' 
+      # & variable2 %in% hydro_candidates 
+      & !is.na(correlation),] %>%
+      .[, abs_cor := abs(correlation)] %>%
+      setorder(-abs_cor)
+    
+    topcors_bydrn <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'dia_sedi_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+               var_label = paste(variable2, round(correlation, 2))
+      ), by=country] %>%
+      dcast(cor_order~country, value.var = 'var_label', fill=NA)
+    
+    topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'dia_sedi_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, mean(correlation), by=variable2] %>%
+      .[order(V1),]
+    
+    #Test all possible covariance structures
     ssn_norm_ini <- model_ssn_hydrowindow(
       in_ssn = in_ssn_eu_summarized,
       family = 'Gaussian',
@@ -9363,7 +9366,7 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     
     View(ssn_lognorm_cov$ssn_glance)
   }
-    
+  
   #Set a quick helper function to train an SSN GLM model with a basic model structure
   quick_dia_sedi_ssn <- function(in_formula, in_random=NULL, estmethod='ml') {
     ssn_glm(
@@ -9442,56 +9445,49 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     rbindlist %>%
     .[, mod := names(dia_sedi_simps_modlist)]
   
-  #Check model in additional depth (applied to most models before continuing)
-  chosen_mod <- dia_sedi_simps_modlist[['mod21']]
-  
-  #Check residual correlations to choose variable additions
-  check_resid_corr(in_ssn_mod = chosen_mod,
-                   in_idcol = 'site',
-                   in_response_var = alpha_var,
-                   in_candidates = hydro_candidates)
-  
-  #Check residuals, variance decomposition, summary, and predictions
-  plot(chosen_mod)
-  varcomp(chosen_mod)
-  summary(chosen_mod)
-  
-  ggplot(data=augment(chosen_mod, drop=F, type.predict = 'response'), 
-         aes(x=.fitted, y=get(alpha_var))) +
-    geom_point(aes(color=stream_type)) +
-    geom_smooth(method='lm') +
-    geom_abline() +
-    facet_wrap(~country)
-  
-  get_ssn_emmeans(in_mod=chosen_mod , 
-                  in_pred_var = 'qsim_avg_samp',
-                  interaction_var = 'country', 
-                  in_drn_dt = drn_dt,
-                  plot=T, label_pred_var=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                   in_pred_var = 'qsim_avg_samp',
-                   interaction_var = 'country', 
-                   in_drn_dt = drn_dt,
-                   plot=T)
-  
-
-  # check_rf <- ranger::ranger(mean_invsimpson ~ ., 
-  #                            data= allvars_dt[, c(hydro_candidates, 'mean_invsimpson', 'country'), with=F])
-  # allvars_dt[, mean_simps_preds := ranger::predictions(check_rf)]
-  # ggplot(allvars_dt, aes(x=mean_simps_preds, y=mean_invsimpson, color=stream_type)) + 
-  #   geom_point() +
-  #   facet_wrap(~country)
-  
-  #Summary table
-  mod_perf_tab <- lapply(dia_sedi_simps_modlist, function(x) {
-    cbind(Reduce(paste, deparse(x$formula)), 
-          glance(x), 
-          ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
-          loocv(x))
-  }) %>% 
-    rbindlist %>%
-    .[, mod := names(dia_sedi_simps_modlist)]
+  if (interactive) {
+    #Check model in additional depth (applied to most models before continuing)
+    chosen_mod <- dia_sedi_simps_modlist[['mod21']]
+    
+    #Check residual correlations to choose variable additions
+    check_resid_corr(in_ssn_mod = chosen_mod,
+                     in_idcol = 'site',
+                     in_response_var = alpha_var,
+                     in_candidates = hydro_candidates)
+    
+    #Check residuals, variance decomposition, summary, and predictions
+    plot(chosen_mod)
+    varcomp(chosen_mod)
+    summary(chosen_mod)
+    
+    ggplot(data=augment(chosen_mod, drop=F, type.predict = 'response'), 
+           aes(x=.fitted, y=get(alpha_var))) +
+      geom_point(aes(color=stream_type)) +
+      geom_smooth(method='lm') +
+      geom_abline() +
+      facet_wrap(~country)
+    
+    get_ssn_emmeans(in_mod=chosen_mod , 
+                    in_pred_var = 'qsim_avg_samp',
+                    interaction_var = 'country', 
+                    in_drn_dt = drn_dt,
+                    plot=T, label_pred_var=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'qsim_avg_samp',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+    
+    
+    # check_rf <- ranger::ranger(mean_invsimpson ~ ., 
+    #                            data= allvars_dt[, c(hydro_candidates, 'mean_invsimpson', 'country'), with=F])
+    # allvars_dt[, mean_simps_preds := ranger::predictions(check_rf)]
+    # ggplot(allvars_dt, aes(x=mean_simps_preds, y=mean_invsimpson, color=stream_type)) + 
+    #   geom_point() +
+    #   facet_wrap(~country)
+    
+  }
   
   #####CHOOSE MOD 19 for continuous predictions###########
   
@@ -9510,27 +9506,10 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   #   SSN2::varcomp(ssn_dia_sedi_best_final)
   #   plot(ssn_dia_sedi_best_final)
   # }
-
+  
   #------ For prediction model -------------------------------------------------
   # This section focuses on creating a model suitable for prediction to new reaches,
   # using only variables available for all reaches.
-  
-  #Test covariance structures again, this time with REML 
-  ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
-    in_ssn = in_ssn_eu_summarized,
-    family = 'Gaussian',
-    organism = c('dia_sedi_nopools'),
-    formula_root = 'meanConD_CV30yrpast',
-    hydro_var = 'FstDrE_SD10yrpast',
-    response_var = paste0('log10(', alpha_var, ')'),
-    ssn_covtypes = ssn_covtypes,
-    partition_formula = as.formula('~ country'),
-    random_formula = NULL,
-    estmethod='reml'
-  )
-  
-  selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
-  
   #Check Torgegram
   tg_selected <- SSN2::Torgegram(
     formula = 'mean_invsimpson ~ FstDrE_SD10yrpast + country:FstDrE_SD10yrpast + meanConD_CV30yrpast',
@@ -9550,11 +9529,29 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     theme_classic() +
     facet_wrap(~dist_type)
   
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_epa_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_epa_none)
-  
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  if (interactive)  {
+    #Test covariance structures again, this time with REML 
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'Gaussian',
+      organism = c('dia_sedi_nopools'),
+      formula_root = 'meanConD_CV30yrpast',
+      hydro_var = 'FstDrE_SD10yrpast',
+      response_var = paste0('log10(', alpha_var, ')'),
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
+    )
+    
+    selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_epa_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_epa_none)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  }
   
   #Re-fit final model with REML
   ssn_dia_sedi_pred_final <- ssn_glm(
@@ -9592,12 +9589,12 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     model_selection_table = mod_perf_tab,
     ssn_mod_fit = ssn_dia_sedi_pred_final, #Prediction model fit with REML
     ssn_pred_final = ssn_dia_sedi_mod_preds, #AUgmented data with prediction model
-    torgegram_mod_pred = tg_plot, #Torgegram for prediction model 
-    ssn_mod_fit_best = ssn_dia_sedi_best_final, #"Best" model fit with REML
-    ssn_pred_best = ssn_dia_sedi_best_preds #Augmented data for "best" model
+    torgegram_mod_pred = tg_plot #Torgegram for prediction model 
+    # , ssn_mod_fit_best = ssn_dia_sedi_best_final, #"Best" model fit with REML
+    # ssn_pred_best = ssn_dia_sedi_best_preds #Augmented data for "best" model
   ))
-  }
-  
+}
+
 
 #------ model_dia_sedi_richness_yr -----------------------------------------------------------
 # in_allvars_summarized <- tar_read(allvars_summarized)
@@ -9646,11 +9643,11 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
 #'   }
 #'   
 model_dia_sedi_richness_yr <- function(in_ssn_eu_summarized,
-                                  in_allvars_summarized,
-                                  in_cor_matrices, 
-                                  ssn_covtypes,
-                                  scale_predictors = T,
-                                  interactive = F) {
+                                       in_allvars_summarized,
+                                       in_cor_matrices, 
+                                       ssn_covtypes,
+                                       scale_predictors = T,
+                                       interactive = F) {
   
   #Subset SSN and create distance matrices-----
   ssn_dia_sedi <- in_ssn_eu_summarized$dia_sedi_nopools$ssn
@@ -9749,33 +9746,31 @@ model_dia_sedi_richness_yr <- function(in_ssn_eu_summarized,
       geom_smooth(method='lm', se=F, color='black') +
       facet_wrap(~variable, scales='free_x') +
       theme_bw()
-  }
-  
-  #Settle on a basic covariance structure to start  with -----
-  #Check correlation
-  topcors_overall <- in_cor_matrices$div[
-    variable1 == alpha_var & organism == 'dia_sedi_nopools' 
-    # & variable2 %in% hydro_candidates 
-    & !is.na(correlation),] %>%
-    .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor)
-  
-  topcors_bydrn <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'dia_sedi_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
-             var_label = paste(variable2, round(correlation, 2))
-    ), by=country] %>%
-    dcast(cor_order~country, value.var = 'var_label', fill=NA)
-  
-  topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'dia_sedi_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, mean(correlation), by=variable2] %>%
-    .[order(V1),]
-  
-  #Test all possible covariance structures
-  if (interactive) {
+    
+    #Settle on a basic covariance structure to start  with -----
+    #Check correlation
+    topcors_overall <- in_cor_matrices$div[
+      variable1 == alpha_var & organism == 'dia_sedi_nopools' 
+      # & variable2 %in% hydro_candidates 
+      & !is.na(correlation),] %>%
+      .[, abs_cor := abs(correlation)] %>%
+      setorder(-abs_cor)
+    
+    topcors_bydrn <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'dia_sedi_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+               var_label = paste(variable2, round(correlation, 2))
+      ), by=country] %>%
+      dcast(cor_order~country, value.var = 'var_label', fill=NA)
+    
+    topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'dia_sedi_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, mean(correlation), by=variable2] %>%
+      .[order(V1),]
+    
+    #Test all possible covariance structures
     ssn_norm_ini <- model_ssn_hydrowindow(
       in_ssn = in_ssn_eu_summarized,
       organism = c('dia_sedi_nopools'),
@@ -9930,46 +9925,48 @@ model_dia_sedi_richness_yr <- function(in_ssn_eu_summarized,
     rbindlist %>%
     .[, mod := names(dia_sedi_rich_modlist)]
   
-  #Check model in additional depth (applied to most models before continuing)
-  chosen_mod <- dia_sedi_rich_modlist[['mod11']]
-  
-  #Check residuals, variance decomposition, summary, and predictions
-  par(mfrow=c(2,3))
-  plot(chosen_mod, which=1:6)
-  print('plot')
-  varcomp(chosen_mod)
-  summary(chosen_mod)
-  
-  #Check residual correlations to choose variable additions
-  check_resid_corr(in_ssn_mod = chosen_mod,
-                   in_idcol = 'site',
-                   in_response_var = alpha_var,
-                   in_candidates = hydro_candidates)
-
-  
-  ggplot(data=  augment(chosen_mod, drop=F, type.predict = 'response'), 
-         aes(x=.fitted, y=get(alpha_var))) +
-    geom_point(aes(color=country)) +
-    geom_smooth(method='lm') +
-    geom_abline()
-  
-  get_ssn_emmeans(in_mod=chosen_mod , 
-                  in_pred_var = 'PDurD365past',
-                  interaction_var = 'country', 
-                  in_drn_dt = drn_dt,
-                  plot=T, label_pred_var=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                   in_pred_var = 'PDurD365past',
-                   interaction_var = 'country', 
-                   in_drn_dt = drn_dt,
-                   plot=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                   in_pred_var = 'meanQ3650past',
-                   interaction_var = 'country', 
-                   in_drn_dt = drn_dt,
-                   plot=T)
+  if (interactive) {
+    #Check model in additional depth (applied to most models before continuing)
+    chosen_mod <- dia_sedi_rich_modlist[['mod11']]
+    
+    #Check residuals, variance decomposition, summary, and predictions
+    par(mfrow=c(2,3))
+    plot(chosen_mod, which=1:6)
+    print('plot')
+    varcomp(chosen_mod)
+    summary(chosen_mod)
+    
+    #Check residual correlations to choose variable additions
+    check_resid_corr(in_ssn_mod = chosen_mod,
+                     in_idcol = 'site',
+                     in_response_var = alpha_var,
+                     in_candidates = hydro_candidates)
+    
+    
+    ggplot(data=  augment(chosen_mod, drop=F, type.predict = 'response'), 
+           aes(x=.fitted, y=get(alpha_var))) +
+      geom_point(aes(color=country)) +
+      geom_smooth(method='lm') +
+      geom_abline()
+    
+    get_ssn_emmeans(in_mod=chosen_mod , 
+                    in_pred_var = 'PDurD365past',
+                    interaction_var = 'country', 
+                    in_drn_dt = drn_dt,
+                    plot=T, label_pred_var=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'PDurD365past',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'meanQ3650past',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+  }
   
   #Add environmental variables and "stream_type"
   dia_sedi_rich_modlist[['mod22']] <- quick_dia_sedi_ssn(as.formula(paste(alpha_var,  '~ PDurD365past + country:PDurD365past + log10(meanQ3650past) + country:log10(meanQ3650past) + env_PC1')))
@@ -10004,41 +10001,24 @@ model_dia_sedi_richness_yr <- function(in_ssn_eu_summarized,
   
   #------ For "best" model -------------------------------------------------
   # Refits the selected "best" model using the REML method for better variance estimation.
-  ssn_dia_sedi_best_final <- quick_dia_sedi_ssn(
-    as.formula(paste(alpha_var, '~ PDurD365past + country:PDurD365past + 
-                     log10(meanQ3650past) + country:log10(meanQ3650past) +
-                     env_PC1 + env_PC2')),
-    estmethod = 'reml'
-  )
-  ssn_dia_sedi_best_preds <- augment(ssn_dia_sedi_best_final,
-                                drop=F)
-  
-  if (interactive) {
-    summary(ssn_dia_sedi_best_final)
-    SSN2::varcomp(ssn_dia_sedi_best_final)
-    plot(ssn_dia_sedi_best_final)
-  }
+  # ssn_dia_sedi_best_final <- quick_dia_sedi_ssn(
+  #   as.formula(paste(alpha_var, '~ PDurD365past + country:PDurD365past + 
+  #                    log10(meanQ3650past) + country:log10(meanQ3650past) +
+  #                    env_PC1 + env_PC2')),
+  #   estmethod = 'reml'
+  # )
+  # ssn_dia_sedi_best_preds <- augment(ssn_dia_sedi_best_final,
+  #                               drop=F)
+  # 
+  # if (interactive) {
+  #   summary(ssn_dia_sedi_best_final)
+  #   SSN2::varcomp(ssn_dia_sedi_best_final)
+  #   plot(ssn_dia_sedi_best_final)
+  # }
   
   #------ For prediction model -------------------------------------------------
   # This section focuses on creating a model suitable for prediction to new reaches,
   # using only variables available for all reaches.
-  
-  #Test covariance structures again, this time with REML 
-  ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
-    in_ssn = in_ssn_eu_summarized,
-    family = 'poisson',
-    organism = c('dia_sedi_nopools'),
-    formula_root = 'log10(meanQ3650past)',
-    hydro_var = 'PDurD365past',
-    response_var = alpha_var,
-    ssn_covtypes = ssn_covtypes,
-    partition_formula = as.formula('~ country'),
-    random_formula = NULL,
-    estmethod='reml'
-  )
-  
-  selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
-  
   #Check Torgegram
   tg_selected <- SSN2::Torgegram(
     formula = 'mean_richness ~ PDurD365past + country:PDurD365past + log10(meanQ3650past) + country:log10(meanQ3650past)',
@@ -10058,12 +10038,30 @@ model_dia_sedi_richness_yr <- function(in_ssn_eu_summarized,
     theme_classic() +
     facet_wrap(~dist_type)
   
-  summary(ssn_mod_predictions_covtypes$ssn_list$mariah_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$mariah_none_none)
-  # plot(ssn_mod_predictions_covtypes$ssn_list$mariah_none_none, which=1:6)
-  
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  if (interactive) {
+    #Test covariance structures again, this time with REML 
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'poisson',
+      organism = c('dia_sedi_nopools'),
+      formula_root = 'log10(meanQ3650past)',
+      hydro_var = 'PDurD365past',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
+    )
+    
+    selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$mariah_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$mariah_none_none)
+    # plot(ssn_mod_predictions_covtypes$ssn_list$mariah_none_none, which=1:6)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  }
   
   #Re-fit final model with REML
   ssn_dia_sedi_pred_final <- ssn_glm(
@@ -10106,9 +10104,9 @@ model_dia_sedi_richness_yr <- function(in_ssn_eu_summarized,
     model_selection_table = mod_perf_tab,
     ssn_mod_fit = ssn_dia_sedi_pred_final, #Prediction model fit with REML
     ssn_pred_final = ssn_dia_sedi_mod_preds, #AUgmented data with prediction model
-    torgegram_mod_pred = tg_plot, #Torgegram for prediction model 
-    ssn_mod_fit_best = ssn_dia_sedi_best_final, #"Best" model fit with REML
-    ssn_pred_best = ssn_dia_sedi_best_preds #Augmented data for "best" model
+    torgegram_mod_pred = tg_plot #Torgegram for prediction model 
+    #,  ssn_mod_fit_best = ssn_dia_sedi_best_final, #"Best" model fit with REML
+    # ssn_pred_best = ssn_dia_sedi_best_preds #Augmented data for "best" model
   ))
 }
 
@@ -10214,30 +10212,30 @@ model_dia_biof_richness_yr <- function(in_ssn_eu_summarized,
   alpha_var <- 'mean_richness'
   
   
-  #Check correlations
-  topcors_overall <- in_cor_matrices$div[
-    variable1 == alpha_var & organism == 'dia_biof_nopools' 
-    # & variable2 %in% hydro_candidates 
-    & !is.na(correlation),] %>%
-    .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor)
-  
-  topcors_bydrn <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'dia_biof_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
-             var_label = paste(variable2, round(correlation, 2))
-    ), by=country] %>%
-    dcast(cor_order~country, value.var = 'var_label', fill=NA)
-  
-  topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'dia_biof_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, mean(correlation), by=variable2] %>%
-    .[order(V1),]
-  
   #Exploratory plots-------
   if (interactive) {
+    #Check correlations
+    topcors_overall <- in_cor_matrices$div[
+      variable1 == alpha_var & organism == 'dia_biof_nopools' 
+      # & variable2 %in% hydro_candidates 
+      & !is.na(correlation),] %>%
+      .[, abs_cor := abs(correlation)] %>%
+      setorder(-abs_cor)
+    
+    topcors_bydrn <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'dia_biof_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+               var_label = paste(variable2, round(correlation, 2))
+      ), by=country] %>%
+      dcast(cor_order~country, value.var = 'var_label', fill=NA)
+    
+    topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'dia_biof_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, mean(correlation), by=variable2] %>%
+      .[order(V1),]
+    
     ggplot(ssn_dia_biof$obs, aes(x=country, y=get(alpha_var))) +
       geom_boxplot()
     
@@ -10293,11 +10291,9 @@ model_dia_biof_richness_yr <- function(in_ssn_eu_summarized,
       geom_smooth(method='lm', se=F, color='black') +
       facet_wrap(~variable, scales='free_x') +
       theme_bw()
-  }
-  
-  #Settle on a basic covariance structure to start  with ----
-  #Test all possible covariance structures
-  if (interactive) {
+    
+    #Settle on a basic covariance structure to start  with ----
+    #Test all possible covariance structures
     ssn_norm_ini <- model_ssn_hydrowindow(
       in_ssn = in_ssn_eu_summarized,
       organism = c('dia_biof_nopools'),
@@ -10463,104 +10459,79 @@ model_dia_biof_richness_yr <- function(in_ssn_eu_summarized,
     rbindlist %>%
     .[, mod := names(dia_biof_rich_modlist)]
   
-  #Check model in additional depth (applied to most models before continuing)
-  chosen_mod <- dia_biof_rich_modlist[['mod18']]
-  
-  #Check residuals, variance decomposition, summary, and predictions
-  par(mfrow=c(2,3))
-  plot(chosen_mod, which=1:6)
-  print('plot')
-  varcomp(chosen_mod)
-  summary(chosen_mod)
-  
-  #Check residual correlations to choose variable additions
-  check_resid_corr(in_ssn_mod = chosen_mod,
-                   in_idcol = 'site',
-                   in_response_var = alpha_var,
-                   in_candidates = hydro_candidates)
-  
-  augment(chosen_mod, drop=F, type.predict = 'response') %>%
-    setDT %>%
-    .[!which.max(`.resid`),] %>%
-  ggplot(data=., 
-         aes(x=.fitted, y=get(alpha_var))) +
-    geom_point(aes(color=country)) +
-    geom_smooth(method='lm') +
-    geom_abline()
-  
-  get_ssn_emmeans(in_mod=chosen_mod , 
-                  in_pred_var = 'meanQ3650past',
-                  interaction_var = 'country', 
-                  in_drn_dt = drn_dt,
-                  plot=T, label_pred_var=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                   in_pred_var = 'meanQ3650past',
-                   interaction_var = 'country', 
-                   in_drn_dt = drn_dt,
-                   plot=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                   in_pred_var = 'DurD_samp',
-                   interaction_var = 'country', 
-                   in_drn_dt = drn_dt,
-                   plot=T)
-
-  # check_rf <- ranger::ranger(mean_richness ~ ., 
-  #                            data= allvars_dt[, c(hydro_candidates, 'mean_richness', 'country'), with=F])
-  # allvars_dt[, mean_rich_preds := ranger::predictions(check_rf)]
-  # ggplot(allvars_dt, aes(x=mean_rich_preds, y=mean_richness, color=stream_type)) + 
-  #   geom_point() +
-  #   facet_wrap(~country)
-  
-  #Summary table
-  mod_perf_tab <- lapply(dia_biof_rich_modlist, function(x) {
-    cbind(Reduce(paste, deparse(x$formula)), 
-          glance(x), 
-          ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
-          loocv(x))
-  }) %>% 
-    rbindlist %>%
-    .[, mod := names(dia_biof_rich_modlist)]
+  if (interactive) {
+    #Check model in additional depth (applied to most models before continuing)
+    chosen_mod <- dia_biof_rich_modlist[['mod18']]
+    
+    #Check residuals, variance decomposition, summary, and predictions
+    par(mfrow=c(2,3))
+    plot(chosen_mod, which=1:6)
+    print('plot')
+    varcomp(chosen_mod)
+    summary(chosen_mod)
+    
+    #Check residual correlations to choose variable additions
+    check_resid_corr(in_ssn_mod = chosen_mod,
+                     in_idcol = 'site',
+                     in_response_var = alpha_var,
+                     in_candidates = hydro_candidates)
+    
+    augment(chosen_mod, drop=F, type.predict = 'response') %>%
+      setDT %>%
+      .[!which.max(`.resid`),] %>%
+      ggplot(data=., 
+             aes(x=.fitted, y=get(alpha_var))) +
+      geom_point(aes(color=country)) +
+      geom_smooth(method='lm') +
+      geom_abline()
+    
+    get_ssn_emmeans(in_mod=chosen_mod , 
+                    in_pred_var = 'meanQ3650past',
+                    interaction_var = 'country', 
+                    in_drn_dt = drn_dt,
+                    plot=T, label_pred_var=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'meanQ3650past',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'DurD_samp',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+    
+    # check_rf <- ranger::ranger(mean_richness ~ ., 
+    #                            data= allvars_dt[, c(hydro_candidates, 'mean_richness', 'country'), with=F])
+    # allvars_dt[, mean_rich_preds := ranger::predictions(check_rf)]
+    # ggplot(allvars_dt, aes(x=mean_rich_preds, y=mean_richness, color=stream_type)) + 
+    #   geom_point() +
+    #   facet_wrap(~country)
+  }
   
   #####CHOOSE MOD 23 for "absolute" best model###############"
   #####CHOOSE MOD 18 for continuous predictions###########
   
   #------ For "best" model -------------------------------------------------
   # Refits the selected "best" model using the REML method for better variance estimation.
-  ssn_dia_biof_best_final <- quick_dia_biof_ssn(
-    as.formula(paste(alpha_var, '~ stream_type + DurD_samp + DurD_samp:country + country*log10(meanQ3650past) + env_PC1 + env_PC2')),
-    estmethod = 'reml'
-  )
-  ssn_dia_biof_best_preds <- augment(ssn_dia_biof_best_final,
-                                     drop=F)
-  
-  if (interactive) {
-    summary(ssn_dia_biof_best_final)
-    SSN2::varcomp(ssn_dia_biof_best_final)
-    plot(ssn_dia_biof_best_final)
-  }
+  # ssn_dia_biof_best_final <- quick_dia_biof_ssn(
+  #   as.formula(paste(alpha_var, '~ stream_type + DurD_samp + DurD_samp:country + country*log10(meanQ3650past) + env_PC1 + env_PC2')),
+  #   estmethod = 'reml'
+  # )
+  # ssn_dia_biof_best_preds <- augment(ssn_dia_biof_best_final,
+  #                                    drop=F)
+  # 
+  # if (interactive) {
+  #   summary(ssn_dia_biof_best_final)
+  #   SSN2::varcomp(ssn_dia_biof_best_final)
+  #   plot(ssn_dia_biof_best_final)
+  # }
   
   #------ For prediction model -------------------------------------------------
   # This section focuses on creating a model suitable for prediction to new reaches,
   # using only variables available for all reaches.
-  
-  #Test covariance structures again, this time with REML 
-  ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
-    in_ssn = in_ssn_eu_summarized,
-    family = 'poisson',
-    organism = c('dia_biof_nopools'),
-    formula_root = 'log10(meanQ3650past)',
-    hydro_var = 'DurD_samp',
-    response_var = alpha_var,
-    ssn_covtypes = ssn_covtypes,
-    partition_formula = as.formula('~ country'),
-    random_formula = NULL,
-    estmethod='reml'
-  )
-  # 
-  selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
-  
   #Check Torgegram
   tg_selected <- SSN2::Torgegram(
     formula = 'mean_richness ~ DurD_samp + DurD_samp:country + country*log10(meanQ3650past) + particle_size',
@@ -10580,12 +10551,31 @@ model_dia_biof_richness_yr <- function(in_ssn_eu_summarized,
     theme_classic() +
     facet_wrap(~dist_type)
   
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
-  plot(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian, which=1:6)
-  print('plot')
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  if (interactive) {
+    #Test covariance structures again, this time with REML 
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'poisson',
+      organism = c('dia_biof_nopools'),
+      formula_root = 'log10(meanQ3650past)',
+      hydro_var = 'DurD_samp',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
+    )
+    # 
+    selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
+    
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
+    plot(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian, which=1:6)
+    print('plot')
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  }
   
   #Re-fit final model with REML
   ssn_dia_biof_pred_final <- ssn_glm(
@@ -10629,13 +10619,11 @@ model_dia_biof_richness_yr <- function(in_ssn_eu_summarized,
     model_selection_table = mod_perf_tab,
     ssn_mod_fit = ssn_dia_biof_pred_final, #Prediction model fit with REML
     ssn_pred_final = ssn_dia_biof_mod_preds, #AUgmented data with prediction model
-    torgegram_mod_pred = tg_plot, #Torgegram for prediction model 
-    ssn_mod_fit_best = ssn_dia_biof_best_final, #"Best" model fit with REML
-    ssn_pred_best = ssn_dia_biof_best_preds #Augmented data for "best" model
+    torgegram_mod_pred = tg_plot #Torgegram for prediction model 
+    # , ssn_mod_fit_best = ssn_dia_biof_best_final, #"Best" model fit with REML
+    # ssn_pred_best = ssn_dia_biof_best_preds #Augmented data for "best" model
   ))
 }
-
-
 
 #------ model_fun_sedi_invsimpson_yr -------------------------------------------
 # in_allvars_summarized <- tar_read(allvars_summarized)
@@ -10647,11 +10635,11 @@ model_dia_biof_richness_yr <- function(in_ssn_eu_summarized,
 # scale_predictors = T
 
 model_fun_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
-                                  in_allvars_summarized,
-                                  in_cor_matrices, 
-                                  ssn_covtypes,
-                                  scale_predictors = T,
-                                  interactive = F) {
+                                         in_allvars_summarized,
+                                         in_cor_matrices, 
+                                         ssn_covtypes,
+                                         scale_predictors = T,
+                                         interactive = F) {
   
   #Subset SSN and create distance matrices-----
   ssn_fun_sedi <- in_ssn_eu_summarized$fun_sedi_nopools$ssn
@@ -10757,33 +10745,31 @@ model_fun_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
       geom_smooth(method='lm', se=F, color='black') +
       facet_wrap(~variable, scales='free_x') +
       theme_bw()
-  }
-  
-  #Settle on a basic covariance structure to start  with -----
-  #Check correlation
-  topcors_overall <- in_cor_matrices$div[
-    variable1 == alpha_var & organism == 'fun_sedi_nopools' 
-    # & variable2 %in% hydro_candidates 
-    & !is.na(correlation),] %>%
-    .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor)
-  
-  topcors_bydrn <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'fun_sedi_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
-             var_label = paste(variable2, round(correlation, 2))
-    ), by=country] %>%
-    dcast(cor_order~country, value.var = 'var_label', fill=NA)
-  
-  topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'fun_sedi_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, mean(correlation), by=variable2] %>%
-    .[order(V1),]
-  
-  #Test all possible covariance structures
-  if (interactive) {
+    
+    #Settle on a basic covariance structure to start  with -----
+    #Check correlation
+    topcors_overall <- in_cor_matrices$div[
+      variable1 == alpha_var & organism == 'fun_sedi_nopools' 
+      # & variable2 %in% hydro_candidates 
+      & !is.na(correlation),] %>%
+      .[, abs_cor := abs(correlation)] %>%
+      setorder(-abs_cor)
+    
+    topcors_bydrn <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'fun_sedi_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+               var_label = paste(variable2, round(correlation, 2))
+      ), by=country] %>%
+      dcast(cor_order~country, value.var = 'var_label', fill=NA)
+    
+    topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'fun_sedi_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, mean(correlation), by=variable2] %>%
+      .[order(V1),]
+    
+    #Test all possible covariance structures
     ssn_norm_ini <- model_ssn_hydrowindow(
       in_ssn = in_ssn_eu_summarized,
       family = 'Gaussian',
@@ -10859,9 +10845,9 @@ model_fun_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     plot(ssn_lognorm_cov$ssn_list$mariah_none_none)
     loocv(ssn_lognorm_cov$ssn_list$none_none_spherical)
     plot(ssn_lognorm_cov$ssn_list$none_none_spherical)
-  
-  }
     
+  }
+  
   #Set a quick helper function to train an SSN GLM model with a basic model structure
   quick_fun_sedi_ssn <- function(in_formula, in_random=NULL, estmethod='ml') {
     ssn_glm(
@@ -10934,50 +10920,52 @@ model_fun_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     rbindlist %>%
     .[, mod := names(fun_sedi_simps_modlist)]
   
-  #Check model in additional depth (applied to most models before continuing)
-  chosen_mod <- fun_sedi_simps_modlist[['mod17']]
+  if (interactive) {
+    #Check model in additional depth (applied to most models before continuing)
+    chosen_mod <- fun_sedi_simps_modlist[['mod17']]
+    
+    #Check residuals, variance decomposition, summary, and predictions
+    par(mfrow=c(2,3))
+    plot(chosen_mod, which=1:6)
+    print('plot')
+    varcomp(chosen_mod)
+    summary(chosen_mod)
+    
+    #Check residual correlations to choose variable additions
+    check_resid_corr(in_ssn_mod = chosen_mod,
+                     in_idcol = 'site',
+                     in_response_var = alpha_var,
+                     in_candidates = hydro_candidates)
+    
+    augment(chosen_mod, drop=F, type.predict = 'response') %>%
+      setDT %>%
+      .[!which.max(`.resid`),] %>%
+      ggplot(data=., 
+             aes(x=.fitted, y=get(alpha_var))) +
+      geom_point(aes(color=country)) +
+      geom_smooth(method='lm') +
+      geom_abline()
+    
+    get_ssn_emmeans(in_mod=chosen_mod , 
+                    in_pred_var = 'DurD_samp',
+                    interaction_var = 'country', 
+                    in_drn_dt = drn_dt,
+                    plot=T, label_pred_var=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'DurD_samp',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+    
+    # check_rf <- ranger::ranger(log10(mean_invsimpson) ~ .,
+    #                            data= allvars_dt[, c(hydro_candidates, 'mean_invsimpson', 'country'), with=F])
+    # allvars_dt[, mean_simps_preds := ranger::predictions(check_rf)]
+    # ggplot(allvars_dt, aes(x=mean_simps_preds, y=mean_invsimpson, color=stream_type)) +
+    #   geom_point() +
+    #   facet_wrap(~country)
+  }
   
-  #Check residuals, variance decomposition, summary, and predictions
-  par(mfrow=c(2,3))
-  plot(chosen_mod, which=1:6)
-  print('plot')
-  varcomp(chosen_mod)
-  summary(chosen_mod)
-  
-  #Check residual correlations to choose variable additions
-  check_resid_corr(in_ssn_mod = chosen_mod,
-                   in_idcol = 'site',
-                   in_response_var = alpha_var,
-                   in_candidates = hydro_candidates)
-  
-  augment(chosen_mod, drop=F, type.predict = 'response') %>%
-    setDT %>%
-    .[!which.max(`.resid`),] %>%
-    ggplot(data=., 
-           aes(x=.fitted, y=get(alpha_var))) +
-    geom_point(aes(color=country)) +
-    geom_smooth(method='lm') +
-    geom_abline()
-  
-  get_ssn_emmeans(in_mod=chosen_mod , 
-                  in_pred_var = 'DurD_samp',
-                  interaction_var = 'country', 
-                  in_drn_dt = drn_dt,
-                  plot=T, label_pred_var=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                   in_pred_var = 'DurD_samp',
-                   interaction_var = 'country', 
-                   in_drn_dt = drn_dt,
-                   plot=T)
-
-  # check_rf <- ranger::ranger(log10(mean_invsimpson) ~ .,
-  #                            data= allvars_dt[, c(hydro_candidates, 'mean_invsimpson', 'country'), with=F])
-  # allvars_dt[, mean_simps_preds := ranger::predictions(check_rf)]
-  # ggplot(allvars_dt, aes(x=mean_simps_preds, y=mean_invsimpson, color=stream_type)) +
-  #   geom_point() +
-  #   facet_wrap(~country)
-
   #####CHOOSE MOD 17 for continuous predictions###########
   
   # #------ For "best" model -------------------------------------------------
@@ -10995,24 +10983,8 @@ model_fun_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   #   SSN2::varcomp(ssn_fun_sedi_best_final)
   #   plot(ssn_fun_sedi_best_final)
   # }
-
+  
   #------ For prediction model -------------------------------------------------
-  in_ssn_eu_summarized$fun_sedi_nopools$ssn$obs$mean_invsimpson_log10 <- 
-    log10(in_ssn_eu_summarized$fun_sedi_nopools$ssn$obs$mean_invsimpson)
-  
-  ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
-    in_ssn = in_ssn_eu_summarized,
-    family = 'Gaussian',
-    organism = c('fun_sedi_nopools'),
-    formula_root = 'log10(meanQ3650past)',
-    hydro_var = 'DurD_samp',
-    response_var = alpha_var,
-    ssn_covtypes = ssn_covtypes,
-    partition_formula = as.formula('~ country'),
-    random_formula = NULL,
-    estmethod='reml'
-  )
-  
   #Check Torgegram
   tg_selected <- SSN2::Torgegram(
     formula = 'mean_invsimpson_log10 ~ country*DurD_samp + log10(STcon_m10_directed_avg_samp)',
@@ -11032,11 +11004,29 @@ model_fun_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     theme_classic() +
     facet_wrap(~dist_type)
   
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_epa_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_epa_none)
-  
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  if (interactive) {
+    in_ssn_eu_summarized$fun_sedi_nopools$ssn$obs$mean_invsimpson_log10 <- 
+      log10(in_ssn_eu_summarized$fun_sedi_nopools$ssn$obs$mean_invsimpson)
+    
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'Gaussian',
+      organism = c('fun_sedi_nopools'),
+      formula_root = 'log10(meanQ3650past)',
+      hydro_var = 'DurD_samp',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
+    )
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_epa_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_epa_none)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  }
   
   #Re-fit final model with REML
   ssn_fun_sedi_pred_final <- ssn_glm(
@@ -11074,11 +11064,11 @@ model_fun_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     model_selection_table = mod_perf_tab,
     ssn_mod_fit = ssn_fun_sedi_pred_final, #Prediction model fit with REML
     ssn_pred_final = ssn_fun_sedi_mod_preds, #AUgmented data with prediction model
-    torgegram_mod_pred = tg_plot, #Torgegram for prediction model 
-    # ssn_mod_fit_best = ssn_fun_sedi_best_final, #"Best" model fit with REML
+    torgegram_mod_pred = tg_plot #Torgegram for prediction model 
+    # , ssn_mod_fit_best = ssn_fun_sedi_best_final, #"Best" model fit with REML
     # ssn_pred_best = ssn_fun_sedi_best_preds #Augmented data for "best" model
   ))
-  }
+}
 #------ model_fun_sedi_richness_yr ---------------------------------------------
 # in_allvars_summarized <- tar_read(allvars_summarized)
 # in_ssn_eu_summarized <- tar_read(ssn_eu_summarized)
@@ -11226,7 +11216,7 @@ model_fun_sedi_richness_yr <- function(in_ssn_eu_summarized,
       scale_x_sqrt() +
       facet_wrap(~country)
     
-   
+    
     
     data.table::melt(ssn_fun_sedi$obs, 
                      id.vars=c('site', 'country', alpha_var), 
@@ -11238,33 +11228,31 @@ model_fun_sedi_richness_yr <- function(in_ssn_eu_summarized,
       geom_smooth(method='lm', se=F, color='black') +
       facet_wrap(~variable, scales='free_x') +
       theme_bw()
-  }
-  
-  #Settle on a basic covariance structure to start  with -----
-  #Check correlation
-  topcors_overall <- in_cor_matrices$div[
-    variable1 == alpha_var & organism == 'fun_sedi_nopools' 
-    # & variable2 %in% hydro_candidates 
-    & !is.na(correlation),] %>%
-    .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor)
-  
-  topcors_bydrn <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'fun_sedi_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
-             var_label = paste(variable2, round(correlation, 2))
-    ), by=country] %>%
-    dcast(cor_order~country, value.var = 'var_label', fill=NA)
-  
-  topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'fun_sedi_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, mean(correlation), by=variable2] %>%
-    .[order(V1),]
-  
-  #Test all possible covariance structures
-  if (interactive) {
+    
+    #Settle on a basic covariance structure to start  with -----
+    #Check correlation
+    topcors_overall <- in_cor_matrices$div[
+      variable1 == alpha_var & organism == 'fun_sedi_nopools' 
+      # & variable2 %in% hydro_candidates 
+      & !is.na(correlation),] %>%
+      .[, abs_cor := abs(correlation)] %>%
+      setorder(-abs_cor)
+    
+    topcors_bydrn <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'fun_sedi_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+               var_label = paste(variable2, round(correlation, 2))
+      ), by=country] %>%
+      dcast(cor_order~country, value.var = 'var_label', fill=NA)
+    
+    topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'fun_sedi_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, mean(correlation), by=variable2] %>%
+      .[order(V1),]
+    
+    #Test all possible covariance structures
     ssn_norm_ini <- model_ssn_hydrowindow(
       in_ssn = in_ssn_eu_summarized,
       organism = c('fun_sedi_nopools'),
@@ -11418,54 +11406,55 @@ model_fun_sedi_richness_yr <- function(in_ssn_eu_summarized,
     rbindlist %>%
     .[, mod := names(fun_sedi_rich_modlist)]
   
-  #Check model in additional depth (applied to most models before continuing)
-  chosen_mod <- fun_sedi_rich_modlist[['mod17']]
-  
-  #Check residuals, variance decomposition, summary, and predictions
-  par(mfrow=c(2,3))
-  plot(chosen_mod, which=1:6)
-  print('plot')
-  varcomp(chosen_mod)
-  summary(chosen_mod)
-  
-  #Check residual correlations to choose variable additions
-  check_resid_corr(in_ssn_mod = chosen_mod,
-                   in_idcol = 'site',
-                   in_response_var = alpha_var,
-                   in_candidates = hydro_candidates)
-  
-  
-  ggplot(data=  augment(chosen_mod, drop=F, type.predict = 'response'), 
-         aes(x=.fitted, y=get(alpha_var))) +
-    geom_point(aes(color=country)) +
-    geom_smooth(method='lm') +
-    geom_abline()
-  
-  get_ssn_emmeans(in_mod=chosen_mod , 
-                  in_pred_var = 'basin_area_km2',
-                  interaction_var = 'country', 
-                  in_drn_dt = drn_dt,
-                  plot=T, label_pred_var=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                   in_pred_var = 'basin_area_km2',
-                   interaction_var = 'country', 
-                   in_drn_dt = drn_dt,
-                   plot=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                   in_pred_var = 'Fdist_mean_10past_undirected_avg_samp',
-                   interaction_var = 'country', 
-                   in_drn_dt = drn_dt,
-                   plot=T)
-
-  # check_rf <- ranger::ranger(mean_richness ~ .,
-  #                            data= allvars_dt[, c(hydro_candidates, 'mean_richness', 'country'), with=F])
-  # allvars_dt[, mean_rich_preds := ranger::predictions(check_rf)]
-  # ggplot(allvars_dt, aes(x=mean_rich_preds, y=mean_richness, color=stream_type)) +
-  #   geom_point() +
-  #   facet_wrap(~country)
-
+  if (interactive) {
+    #Check model in additional depth (applied to most models before continuing)
+    chosen_mod <- fun_sedi_rich_modlist[['mod17']]
+    
+    #Check residuals, variance decomposition, summary, and predictions
+    par(mfrow=c(2,3))
+    plot(chosen_mod, which=1:6)
+    print('plot')
+    varcomp(chosen_mod)
+    summary(chosen_mod)
+    
+    #Check residual correlations to choose variable additions
+    check_resid_corr(in_ssn_mod = chosen_mod,
+                     in_idcol = 'site',
+                     in_response_var = alpha_var,
+                     in_candidates = hydro_candidates)
+    
+    
+    ggplot(data=  augment(chosen_mod, drop=F, type.predict = 'response'), 
+           aes(x=.fitted, y=get(alpha_var))) +
+      geom_point(aes(color=country)) +
+      geom_smooth(method='lm') +
+      geom_abline()
+    
+    get_ssn_emmeans(in_mod=chosen_mod , 
+                    in_pred_var = 'basin_area_km2',
+                    interaction_var = 'country', 
+                    in_drn_dt = drn_dt,
+                    plot=T, label_pred_var=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'basin_area_km2',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'Fdist_mean_10past_undirected_avg_samp',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+    
+    # check_rf <- ranger::ranger(mean_richness ~ .,
+    #                            data= allvars_dt[, c(hydro_candidates, 'mean_richness', 'country'), with=F])
+    # allvars_dt[, mean_rich_preds := ranger::predictions(check_rf)]
+    # ggplot(allvars_dt, aes(x=mean_rich_preds, y=mean_richness, color=stream_type)) +
+    #   geom_point() +
+    #   facet_wrap(~country)
+  }
   
   #####CHOOSE MOD 17 for continuous predictions###########
   
@@ -11487,37 +11476,6 @@ model_fun_sedi_richness_yr <- function(in_ssn_eu_summarized,
   # }
   
   #------ For prediction model -------------------------------------------------
-  # This section focuses on creating a model suitable for prediction to new reaches,
-  # using only variables available for all reaches.
-  ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
-    in_ssn = in_ssn_eu_summarized,
-    family = 'poisson',
-    organism = c('fun_sedi_nopools'),
-    formula_root = 'log10(meanQ3650past)',
-    hydro_var = 'DurD_samp',
-    response_var = alpha_var,
-    ssn_covtypes = ssn_covtypes,
-    partition_formula = as.formula('~ country'),
-    random_formula = NULL,
-    estmethod='reml'
-  )
-  
-  #Test covariance structures again, this time with REML 
-  ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
-    in_ssn = in_ssn_eu_summarized,
-    family = 'nbinomial',
-    organism = c('fun_sedi_nopools'),
-    formula_root = 'log10(basin_area_km2) + DurD_CV10yrpast',
-    hydro_var = 'Fdist_mean_10past_undirected_avg_samp',
-    response_var = alpha_var,
-    ssn_covtypes = ssn_covtypes,
-    partition_formula = as.formula('~ country'),
-    random_formula = NULL,
-    estmethod='reml'
-  )
-  
-  selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
-  
   #Check Torgegram
   tg_selected <- SSN2::Torgegram(
     formula = 'mean_richness ~ log10(Fdist_mean_10past_undirected_avg_samp+1) + country:log10(Fdist_mean_10past_undirected_avg_samp+1) + DurD_CV10yrpast + country*log10(basin_area_km2)',
@@ -11537,12 +11495,45 @@ model_fun_sedi_richness_yr <- function(in_ssn_eu_summarized,
     theme_classic() +
     facet_wrap(~dist_type)
   
-  summary(ssn_mod_predictions_covtypes$ssn_list$linear_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$linear_none_none)
-  # plot(ssn_mod_predictions_covtypes$ssn_list$mariah_none_none, which=1:6)
-  
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  if (interactive) {
+    # This section focuses on creating a model suitable for prediction to new reaches,
+    # using only variables available for all reaches.
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'poisson',
+      organism = c('fun_sedi_nopools'),
+      formula_root = 'log10(meanQ3650past)',
+      hydro_var = 'DurD_samp',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
+    )
+    
+    #Test covariance structures again, this time with REML 
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'nbinomial',
+      organism = c('fun_sedi_nopools'),
+      formula_root = 'log10(basin_area_km2) + DurD_CV10yrpast',
+      hydro_var = 'Fdist_mean_10past_undirected_avg_samp',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
+    )
+    
+    selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$linear_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$linear_none_none)
+    # plot(ssn_mod_predictions_covtypes$ssn_list$mariah_none_none, which=1:6)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  }
   
   #Re-fit final model with REML
   ssn_fun_sedi_pred_final <- ssn_glm(
@@ -11714,33 +11705,31 @@ model_fun_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
       geom_smooth(method='lm', se=F, color='black') +
       facet_wrap(~variable, scales='free_x') +
       theme_bw()
-  }
-  
-  #Settle on a basic covariance structure to start  with -----
-  #Check correlation
-  topcors_overall <- in_cor_matrices$div[
-    variable1 == alpha_var & organism == 'fun_biof_nopools' 
-    # & variable2 %in% hydro_candidates 
-    & !is.na(correlation),] %>%
-    .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor)
-  
-  topcors_bydrn <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'fun_biof_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
-             var_label = paste(variable2, round(correlation, 2))
-    ), by=country] %>%
-    dcast(cor_order~country, value.var = 'var_label', fill=NA)
-  
-  topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'fun_biof_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, mean(correlation), by=variable2] %>%
-    .[order(V1),]
-  
-  #Test all possible covariance structures
-  if (interactive) {
+    
+    #Settle on a basic covariance structure to start  with -----
+    #Check correlation
+    topcors_overall <- in_cor_matrices$div[
+      variable1 == alpha_var & organism == 'fun_biof_nopools' 
+      # & variable2 %in% hydro_candidates 
+      & !is.na(correlation),] %>%
+      .[, abs_cor := abs(correlation)] %>%
+      setorder(-abs_cor)
+    
+    topcors_bydrn <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'fun_biof_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+               var_label = paste(variable2, round(correlation, 2))
+      ), by=country] %>%
+      dcast(cor_order~country, value.var = 'var_label', fill=NA)
+    
+    topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'fun_biof_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, mean(correlation), by=variable2] %>%
+      .[order(V1),]
+    
+    #Test all possible covariance structures
     # ssn_norm_ini <- model_ssn_hydrowindow(
     #   in_ssn = in_ssn_eu_summarized,
     #   family = 'Gaussian',
@@ -11901,49 +11890,51 @@ model_fun_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
     rbindlist %>%
     .[, mod := names(fun_biof_simps_modlist)]
   
-  #Check model in additional depth (applied to most models before continuing)
-  chosen_mod <- fun_biof_simps_modlist[['mod17']]
-  
-  #Check residuals, variance decomposition, summary, and predictions
-  par(mfrow=c(2,3))
-  plot(chosen_mod, which=1:6)
-  print('plot')
-  varcomp(chosen_mod)
-  summary(chosen_mod)
-  
-  #Check residual correlations to choose variable additions
-  check_resid_corr(in_ssn_mod = chosen_mod,
-                   in_idcol = 'site',
-                   in_response_var = alpha_var,
-                   in_candidates = hydro_candidates)
-  
-  augment(chosen_mod, drop=F, type.predict = 'response') %>%
-    setDT %>%
-    .[!which.max(`.resid`),] %>%
-    ggplot(data=., 
-           aes(x=.fitted, y=get(alpha_var))) +
-    geom_point(aes(color=country)) +
-    geom_smooth(method='lm') +
-    geom_abline()
-  
-  get_ssn_emmeans(in_mod=chosen_mod , 
-                  in_pred_var = 'DurD_samp',
-                  interaction_var = 'country', 
-                  in_drn_dt = drn_dt,
-                  plot=T, label_pred_var=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                   in_pred_var = 'DurD_samp',
-                   interaction_var = 'country', 
-                   in_drn_dt = drn_dt,
-                   plot=T)
-  
-  # check_rf <- ranger::ranger(log10(mean_invsimpson) ~ .,
-  #                            data= allvars_dt[, c(hydro_candidates, 'mean_invsimpson', 'country'), with=F])
-  # allvars_dt[, mean_simps_preds := ranger::predictions(check_rf)]
-  # ggplot(allvars_dt, aes(x=mean_simps_preds, y=mean_invsimpson, color=stream_type)) +
-  #   geom_point() +
-  #   facet_wrap(~country)
+  if (interactive) {
+    #Check model in additional depth (applied to most models before continuing)
+    chosen_mod <- fun_biof_simps_modlist[['mod17']]
+    
+    #Check residuals, variance decomposition, summary, and predictions
+    par(mfrow=c(2,3))
+    plot(chosen_mod, which=1:6)
+    print('plot')
+    varcomp(chosen_mod)
+    summary(chosen_mod)
+    
+    #Check residual correlations to choose variable additions
+    check_resid_corr(in_ssn_mod = chosen_mod,
+                     in_idcol = 'site',
+                     in_response_var = alpha_var,
+                     in_candidates = hydro_candidates)
+    
+    augment(chosen_mod, drop=F, type.predict = 'response') %>%
+      setDT %>%
+      .[!which.max(`.resid`),] %>%
+      ggplot(data=., 
+             aes(x=.fitted, y=get(alpha_var))) +
+      geom_point(aes(color=country)) +
+      geom_smooth(method='lm') +
+      geom_abline()
+    
+    get_ssn_emmeans(in_mod=chosen_mod , 
+                    in_pred_var = 'DurD_samp',
+                    interaction_var = 'country', 
+                    in_drn_dt = drn_dt,
+                    plot=T, label_pred_var=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'DurD_samp',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+    
+    # check_rf <- ranger::ranger(log10(mean_invsimpson) ~ .,
+    #                            data= allvars_dt[, c(hydro_candidates, 'mean_invsimpson', 'country'), with=F])
+    # allvars_dt[, mean_simps_preds := ranger::predictions(check_rf)]
+    # ggplot(allvars_dt, aes(x=mean_simps_preds, y=mean_invsimpson, color=stream_type)) +
+    #   geom_point() +
+    #   facet_wrap(~country)
+  }
   
   #####CHOOSE MOD 17 for continuous predictions###########
   
@@ -11966,23 +11957,6 @@ model_fun_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
   #------ For prediction model -------------------------------------------------
   # This section focuses on creating a model suitable for prediction to new reaches,
   # using only variables available for all reaches.
-  in_ssn_eu_summarized$fun_biof_nopools$ssn$obs$mean_invsimpson_log10 <- 
-    log10(in_ssn_eu_summarized$fun_biof_nopools$ssn$obs$mean_invsimpson)
-  
-  ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
-    in_ssn = in_ssn_eu_summarized,
-    family = 'Gaussian',
-    organism = c('fun_biof_nopools'),
-    formula_root = 'log10(meanQ3650past)',
-    hydro_var = 'DurD_samp',
-    response_var = alpha_var,
-    ssn_covtypes = ssn_covtypes,
-    partition_formula = as.formula('~ country'),
-    random_formula = ~country,
-    estmethod='reml'
-  )
-  View(  ssn_mod_predictions_covtypes$ssn_glance)
-  
   #Check Torgegram
   tg_selected <- SSN2::Torgegram(
     formula = 'mean_invsimpson_log10 ~ country*DurD_samp + sqrt(DurD_CV10yrpast)',
@@ -12002,14 +11976,33 @@ model_fun_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
     theme_classic() +
     facet_wrap(~dist_type)
   
-  summary(ssn_mod_predictions_covtypes$ssn_list$spherical_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$spherical_none_none)
-  
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
-  
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  if (interactive) {
+    in_ssn_eu_summarized$fun_biof_nopools$ssn$obs$mean_invsimpson_log10 <- 
+      log10(in_ssn_eu_summarized$fun_biof_nopools$ssn$obs$mean_invsimpson)
+    
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'Gaussian',
+      organism = c('fun_biof_nopools'),
+      formula_root = 'log10(meanQ3650past)',
+      hydro_var = 'DurD_samp',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = ~country,
+      estmethod='reml'
+    )
+    View(  ssn_mod_predictions_covtypes$ssn_glance)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$spherical_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$spherical_none_none)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  }
   
   #Re-fit final model with REML
   ssn_fun_biof_pred_final <- ssn_glm(
@@ -12047,8 +12040,8 @@ model_fun_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
     model_selection_table = mod_perf_tab,
     ssn_mod_fit = ssn_fun_biof_pred_final, #Prediction model fit with REML
     ssn_pred_final = ssn_fun_biof_mod_preds, #AUgmented data with prediction model
-    torgegram_mod_pred = tg_plot, #Torgegram for prediction model 
-    # ssn_mod_fit_best = ssn_fun_biof_best_final, #"Best" model fit with REML
+    torgegram_mod_pred = tg_plot #Torgegram for prediction model 
+    #, ssn_mod_fit_best = ssn_fun_biof_best_final, #"Best" model fit with REML
     # ssn_pred_best = ssn_fun_biof_best_preds #Augmented data for "best" model
   ))
 }
@@ -12210,33 +12203,31 @@ model_fun_biof_richness_yr <- function(in_ssn_eu_summarized,
       geom_smooth(method='lm', se=F, color='black') +
       facet_wrap(~variable, scales='free_x') +
       theme_bw()
-  }
-  
-  #Settle on a basic covariance structure to start  with -----
-  #Check correlation
-  topcors_overall <- in_cor_matrices$div[
-    variable1 == alpha_var & organism == 'fun_biof_nopools' 
-    # & variable2 %in% hydro_candidates 
-    & !is.na(correlation),] %>%
-    .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor)
-  
-  topcors_bydrn <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'fun_biof_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
-             var_label = paste(variable2, round(correlation, 2))
-    ), by=country] %>%
-    dcast(cor_order~country, value.var = 'var_label', fill=NA)
-  
-  topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'fun_biof_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, mean(correlation), by=variable2] %>%
-    .[order(V1),]
-  
-  #Test all possible covariance structures
-  if (interactive) {
+    
+    #Settle on a basic covariance structure to start  with -----
+    #Check correlation
+    topcors_overall <- in_cor_matrices$div[
+      variable1 == alpha_var & organism == 'fun_biof_nopools' 
+      # & variable2 %in% hydro_candidates 
+      & !is.na(correlation),] %>%
+      .[, abs_cor := abs(correlation)] %>%
+      setorder(-abs_cor)
+    
+    topcors_bydrn <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'fun_biof_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+               var_label = paste(variable2, round(correlation, 2))
+      ), by=country] %>%
+      dcast(cor_order~country, value.var = 'var_label', fill=NA)
+    
+    topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'fun_biof_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, mean(correlation), by=variable2] %>%
+      .[order(V1),]
+    
+    #Test all possible covariance structures
     ssn_norm_ini <- model_ssn_hydrowindow(
       in_ssn = in_ssn_eu_summarized,
       organism = c('fun_biof_nopools'),
@@ -12400,54 +12391,55 @@ model_fun_biof_richness_yr <- function(in_ssn_eu_summarized,
     rbindlist %>%
     .[, mod := names(fun_biof_rich_modlist)]
   
-  #Check model in additional depth (applied to most models before continuing)
-  chosen_mod <- fun_biof_rich_modlist[['mod20']]
-  
-  #Check residuals, variance decomposition, summary, and predictions
-  par(mfrow=c(2,3))
-  plot(chosen_mod, which=1:6)
-  print('plot')
-  varcomp(chosen_mod)
-  summary(chosen_mod)
-  
-  #Check residual correlations to choose variable additions
-  check_resid_corr(in_ssn_mod = chosen_mod,
-                   in_idcol = 'site',
-                   in_response_var = alpha_var,
-                   in_candidates = hydro_candidates)
-  
-  ggplot(data=  augment(chosen_mod, drop=F, type.predict = 'response'), 
-         aes(x=.fitted, y=get(alpha_var))) +
-    geom_point(aes(color=country)) +
-    geom_smooth(method='lm') +
-    geom_abline()
-  
-  get_ssn_emmeans(in_mod=chosen_mod , 
-                  in_pred_var = 'DurD_samp',
-                  interaction_var = 'country', 
-                  in_drn_dt = drn_dt,
-                  plot=T, label_pred_var=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                   in_pred_var = 'DurD_samp',
-                   interaction_var = 'country', 
-                   in_drn_dt = drn_dt,
-                   plot=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                   in_pred_var = 'temperature_c',
-                   interaction_var = 'country', 
-                   in_drn_dt = drn_dt,
-                   plot=T)
-  
-
-  # check_rf <- ranger::ranger(mean_richness ~ .,
-  #                            data= allvars_dt[, c(hydro_candidates, 'mean_richness', 'country'), with=F])
-  # allvars_dt[, mean_rich_preds := ranger::predictions(check_rf)]
-  # ggplot(allvars_dt, aes(x=mean_rich_preds, y=mean_richness, color=stream_type)) +
-  #   geom_point() +
-  #   facet_wrap(~country)
-  
+  if (interactive) {
+    #Check model in additional depth (applied to most models before continuing)
+    chosen_mod <- fun_biof_rich_modlist[['mod20']]
+    
+    #Check residuals, variance decomposition, summary, and predictions
+    par(mfrow=c(2,3))
+    plot(chosen_mod, which=1:6)
+    print('plot')
+    varcomp(chosen_mod)
+    summary(chosen_mod)
+    
+    #Check residual correlations to choose variable additions
+    check_resid_corr(in_ssn_mod = chosen_mod,
+                     in_idcol = 'site',
+                     in_response_var = alpha_var,
+                     in_candidates = hydro_candidates)
+    
+    ggplot(data=  augment(chosen_mod, drop=F, type.predict = 'response'), 
+           aes(x=.fitted, y=get(alpha_var))) +
+      geom_point(aes(color=country)) +
+      geom_smooth(method='lm') +
+      geom_abline()
+    
+    get_ssn_emmeans(in_mod=chosen_mod , 
+                    in_pred_var = 'DurD_samp',
+                    interaction_var = 'country', 
+                    in_drn_dt = drn_dt,
+                    plot=T, label_pred_var=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'DurD_samp',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'temperature_c',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+    
+    
+    # check_rf <- ranger::ranger(mean_richness ~ .,
+    #                            data= allvars_dt[, c(hydro_candidates, 'mean_richness', 'country'), with=F])
+    # allvars_dt[, mean_rich_preds := ranger::predictions(check_rf)]
+    # ggplot(allvars_dt, aes(x=mean_rich_preds, y=mean_richness, color=stream_type)) +
+    #   geom_point() +
+    #   facet_wrap(~country)
+  }
   
   #####CHOOSE MOD 14 for continuous predictions###########
   #Adding temperature leads to a change in coefficient of the relationship with
@@ -12473,21 +12465,6 @@ model_fun_biof_richness_yr <- function(in_ssn_eu_summarized,
   #------ For prediction model -------------------------------------------------
   # This section focuses on creating a model suitable for prediction to new reaches,
   # using only variables available for all reaches.
-  ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
-    in_ssn = in_ssn_eu_summarized,
-    family = 'poisson',
-    organism = c('fun_biof_nopools'),
-    formula_root = 'country + log10(meanQ3650past)',
-    hydro_var = 'DurD_samp',
-    response_var = alpha_var,
-    ssn_covtypes = ssn_covtypes,
-    partition_formula = as.formula('~ country'),
-    random_formula = NULL,
-    estmethod='reml'
-  )
-
-  selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
-  
   #Check Torgegram
   tg_selected <- SSN2::Torgegram(
     formula = 'mean_richness ~ country*DurD_samp',
@@ -12507,20 +12484,37 @@ model_fun_biof_richness_yr <- function(in_ssn_eu_summarized,
     theme_classic() +
     facet_wrap(~dist_type)
   
-  summary(ssn_mod_predictions_covtypes$ssn_list$epa_linear_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$epa_linear_none)
-  plot(ssn_mod_predictions_covtypes$ssn_list$epa_linear_none, which=1:6)
-  print('plot')
-  
-  summary(ssn_mod_predictions_covtypes$ssn_list$mariah_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$mariah_none_none)
-  plot(ssn_mod_predictions_covtypes$ssn_list$mariah_none_none, which=1:6)
-  print('plot')
-  
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
-  plot(ssn_mod_predictions_covtypes$ssn_list$none_none_none, which=1:6)
-  print('plot')
+  if (interactive) {
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'poisson',
+      organism = c('fun_biof_nopools'),
+      formula_root = 'country + log10(meanQ3650past)',
+      hydro_var = 'DurD_samp',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
+    )
+    
+    selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$epa_linear_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$epa_linear_none)
+    plot(ssn_mod_predictions_covtypes$ssn_list$epa_linear_none, which=1:6)
+    print('plot')
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$mariah_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$mariah_none_none)
+    plot(ssn_mod_predictions_covtypes$ssn_list$mariah_none_none, which=1:6)
+    print('plot')
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    plot(ssn_mod_predictions_covtypes$ssn_list$none_none_none, which=1:6)
+    print('plot')
+  }
   
   #Re-fit final model with REML
   ssn_fun_biof_pred_final <- ssn_glm(
@@ -12697,36 +12691,34 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
       geom_smooth(method='lm', se=F, color='black') +
       facet_wrap(~variable, scales='free_x') +
       theme_bw()
-  }
-  
-  #Settle on a basic covariance structure to start  with -----
-  #Check correlation
-  topcors_overall <- in_cor_matrices$div[
-    variable1 == alpha_var & organism == 'bac_sedi_nopools' 
-    # & variable2 %in% hydro_candidates 
-    & !is.na(correlation),] %>%
-    .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor)
-  
-  topcors_bydrn <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'bac_sedi_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
-             var_label = paste(variable2, round(correlation, 2))
-    ), by=country] %>%
-    dcast(cor_order~country, value.var = 'var_label', fill=NA)
-  
-  topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'bac_sedi_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, mean(correlation), by=variable2] %>%
-    .[order(V1),]
-  
-  #Test all possible covariance structures
-  in_ssn_eu_summarized[['bac_sedi_nopools']]$ssn$obs$STcon_m10_directed_avg_samp_log10 <- 
-    log10(in_ssn_eu_summarized[['bac_sedi_nopools']]$ssn$obs$STcon_m10_directed_avg_samp)
-  
-  if (interactive) {
+    
+    #Settle on a basic covariance structure to start  with -----
+    #Check correlation
+    topcors_overall <- in_cor_matrices$div[
+      variable1 == alpha_var & organism == 'bac_sedi_nopools' 
+      # & variable2 %in% hydro_candidates 
+      & !is.na(correlation),] %>%
+      .[, abs_cor := abs(correlation)] %>%
+      setorder(-abs_cor)
+    
+    topcors_bydrn <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'bac_sedi_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+               var_label = paste(variable2, round(correlation, 2))
+      ), by=country] %>%
+      dcast(cor_order~country, value.var = 'var_label', fill=NA)
+    
+    topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'bac_sedi_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, mean(correlation), by=variable2] %>%
+      .[order(V1),]
+    
+    #Test all possible covariance structures
+    in_ssn_eu_summarized[['bac_sedi_nopools']]$ssn$obs$STcon_m10_directed_avg_samp_log10 <- 
+      log10(in_ssn_eu_summarized[['bac_sedi_nopools']]$ssn$obs$STcon_m10_directed_avg_samp)
+    
     ssn_norm_ini <- model_ssn_hydrowindow(
       in_ssn = in_ssn_eu_summarized,
       family = 'Gaussian',
@@ -12887,12 +12879,12 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   bac_sedi_simps_modlist[['mod25']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ country*DurD_samp + log10(STcon_m10_undirected_avg_samp)'))) 
   
   bac_sedi_simps_modlist[['mod26']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ country*DurD_samp + log10(STcon_m10_undirected_avg_samp) +   country:log10(STcon_m10_undirected_avg_samp)'))) 
-                                                                             
+  
   bac_sedi_simps_modlist[['mod27']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ country*DurD_samp + sqrt(STcon_m10_directed_avg_samp)')))    
   
   bac_sedi_simps_modlist[['mod28']] <- quick_bac_sedi_ssn(as.formula(paste(alpha_var,  '~ country*DurD_samp + sqrt(STcon_m10_directed_avg_samp) +      country:log10(STcon_m10_directed_avg_samp)')))
-
-   mod_perf_tab <- lapply(bac_sedi_simps_modlist, function(x) {
+  
+  mod_perf_tab <- lapply(bac_sedi_simps_modlist, function(x) {
     cbind(Reduce(paste, deparse(x$formula)), 
           glance(x), 
           ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
@@ -12901,49 +12893,51 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     rbindlist %>%
     .[, mod := names(bac_sedi_simps_modlist)]
   
-  #Check model in additional depth (applied to most models before continuing)
-  chosen_mod <- bac_sedi_simps_modlist[['mod27']]
-  
-  #Check residuals, variance decomposition, summary, and predictions
-  par(mfrow=c(2,3))
-  plot(chosen_mod, which=1:6)
-  print('plot')
-  varcomp(chosen_mod)
-  summary(chosen_mod)
-  
-  #Check residual correlations to choose variable additions
-  check_resid_corr(in_ssn_mod = chosen_mod,
-                   in_idcol = 'site',
-                   in_response_var = alpha_var,
-                   in_candidates = hydro_candidates)
-  
-  augment(chosen_mod, drop=F, type.predict = 'response') %>%
-    setDT %>%
-    .[!which.max(`.resid`),] %>%
-    ggplot(data=., 
-           aes(x=.fitted, y=get(alpha_var))) +
-    geom_point(aes(color=country)) +
-    geom_smooth(method='lm') +
-    geom_abline()
-  
-  get_ssn_emmeans(in_mod=chosen_mod , 
-                  in_pred_var = 'DurD_samp',
-                  interaction_var = 'country', 
-                  in_drn_dt = drn_dt,
-                  plot=T, label_pred_var=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                   in_pred_var = 'DurD_samp',
-                   interaction_var = 'country', 
-                   in_drn_dt = drn_dt,
-                   plot=T)
-  
-  # check_rf <- ranger::ranger(log10(mean_invsimpson) ~ .,
-  #                            data= allvars_dt[, c(hydro_candidates, 'mean_invsimpson', 'country'), with=F])
-  # allvars_dt[, mean_simps_preds := ranger::predictions(check_rf)]
-  # ggplot(allvars_dt, aes(x=mean_simps_preds, y=mean_invsimpson, color=stream_type)) +
-  #   geom_point() +
-  #   facet_wrap(~country)
+  if (interactive) {
+    #Check model in additional depth (applied to most models before continuing)
+    chosen_mod <- bac_sedi_simps_modlist[['mod27']]
+    
+    #Check residuals, variance decomposition, summary, and predictions
+    par(mfrow=c(2,3))
+    plot(chosen_mod, which=1:6)
+    print('plot')
+    varcomp(chosen_mod)
+    summary(chosen_mod)
+    
+    #Check residual correlations to choose variable additions
+    check_resid_corr(in_ssn_mod = chosen_mod,
+                     in_idcol = 'site',
+                     in_response_var = alpha_var,
+                     in_candidates = hydro_candidates)
+    
+    augment(chosen_mod, drop=F, type.predict = 'response') %>%
+      setDT %>%
+      .[!which.max(`.resid`),] %>%
+      ggplot(data=., 
+             aes(x=.fitted, y=get(alpha_var))) +
+      geom_point(aes(color=country)) +
+      geom_smooth(method='lm') +
+      geom_abline()
+    
+    get_ssn_emmeans(in_mod=chosen_mod , 
+                    in_pred_var = 'DurD_samp',
+                    interaction_var = 'country', 
+                    in_drn_dt = drn_dt,
+                    plot=T, label_pred_var=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'DurD_samp',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+    
+    # check_rf <- ranger::ranger(log10(mean_invsimpson) ~ .,
+    #                            data= allvars_dt[, c(hydro_candidates, 'mean_invsimpson', 'country'), with=F])
+    # allvars_dt[, mean_simps_preds := ranger::predictions(check_rf)]
+    # ggplot(allvars_dt, aes(x=mean_simps_preds, y=mean_invsimpson, color=stream_type)) +
+    #   geom_point() +
+    #   facet_wrap(~country)
+  }
   
   #####CHOOSE MOD 27 for continuous predictions###########
   
@@ -12964,22 +12958,6 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   # }
   
   #------ For prediction model -------------------------------------------------
-  in_ssn_eu_summarized$bac_sedi_nopools$ssn$obs$mean_invsimpson_log10 <- 
-    log10(in_ssn_eu_summarized$bac_sedi_nopools$ssn$obs$mean_invsimpson)
-  
-  ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
-    in_ssn = in_ssn_eu_summarized,
-    family = 'Gaussian',
-    organism = c('bac_sedi_nopools'),
-    formula_root = 'country + sqrt(STcon_m10_directed_avg_samp)',
-    hydro_var = 'DurD_samp',
-    response_var = alpha_var,
-    ssn_covtypes = ssn_covtypes,
-    partition_formula = as.formula('~ country'),
-    random_formula = NULL,
-    estmethod='reml'
-  )
-  View(ssn_mod_predictions_covtypes$ssn_glance)
   #Check Torgegram
   tg_selected <- SSN2::Torgegram(
     formula = 'mean_invsimpson ~ country*DurD_samp + log10(STcon_m10_directed_avg_samp)',
@@ -12999,11 +12977,30 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     theme_classic() +
     facet_wrap(~dist_type)
   
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_epa_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_epa_none)
-  
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  if (interactive) {
+    in_ssn_eu_summarized$bac_sedi_nopools$ssn$obs$mean_invsimpson_log10 <- 
+      log10(in_ssn_eu_summarized$bac_sedi_nopools$ssn$obs$mean_invsimpson)
+    
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'Gaussian',
+      organism = c('bac_sedi_nopools'),
+      formula_root = 'country + sqrt(STcon_m10_directed_avg_samp)',
+      hydro_var = 'DurD_samp',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
+    )
+    View(ssn_mod_predictions_covtypes$ssn_glance)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_epa_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_epa_none)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  }
   
   #Re-fit final model with REML
   ssn_bac_sedi_pred_final <- ssn_glm(
@@ -13041,8 +13038,8 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     model_selection_table = mod_perf_tab,
     ssn_mod_fit = ssn_bac_sedi_pred_final, #Prediction model fit with REML
     ssn_pred_final = ssn_bac_sedi_mod_preds, #AUgmented data with prediction model
-    torgegram_mod_pred = tg_plot, #Torgegram for prediction model 
-    # ssn_mod_fit_best = ssn_bac_sedi_best_final, #"Best" model fit with REML
+    torgegram_mod_pred = tg_plot #Torgegram for prediction model 
+    # , ssn_mod_fit_best = ssn_bac_sedi_best_final, #"Best" model fit with REML
     # ssn_pred_best = ssn_bac_sedi_best_preds #Augmented data for "best" model
   ))
 }
@@ -13211,30 +13208,30 @@ model_bac_sedi_richness_yr <- function(in_ssn_eu_summarized,
       geom_smooth(method='lm', se=F, color='black') +
       facet_wrap(~variable, scales='free_x') +
       theme_bw()
+    
+    #Settle on a basic covariance structure to start  with -----
+    #Check correlation
+    topcors_overall <- in_cor_matrices$div[
+      variable1 == alpha_var & organism == 'bac_sedi_nopools' 
+      # & variable2 %in% hydro_candidates 
+      & !is.na(correlation),] %>%
+      .[, abs_cor := abs(correlation)] %>%
+      setorder(-abs_cor)
+    
+    topcors_bydrn <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'bac_sedi_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+               var_label = paste(variable2, round(correlation, 2))
+      ), by=country] %>%
+      dcast(cor_order~country, value.var = 'var_label', fill=NA)
+    
+    topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'bac_sedi_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, mean(correlation), by=variable2] %>%
+      .[order(V1),]
   }
-  
-  #Settle on a basic covariance structure to start  with -----
-  #Check correlation
-  topcors_overall <- in_cor_matrices$div[
-    variable1 == alpha_var & organism == 'bac_sedi_nopools' 
-    # & variable2 %in% hydro_candidates 
-    & !is.na(correlation),] %>%
-    .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor)
-  
-  topcors_bydrn <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'bac_sedi_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
-             var_label = paste(variable2, round(correlation, 2))
-    ), by=country] %>%
-    dcast(cor_order~country, value.var = 'var_label', fill=NA)
-  
-  topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'bac_sedi_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, mean(correlation), by=variable2] %>%
-    .[order(V1),]
   
   #Test all possible covariance structures
   in_ssn_eu_summarized[['bac_sedi_nopools']]$ssn$obs$STcon_m10_undirected_avg_samp_log10 <- 
@@ -13394,54 +13391,55 @@ model_bac_sedi_richness_yr <- function(in_ssn_eu_summarized,
     rbindlist %>%
     .[, mod := names(bac_sedi_rich_modlist)]
   
-  #Check model in additional depth (applied to most models before continuing)
-  chosen_mod <- bac_sedi_rich_modlist[['mod13']]
-  
-  #Check residuals, variance decomposition, summary, and predictions
-  par(mfrow=c(2,3))
-  plot(chosen_mod, which=1:6)
-  print('plot')
-  varcomp(chosen_mod)
-  summary(chosen_mod)
-  
-  #Check residual correlations to choose variable additions
-  check_resid_corr(in_ssn_mod = chosen_mod,
-                   in_idcol = 'site',
-                   in_response_var = alpha_var,
-                   in_candidates = hydro_candidates)
-  
-  
-  ggplot(data=  augment(chosen_mod, drop=F, type.predict = 'response'), 
-         aes(x=.fitted, y=get(alpha_var))) +
-    geom_point(aes(color=country)) +
-    geom_smooth(method='lm') +
-    geom_abline()
-  
-  get_ssn_emmeans(in_mod=chosen_mod , 
-                  in_pred_var = 'FreD3650past',
-                  interaction_var = 'country', 
-                  in_drn_dt = drn_dt,
-                  plot=T, label_pred_var=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                   in_pred_var = 'FreD3650past',
-                   interaction_var = 'country', 
-                   in_drn_dt = drn_dt,
-                   plot=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                   in_pred_var = 'Fdist_mean_10past_undirected_avg_samp',
-                   interaction_var = 'country', 
-                   in_drn_dt = drn_dt,
-                   plot=T)
-  
-  # check_rf <- ranger::ranger(mean_richness ~ .,
-  #                            data= allvars_dt[, c(hydro_candidates, 'mean_richness', 'country'), with=F])
-  # allvars_dt[, mean_rich_preds := ranger::predictions(check_rf)]
-  # ggplot(allvars_dt, aes(x=mean_rich_preds, y=mean_richness, color=stream_type)) +
-  #   geom_point() +
-  #   facet_wrap(~country)
-  
+  if (interactive) {
+    #Check model in additional depth (applied to most models before continuing)
+    chosen_mod <- bac_sedi_rich_modlist[['mod13']]
+    
+    #Check residuals, variance decomposition, summary, and predictions
+    par(mfrow=c(2,3))
+    plot(chosen_mod, which=1:6)
+    print('plot')
+    varcomp(chosen_mod)
+    summary(chosen_mod)
+    
+    #Check residual correlations to choose variable additions
+    check_resid_corr(in_ssn_mod = chosen_mod,
+                     in_idcol = 'site',
+                     in_response_var = alpha_var,
+                     in_candidates = hydro_candidates)
+    
+    
+    ggplot(data=  augment(chosen_mod, drop=F, type.predict = 'response'), 
+           aes(x=.fitted, y=get(alpha_var))) +
+      geom_point(aes(color=country)) +
+      geom_smooth(method='lm') +
+      geom_abline()
+    
+    get_ssn_emmeans(in_mod=chosen_mod , 
+                    in_pred_var = 'FreD3650past',
+                    interaction_var = 'country', 
+                    in_drn_dt = drn_dt,
+                    plot=T, label_pred_var=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'FreD3650past',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'Fdist_mean_10past_undirected_avg_samp',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+    
+    # check_rf <- ranger::ranger(mean_richness ~ .,
+    #                            data= allvars_dt[, c(hydro_candidates, 'mean_richness', 'country'), with=F])
+    # allvars_dt[, mean_rich_preds := ranger::predictions(check_rf)]
+    # ggplot(allvars_dt, aes(x=mean_rich_preds, y=mean_richness, color=stream_type)) +
+    #   geom_point() +
+    #   facet_wrap(~country)
+  }
   
   #####CHOOSE MOD 13 for continuous predictions###########
   
@@ -13463,23 +13461,6 @@ model_bac_sedi_richness_yr <- function(in_ssn_eu_summarized,
   # }
   
   #------ For prediction model -------------------------------------------------
-  # This section focuses on creating a model suitable for prediction to new reaches,
-  # using only variables available for all reaches.
-  ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
-    in_ssn = in_ssn_eu_summarized,
-    family = 'Gaussian',
-    organism = c('bac_sedi_nopools'),
-    formula_root = 'log10(meanQ3650past)',
-    hydro_var = 'FreD3650past',
-    response_var = alpha_var,
-    ssn_covtypes = ssn_covtypes,
-    partition_formula = as.formula('~ country'),
-    random_formula = ~ country,
-    estmethod='reml'
-  )
-  
-  selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
-  
   #Check Torgegram
   tg_selected <- SSN2::Torgegram(
     formula = 'mean_richness ~ country*DurD3650past',
@@ -13499,12 +13480,34 @@ model_bac_sedi_richness_yr <- function(in_ssn_eu_summarized,
     theme_classic() +
     facet_wrap(~dist_type)
   
-  summary(ssn_mod_predictions_covtypes$ssn_list$epa_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$epa_none_none)
-  # plot(ssn_mod_predictions_covtypes$ssn_list$epa_none_none, which=1:6)
+  if (interactive) {
+    # This section focuses on creating a model suitable for prediction to new reaches,
+    # using only variables available for all reaches.
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'Gaussian',
+      organism = c('bac_sedi_nopools'),
+      formula_root = 'log10(meanQ3650past)',
+      hydro_var = 'FreD3650past',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = ~ country,
+      estmethod='reml'
+    )
+    
+    selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
+    
+    
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$epa_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$epa_none_none)
+    # plot(ssn_mod_predictions_covtypes$ssn_list$epa_none_none, which=1:6)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  }
   
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
   
   #Re-fit final model with REML
   ssn_bac_sedi_pred_final <- ssn_glm(
@@ -13546,7 +13549,7 @@ model_bac_sedi_richness_yr <- function(in_ssn_eu_summarized,
   return(list(
     model_selection_table = mod_perf_tab,
     ssn_mod_fit = ssn_bac_sedi_pred_final, #Prediction model fit with REML
-    ssn_pred_final = ssn_bac_sedi_mod_preds, #AUgmented data with prediction model
+    ssn_pred_final = ssn_bac_sedi_mod_preds, #Augmented data with prediction model
     torgegram_mod_pred = tg_plot
     # , #Torgegram for prediction model 
     # ssn_mod_fit_best = ssn_bac_sedi_best_final, #"Best" model fit with REML
@@ -13680,30 +13683,30 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
       geom_smooth(method='lm', se=F, color='black') +
       facet_wrap(~variable, scales='free_x') +
       theme_bw()
+    
+    #Settle on a basic covariance structure to start  with -----
+    #Check correlation
+    topcors_overall <- in_cor_matrices$div[
+      variable1 == alpha_var & organism == 'bac_biof_nopools' 
+      # & variable2 %in% hydro_candidates 
+      & !is.na(correlation),] %>%
+      .[, abs_cor := abs(correlation)] %>%
+      setorder(-abs_cor)
+    
+    topcors_bydrn <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'bac_biof_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+               var_label = paste(variable2, round(correlation, 2))
+      ), by=country] %>%
+      dcast(cor_order~country, value.var = 'var_label', fill=NA)
+    
+    topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'bac_biof_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, mean(correlation), by=variable2] %>%
+      .[order(V1),]
   }
-  
-  #Settle on a basic covariance structure to start  with -----
-  #Check correlation
-  topcors_overall <- in_cor_matrices$div[
-    variable1 == alpha_var & organism == 'bac_biof_nopools' 
-    # & variable2 %in% hydro_candidates 
-    & !is.na(correlation),] %>%
-    .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor)
-  
-  topcors_bydrn <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'bac_biof_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
-             var_label = paste(variable2, round(correlation, 2))
-    ), by=country] %>%
-    dcast(cor_order~country, value.var = 'var_label', fill=NA)
-  
-  topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'bac_biof_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, mean(correlation), by=variable2] %>%
-    .[order(V1),]
   
   #Test all possible covariance structures
   in_ssn_eu_summarized[['bac_biof_nopools']]$ssn$obs$STcon_m10_directed_avg_samp_log10 <- 
@@ -13885,49 +13888,51 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
     rbindlist %>%
     .[, mod := names(bac_biof_simps_modlist)]
   
-  #Check model in additional depth (applied to most models before continuing)
-  chosen_mod <- bac_biof_simps_modlist[['mod28']]
-  
-  #Check residuals, variance decomposition, summary, and predictions
-  par(mfrow=c(2,3))
-  plot(chosen_mod, which=1:6)
-  print('plot')
-  varcomp(chosen_mod)
-  summary(chosen_mod)
-  
-  #Check residual correlations to choose variable additions
-  check_resid_corr(in_ssn_mod = chosen_mod,
-                   in_idcol = 'site',
-                   in_response_var = alpha_var,
-                   in_candidates = hydro_candidates)
-  
-  augment(chosen_mod, drop=F, type.predict = 'response') %>%
-    setDT %>%
-    .[!which.max(`.resid`),] %>%
-    ggplot(data=., 
-           aes(x=.fitted, y=get(alpha_var))) +
-    geom_point(aes(color=country)) +
-    geom_smooth(method='lm') +
-    geom_abline()
-  
-  get_ssn_emmeans(in_mod=chosen_mod , 
-                  in_pred_var = 'DurD_samp',
-                  interaction_var = 'country', 
-                  in_drn_dt = drn_dt,
-                  plot=T, label_pred_var=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                   in_pred_var = 'DurD_samp',
-                   interaction_var = 'country', 
-                   in_drn_dt = drn_dt,
-                   plot=T)
-  
-  # check_rf <- ranger::ranger(log10(mean_invsimpson) ~ .,
-  #                            data= allvars_dt[, c(hydro_candidates, 'mean_invsimpson', 'country'), with=F])
-  # allvars_dt[, mean_simps_preds := ranger::predictions(check_rf)]
-  # ggplot(allvars_dt, aes(x=mean_simps_preds, y=mean_invsimpson, color=stream_type)) +
-  #   geom_point() +
-  #   facet_wrap(~country)
+  if (interactive) {
+    #Check model in additional depth (applied to most models before continuing)
+    chosen_mod <- bac_biof_simps_modlist[['mod28']]
+    
+    #Check residuals, variance decomposition, summary, and predictions
+    par(mfrow=c(2,3))
+    plot(chosen_mod, which=1:6)
+    print('plot')
+    varcomp(chosen_mod)
+    summary(chosen_mod)
+    
+    #Check residual correlations to choose variable additions
+    check_resid_corr(in_ssn_mod = chosen_mod,
+                     in_idcol = 'site',
+                     in_response_var = alpha_var,
+                     in_candidates = hydro_candidates)
+    
+    augment(chosen_mod, drop=F, type.predict = 'response') %>%
+      setDT %>%
+      .[!which.max(`.resid`),] %>%
+      ggplot(data=., 
+             aes(x=.fitted, y=get(alpha_var))) +
+      geom_point(aes(color=country)) +
+      geom_smooth(method='lm') +
+      geom_abline()
+    
+    get_ssn_emmeans(in_mod=chosen_mod , 
+                    in_pred_var = 'DurD_samp',
+                    interaction_var = 'country', 
+                    in_drn_dt = drn_dt,
+                    plot=T, label_pred_var=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'DurD_samp',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+    
+    # check_rf <- ranger::ranger(log10(mean_invsimpson) ~ .,
+    #                            data= allvars_dt[, c(hydro_candidates, 'mean_invsimpson', 'country'), with=F])
+    # allvars_dt[, mean_simps_preds := ranger::predictions(check_rf)]
+    # ggplot(allvars_dt, aes(x=mean_simps_preds, y=mean_invsimpson, color=stream_type)) +
+    #   geom_point() +
+    #   facet_wrap(~country)
+  }
   
   #####CHOOSE MOD 28 for continuous predictions###########
   
@@ -13948,24 +13953,6 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
   # }
   
   #------ For prediction model -------------------------------------------------
-  in_ssn_eu_summarized$bac_biof_nopools$ssn$obs$mean_invsimpson_log10 <- 
-    log10(in_ssn_eu_summarized$bac_biof_nopools$ssn$obs$mean_invsimpson)
-  
-  ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
-    in_ssn = in_ssn_eu_summarized,
-    family = 'Gaussian',
-    organism = c('bac_biof_nopools'),
-    formula_root = 'sqrt(STcon_m10_directed_avg_samp)',
-    hydro_var = 'PDurD365past',
-    response_var = alpha_var,
-    ssn_covtypes = ssn_covtypes,
-    partition_formula = as.formula('~ country'),
-    random_formula = NULL,
-    estmethod='reml'
-  )
-  
-  View(ssn_mod_predictions_covtypes$ssn_glance)
-  
   #Check Torgegram
   tg_selected <- SSN2::Torgegram(
     formula = 'mean_invsimpson_log10 ~ country + PDurD365past*sqrt(STcon_m10_directed_avg_samp)',
@@ -13985,11 +13972,31 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
     theme_classic() +
     facet_wrap(~dist_type)
   
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
-  
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  if (interactive) {
+    in_ssn_eu_summarized$bac_biof_nopools$ssn$obs$mean_invsimpson_log10 <- 
+      log10(in_ssn_eu_summarized$bac_biof_nopools$ssn$obs$mean_invsimpson)
+    
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'Gaussian',
+      organism = c('bac_biof_nopools'),
+      formula_root = 'sqrt(STcon_m10_directed_avg_samp)',
+      hydro_var = 'PDurD365past',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
+    )
+    
+    View(ssn_mod_predictions_covtypes$ssn_glance)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  }
   
   #Re-fit final model with REML
   ssn_bac_biof_pred_final <- ssn_glm(
@@ -14027,8 +14034,8 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
     model_selection_table = mod_perf_tab,
     ssn_mod_fit = ssn_bac_biof_pred_final, #Prediction model fit with REML
     ssn_pred_final = ssn_bac_biof_mod_preds, #AUgmented data with prediction model
-    torgegram_mod_pred = tg_plot, #Torgegram for prediction model 
-    # ssn_mod_fit_best = ssn_bac_biof_best_final, #"Best" model fit with REML
+    torgegram_mod_pred = tg_plot #Torgegram for prediction model 
+    # , ssn_mod_fit_best = ssn_bac_biof_best_final, #"Best" model fit with REML
     # ssn_pred_best = ssn_bac_biof_best_preds #Augmented data for "best" model
   ))
 }
@@ -14197,33 +14204,31 @@ model_bac_biof_richness_yr <- function(in_ssn_eu_summarized,
       geom_smooth(method='lm', se=F, color='black') +
       facet_wrap(~variable, scales='free_x') +
       theme_bw()
-  }
-  
-  #Settle on a basic covariance structure to start  with -----
-  #Check correlation
-  topcors_overall <- in_cor_matrices$div[
-    variable1 == alpha_var & organism == 'bac_biof_nopools' 
-    # & variable2 %in% hydro_candidates 
-    & !is.na(correlation),] %>%
-    .[, abs_cor := abs(correlation)] %>%
-    setorder(-abs_cor)
-  
-  topcors_bydrn <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'bac_biof_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
-             var_label = paste(variable2, round(correlation, 2))
-    ), by=country] %>%
-    dcast(cor_order~country, value.var = 'var_label', fill=NA)
-  
-  topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
-    variable1 == alpha_var & organism == 'bac_biof_nopools' &
-      variable2 %in% hydro_candidates & !is.na(correlation),] %>%
-    .[, mean(correlation), by=variable2] %>%
-    .[order(V1),]
-  
-  #Test all possible covariance structures
-  if (interactive) {
+    
+    #Settle on a basic covariance structure to start  with -----
+    #Check correlation
+    topcors_overall <- in_cor_matrices$div[
+      variable1 == alpha_var & organism == 'bac_biof_nopools' 
+      # & variable2 %in% hydro_candidates 
+      & !is.na(correlation),] %>%
+      .[, abs_cor := abs(correlation)] %>%
+      setorder(-abs_cor)
+    
+    topcors_bydrn <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'bac_biof_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+               var_label = paste(variable2, round(correlation, 2))
+      ), by=country] %>%
+      dcast(cor_order~country, value.var = 'var_label', fill=NA)
+    
+    topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'bac_biof_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, mean(correlation), by=variable2] %>%
+      .[order(V1),]
+    
+    #Test all possible covariance structures
     ssn_norm_ini <- model_ssn_hydrowindow(
       in_ssn = in_ssn_eu_summarized,
       organism = c('bac_biof_nopools'),
@@ -14355,7 +14360,7 @@ model_bac_biof_richness_yr <- function(in_ssn_eu_summarized,
   
   bac_biof_rich_modlist[['mod13']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ RelF_avg_samp')))
   
-  bac_biof_rich_modlist[['mod14']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ country*sd6_10yrpast')))
+  bac_biof_rich_modlist[['mod14']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ country + sd6_30yrpast')))
   
   bac_biof_rich_modlist[['mod15']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ country*FreD3650past')))
   
@@ -14375,47 +14380,48 @@ model_bac_biof_richness_yr <- function(in_ssn_eu_summarized,
     rbindlist %>%
     .[, mod := names(bac_biof_rich_modlist)]
   
-  #Check model in additional depth (applied to most models before continuing)
-  chosen_mod <- bac_biof_rich_modlist[['mod16']]
-  
-  #Check residuals, variance decomposition, summary, and predictions
-  par(mfrow=c(2,3))
-  plot(chosen_mod, which=1:6)
-  print('plot')
-  varcomp(chosen_mod)
-  summary(chosen_mod)
-  
-  #Check residual correlations to choose variable additions
-  check_resid_corr(in_ssn_mod = chosen_mod,
-                   in_idcol = 'site',
-                   in_response_var = alpha_var,
-                   in_candidates = hydro_candidates)
-  
-  
-  ggplot(data=  augment(chosen_mod, drop=F, type.predict = 'response'), 
-         aes(x=.fitted, y=get(alpha_var))) +
-    geom_point(aes(color=country)) +
-    geom_smooth(method='lm') +
-    geom_abline()
-  
-  get_ssn_emmeans(in_mod=chosen_mod , 
-                  in_pred_var = 'DurD_samp',
-                  interaction_var = 'country', 
-                  in_drn_dt = drn_dt,
-                  plot=T, label_pred_var=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                   in_pred_var = 'DurD_samp',
-                   interaction_var = 'country', 
-                   in_drn_dt = drn_dt,
-                   plot=T)
-  
-  get_ssn_emtrends(in_mod=chosen_mod , 
-                   in_pred_var = 'Fdist_mean_10past_undirected_avg_samp',
-                   interaction_var = 'country', 
-                   in_drn_dt = drn_dt,
-                   plot=T)
-  
+  if (interactive) {
+    #Check model in additional depth (applied to most models before continuing)
+    chosen_mod <- bac_biof_rich_modlist[['mod16']]
+    
+    #Check residuals, variance decomposition, summary, and predictions
+    par(mfrow=c(2,3))
+    plot(chosen_mod, which=1:6)
+    print('plot')
+    varcomp(chosen_mod)
+    summary(chosen_mod)
+    
+    #Check residual correlations to choose variable additions
+    check_resid_corr(in_ssn_mod = chosen_mod,
+                     in_idcol = 'site',
+                     in_response_var = alpha_var,
+                     in_candidates = hydro_candidates)
+    
+    
+    ggplot(data=  augment(chosen_mod, drop=F, type.predict = 'response'), 
+           aes(x=.fitted, y=get(alpha_var))) +
+      geom_point(aes(color=country)) +
+      geom_smooth(method='lm') +
+      geom_abline()
+    
+    get_ssn_emmeans(in_mod=chosen_mod , 
+                    in_pred_var = 'DurD_samp',
+                    interaction_var = 'country', 
+                    in_drn_dt = drn_dt,
+                    plot=T, label_pred_var=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'DurD_samp',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'Fdist_mean_10past_undirected_avg_samp',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+  }
   
   bac_biof_rich_modlist[['mod13']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + country*log10(basin_area_km2)')))
   
@@ -14464,21 +14470,6 @@ model_bac_biof_richness_yr <- function(in_ssn_eu_summarized,
   #------ For prediction model -------------------------------------------------
   # This section focuses on creating a model suitable for prediction to new reaches,
   # using only variables available for all reaches.
-  ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
-    in_ssn = in_ssn_eu_summarized,
-    family = 'Gaussian',
-    organism = c('bac_biof_nopools'),
-    formula_root = 'country + log10(meanQ3650past)',
-    hydro_var = 'DurD_samp',
-    response_var = alpha_var,
-    ssn_covtypes = ssn_covtypes,
-    partition_formula = as.formula('~ country'),
-    random_formula = NULL,
-    estmethod='reml'
-  )
-  
-  selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
-  
   #Check Torgegram
   tg_selected <- SSN2::Torgegram(
     formula = 'mean_richness ~ country*DurD_samp',
@@ -14498,14 +14489,30 @@ model_bac_biof_richness_yr <- function(in_ssn_eu_summarized,
     theme_classic() +
     facet_wrap(~dist_type)
   
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_linear_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_linear_none)
-  plot(ssn_mod_predictions_covtypes$ssn_list$none_linear_none, which=1:2)
-  
-  summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
-  varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
-  plot(ssn_mod_predictions_covtypes$ssn_list$none_none_none, which=1:2)
-  
+  if (interactive) {
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'Gaussian',
+      organism = c('bac_biof_nopools'),
+      formula_root = 'country + log10(meanQ3650past)',
+      hydro_var = 'DurD_samp',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
+    )
+    
+    selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_linear_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_linear_none)
+    plot(ssn_mod_predictions_covtypes$ssn_list$none_linear_none, which=1:2)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    plot(ssn_mod_predictions_covtypes$ssn_list$none_none_none, which=1:2)
+  }
   
   #Re-fit final model with REML
   ssn_bac_biof_pred_final <- ssn_glm(
@@ -14556,8 +14563,105 @@ model_bac_biof_richness_yr <- function(in_ssn_eu_summarized,
     # ssn_pred_best = ssn_bac_biof_best_preds #Augmented data for "best" model
   ))
 }
+
+################################################################################
+# Format theoretical model equation (without the numbers) ----------------------
+# Get summary statistics--------------------------------------------------------
+# Display emtrends + obs-preds -------------------------------------------------
+# Sub-select models (richness vs invsimpson)------------------------------------
+# Choose models to project under climate change --------------------------------
+################################################################################
+
+
+#------ format_ssn_glm_equation ------------------------------------------------
+# in_mod_fit <- tar_read(ssn_mods_miv_invsimpson_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_miv_richness_yr)$ssn_mod_fit
+
+# in_mod_fit <- tar_read(ssn_mods_miv_richness_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_miv_invsimpson_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_dia_sedi_richness_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_dia_sedi_invsimpson_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_dia_biof_richness_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_fun_sedi_richness_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_fun_sedi_invsimpson_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_fun_biof_richness_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_fun_biof_invsimpson_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_bac_sedi_richness_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_bac_sedi_invsimpson_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_bac_biof_richness_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_bac_biof_invsimpson_yr)$ssn_mod_fit
+# 
+# greek=T
+# format_ssn_glm_equation(in_mod_fit, greek = TRUE)
+
+format_ssn_glm_equation <- function(in_mod_fit, greek = TRUE) {
+  if (!inherits(in_mod_fit, c('lm','glm','ssn_lm', 'ssn_glm', 'lme', 'merMod'))) {
+    return(NULL)
+  }
+  
+  # Extract response and predictors
+  f <- formula(in_mod_fit)
+  y <- as.character(f[[2]])
+  x <- attr(terms(in_mod_fit), "term.labels")
+  
+  # Define coefficient names
+  coefs <- if (greek) paste0("β_", seq_along(x)) else paste0("b", seq_along(x))
+  intercept <- if (greek) "β₀" else "b0"
+  
+  # Detect family (for SSN2)
+  fam <- in_mod_fit$family
+  if (!is.null(fam)) {
+    link <- switch(
+      fam,
+      "Gaussian"   = "identity",
+      "gaussian"   = "identity",
+      "poisson"    = "log",
+      "nbinomial"  = "log",
+      "binomial"   = "logit",
+      "gamma"      = "inverse",
+      "lognormal"  = "log",
+      "exponential"= "log",
+      "identity"   = "identity",
+      NA_character_
+    )
+  } else {
+    link <- 'identity'
+  }
+  
+  if (length(y) > 1) {
+    if (y[[1]]=='log10') {
+      link <- "log"
+    }
+    y <- y[[2]]
+  }
+
+  # --- Pretty formatting for variable terms ---
+  pretty_terms <- x
+  
+  # Replace I(var^2) → var²
+  pretty_terms <- gsub("I\\(([^\\^]+)\\^2\\)", "\\1²", pretty_terms)
+  # Replace I(var^3) → var³
+  pretty_terms <- gsub("I\\(([^\\^]+)\\^3\\)", "\\1³", pretty_terms)
+  # Replace interactions x1:x2 → x₁ × x₂
+  pretty_terms <- gsub(":", " × ", pretty_terms)
+  # Optional cleanup for nicer rendering
+  pretty_terms <- gsub("\\s+", "", pretty_terms)
+  
+  # Build the right-hand side
+  rhs <- paste(c(intercept, paste0(coefs, "*", pretty_terms)), collapse = " + ")
+  
+  # Construct the full equation
+  if (is.na(link) || link == "identity") {
+    eq <- paste0(y, " = ", rhs)
+  } else {
+    eq <- paste0(link, "(", y, ") = ", rhs)
+  }
+  
+  return(eq)
+}
+
 #------ diagnose_ssn_mod -----------------------------------------------------
-# in_ssn_mods <- tar_read(ssn_mods_miv_yr)
+# in_ssn_mods <- tar_read(ssn_mods_miv_richness_yr)
 # write_plots=T
 # out_dir = figdir
 
@@ -14590,26 +14694,26 @@ diagnose_ssn_mod <- function(in_ssn_mods,
   alpha_var <- all.vars(in_ssn_mods$ssn_mod_fit_best$formula)[[1]]
   
   #Check predictions for best model
-  predobs_plot_best <- setDT(in_ssn_mods$ssn_pred_best) %>%
-    .[, country := factor(
-      country, 
-      levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain" ),
-      ordered=T)
-    ] %>% 
-    ggplot(aes(x=.fitted, y=get(alpha_var))) +
-    geom_point(aes(color=stream_type)) +
-    geom_smooth(method = 'lm',
-                color = 'black', se = FALSE) +
-    geom_abline(linetype='dashed') +
-    scale_x_continuous(name=paste('Predicted', response_var_label)) +
-    scale_y_continuous(name=paste('Observed', response_var_label)) +
-    scale_color_manual(
-      name = 'Stream type',
-      labels = c('Perennial', 'Non-perennial'),
-      values=c('#2b8cbe', '#feb24c')) +
-    coord_fixed() +
-    facet_wrap(~country) +
-    theme_classic() 
+  # predobs_plot_best <- setDT(in_ssn_mods$ssn_pred_best) %>%
+  #   .[, country := factor(
+  #     country, 
+  #     levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain" ),
+  #     ordered=T)
+  #   ] %>% 
+  #   ggplot(aes(x=.fitted, y=get(alpha_var))) +
+  #   geom_point(aes(color=stream_type)) +
+  #   geom_smooth(method = 'lm',
+  #               color = 'black', se = FALSE) +
+  #   geom_abline(linetype='dashed') +
+  #   scale_x_continuous(name=paste('Predicted', response_var_label)) +
+  #   scale_y_continuous(name=paste('Observed', response_var_label)) +
+  #   scale_color_manual(
+  #     name = 'Stream type',
+  #     labels = c('Perennial', 'Non-perennial'),
+  #     values=c('#2b8cbe', '#feb24c')) +
+  #   coord_fixed() +
+  #   facet_wrap(~country) +
+  #   theme_classic() 
   
   #Check predictions for final model
   predobs_plot_final <- setDT(in_ssn_mods$ssn_pred_final)[, country := factor(

@@ -925,7 +925,7 @@ analysis_targets <- list(
     local_env_pca,
     ordinate_local_env(in_allvars_dt = allvars_sites$dt)
   ),
-
+  
   #Create Spatial Stream Network (SSN) object
   tar_target(
     ssn_eu,
@@ -941,7 +941,7 @@ analysis_targets <- list(
                       overwrite = T)
   )
   ,
-
+  
   #Define all hydrological variables: 62
   tar_target(
     hydro_vars_forssn,
@@ -950,17 +950,17 @@ analysis_targets <- list(
         c('DurD', 'FreD', 'PDurD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ', 'MaxConD'),
         paste0(c(30, 60, 90, 180, 365, 3650), 'past')
       )
-
+      
       hydroyr_grid <- expand.grid(
         c('DurD_CV', "FreD_CV", "meanConD_CV", "FstDrE_SD", "sd6"),
         paste0(c(10, 30), 'yrpast')
       )
-
+      
       stcon_grid <- expand.grid(paste0('STcon_m', c(30, 60, 90, 180, 365)),
                                 c('_directed', '_undirected'))
       fdist_grid <- expand.grid(paste0('Fdist_mean_', c(30, 60, 90, 180, 365, 3650), 'past'),
                                 c('_directed', '_undirected'))
-
+      
       hydro_regex_list <- c(
         paste0(hydrovar_grid$Var1,'.*', hydrovar_grid$Var2),
         paste0(hydroyr_grid$Var1,'.*', hydroyr_grid$Var2),
@@ -968,7 +968,7 @@ analysis_targets <- list(
         paste0(fdist_grid$Var1, fdist_grid$Var2),
         'PrdD', 'FstDrE'
       )
-
+      
       lapply(hydro_regex_list, function(var_str) {
         grep(paste0('^', var_str),
              names(ssn_eu[[1]]$ssn$obs),
@@ -977,15 +977,15 @@ analysis_targets <- list(
     }
   )
   ,
-
+  
   #Define hydrological labels
   tar_target(
     hydro_vars_dt,
     create_hydro_vars_dt(in_hydro_vars_forssn = hydro_vars_forssn)
   )
   ,
-
-
+  
+  
   # Run a first SSN with a single hydrological variable for each organism
   # to determine the top spatial covariance types
   tar_target(
@@ -1004,7 +1004,7 @@ analysis_targets <- list(
     iteration = "list"
   )
   ,
-
+  
   #Select the top 5 covariance structures for each organism based on AIC and
   #structure the models to run
   tar_target(
@@ -1014,11 +1014,11 @@ analysis_targets <- list(
       selected_covtypes <- lapply(ssn_div_covtype, `[[`, "ssn_glance") %>%
         rbindlist %>%
         .[, .SD[order(AIC)][1:5, .(covtypes)], by = organism]
-
+      
       #Convert to named list by organism
       covtypes_by_organism <- selected_covtypes[, .(covtypes = list(covtypes)),
                                                 by = organism]
-
+      
       #Attach covtypes to each setup
       model_setup_list <- list()
       for (div_index in alpha_var_list) {
@@ -1030,7 +1030,7 @@ analysis_targets <- list(
             hydro_var = NULL,
             covtypes = covtypes_by_organism[organism==org,]$covtypes[[1]]
           )
-
+          
           #Add all hydrovars
           for (hv in hydro_vars_forssn) {
             model_setup_list[[length(model_setup_list) + 1]] <- list(
@@ -1042,12 +1042,12 @@ analysis_targets <- list(
           }
         }
       }
-
+      
       return(model_setup_list)
     }
   )
   ,
-
+  
   #Run SSN for each chosen variable and time window
   tar_map(
     values = tidyr::expand_grid(
@@ -1060,7 +1060,7 @@ analysis_targets <- list(
       )
     ),
     names = c("in_response_var", "in_organism"),
-
+    
     # fit models
     tar_target(
       ssn_div_hydrowindow,
@@ -1069,7 +1069,7 @@ analysis_targets <- list(
           ssn_div_models_to_run,
           function(x) x$response_var == in_response_var && x$organism == in_organism
         )
-
+        
         future_lapply(models_subset, function(model_setup) {
           print(paste(in_organism, in_response_var, model_setup$hydro_var, sep = " - "))
           model_ssn_hydrowindow(
@@ -1086,12 +1086,12 @@ analysis_targets <- list(
         })
       }
     ),
-
+    
     tar_target(
       ssn_covtype_selected,
       select_ssn_covariance(in_ssnmodels = ssn_div_hydrowindow)
     ),
-
+    
     tar_target(
       hydrowindow_perf_tables,
       {
@@ -1100,10 +1100,10 @@ analysis_targets <- list(
           , c("organism", "hydro_var", "response_var")] %>%
           as.data.table() %>%
           .[response_var == in_response_var & organism == in_organism, ]
-
+        
         ssnmodels <- cbind(ssn_model_names, ssn_div_hydrowindow)
         names(ssnmodels)[ncol(ssnmodels)] <- "ssn_div_models"
-
+        
         # Format per organism
         prepare_hydrowindow_perf_table(
           in_ssnmodels = ssnmodels,
@@ -1112,7 +1112,7 @@ analysis_targets <- list(
           in_hydro_vars_dt = hydro_vars_dt)
       }
     ),
-
+    
     tar_target(
       hydrowindow_varcomp,
       get_hydrowindow_varcomp(
@@ -1121,7 +1121,7 @@ analysis_targets <- list(
         ncol_pag = 3)
     )
     ,
-
+    
     tar_target(
       hydrowindow_emmeans,
       get_hydrowindow_emmeans(
@@ -1130,7 +1130,7 @@ analysis_targets <- list(
         in_drn_dt = drn_dt)
     )
     ,
-
+    
     tar_target(
       hydrowindow_emtrends,
       get_hydrowindow_emtrends(
@@ -1139,14 +1139,14 @@ analysis_targets <- list(
         in_drn_dt = drn_dt)
     )
     ,
-
+    
     tar_target(
       hydrowindow_best_preds,
       get_hydrowindow_predictions(
         best_dt = hydrowindow_perf_tables$best)
     )
     ,
-
+    
     tar_target(
       hydrowindow_obs_preds_plot,
       plot_hydrowindow_obs_preds(
@@ -1154,7 +1154,7 @@ analysis_targets <- list(
         resp_var = in_response_var)
     )
     ,
-
+    
     tar_target(
       hydrowindow_x_preds_plot,
       plot_hydrowindow_x_preds(
@@ -1163,7 +1163,7 @@ analysis_targets <- list(
       )
     )
     ,
-
+    
     tar_target(
       ssn_div_hydrowindow_plots_paths,
       save_ssn_div_hydrowindow_plots(
@@ -1319,7 +1319,7 @@ analysis_targets <- list(
     out_dir = figdir)
   )
   ,
-
+  
   ##############################################################################
   # MODEL SITES SUMMARIZED
   ##############################################################################
@@ -1360,21 +1360,21 @@ analysis_targets <- list(
                              out_dir = figdir) 
   )
   ,
-
+  
   tar_target(
     ssn_mods_miv_richness_yr,
     model_miv_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
-                 in_allvars_summarized = allvars_summarized,
-                 in_cor_matrices = cor_matrices_list_summarized,
-                 ssn_covtypes = ssn_covtypes)
+                          in_allvars_summarized = allvars_summarized,
+                          in_cor_matrices = cor_matrices_list_summarized,
+                          ssn_covtypes = ssn_covtypes)
   ),
   
   tar_target(
-    ssn_mods_miv_invsimpson__yr,
+    ssn_mods_miv_invsimpson_yr,
     model_miv_invsimpson_yr(in_ssn_eu_summarized = ssn_eu_summarized,
-                 in_allvars_summarized = allvars_summarized,
-                 in_cor_matrices = cor_matrices_list_summarized,
-                 ssn_covtypes = ssn_covtypes)
+                            in_allvars_summarized = allvars_summarized,
+                            in_cor_matrices = cor_matrices_list_summarized,
+                            ssn_covtypes = ssn_covtypes)
   ),
   
   tar_target(
@@ -1387,91 +1387,142 @@ analysis_targets <- list(
   
   tar_target(
     ssn_mods_dia_sedi_richness_yr,
-    model_miv_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
-                          in_allvars_summarized = allvars_summarized,
-                          in_cor_matrices = cor_matrices_list_summarized,
-                          ssn_covtypes = ssn_covtypes)
+    model_dia_sedi_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                               in_allvars_summarized = allvars_summarized,
+                               in_cor_matrices = cor_matrices_list_summarized,
+                               ssn_covtypes = ssn_covtypes)
   ),
   
   tar_target(
     ssn_mods_dia_sedi_invsimpson_yr,
-    model_miv_invsimpson_yr(in_ssn_eu_summarized = ssn_eu_summarized,
-                            in_allvars_summarized = allvars_summarized,
-                            in_cor_matrices = cor_matrices_list_summarized,
-                            ssn_covtypes = ssn_covtypes)
+    model_dia_sedi_invsimpson_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                                 in_allvars_summarized = allvars_summarized,
+                                 in_cor_matrices = cor_matrices_list_summarized,
+                                 ssn_covtypes = ssn_covtypes)
   ),
   
   tar_target(
     ssn_mods_dia_biof_richness_yr,
-    model_miv_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
-                          in_allvars_summarized = allvars_summarized,
-                          in_cor_matrices = cor_matrices_list_summarized,
-                          ssn_covtypes = ssn_covtypes)
+    model_dia_biof_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                               in_allvars_summarized = allvars_summarized,
+                               in_cor_matrices = cor_matrices_list_summarized,
+                               ssn_covtypes = ssn_covtypes)
   ),
   
   tar_target(
     ssn_mods_fun_sedi_richness_yr,
-    model_miv_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
-                          in_allvars_summarized = allvars_summarized,
-                          in_cor_matrices = cor_matrices_list_summarized,
-                          ssn_covtypes = ssn_covtypes)
+    model_fun_sedi_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                               in_allvars_summarized = allvars_summarized,
+                               in_cor_matrices = cor_matrices_list_summarized,
+                               ssn_covtypes = ssn_covtypes)
   ),
   
   tar_target(
-    ssn_mods_fun_sedi_invsimpson__yr,
-    model_miv_invsimpson_yr(in_ssn_eu_summarized = ssn_eu_summarized,
-                            in_allvars_summarized = allvars_summarized,
-                            in_cor_matrices = cor_matrices_list_summarized,
-                            ssn_covtypes = ssn_covtypes)
+    ssn_mods_fun_sedi_invsimpson_yr,
+    model_fun_sedi_invsimpson_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                                 in_allvars_summarized = allvars_summarized,
+                                 in_cor_matrices = cor_matrices_list_summarized,
+                                 ssn_covtypes = ssn_covtypes)
   ),
   
   tar_target(
     ssn_mods_fun_biof_richness_yr,
-    model_miv_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
-                          in_allvars_summarized = allvars_summarized,
-                          in_cor_matrices = cor_matrices_list_summarized,
-                          ssn_covtypes = ssn_covtypes)
+    model_fun_biof_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                               in_allvars_summarized = allvars_summarized,
+                               in_cor_matrices = cor_matrices_list_summarized,
+                               ssn_covtypes = ssn_covtypes)
   ),
   
   tar_target(
-    ssn_mods_fun_biof_invsimpson__yr,
-    model_miv_invsimpson_yr(in_ssn_eu_summarized = ssn_eu_summarized,
-                            in_allvars_summarized = allvars_summarized,
-                            in_cor_matrices = cor_matrices_list_summarized,
-                            ssn_covtypes = ssn_covtypes)
+    ssn_mods_fun_biof_invsimpson_yr,
+    model_fun_biof_invsimpson_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                                 in_allvars_summarized = allvars_summarized,
+                                 in_cor_matrices = cor_matrices_list_summarized,
+                                 ssn_covtypes = ssn_covtypes)
   ),
   
   tar_target(
     ssn_mods_bac_sedi_richness_yr,
-    model_miv_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
-                          in_allvars_summarized = allvars_summarized,
-                          in_cor_matrices = cor_matrices_list_summarized,
-                          ssn_covtypes = ssn_covtypes)
+    model_bac_sedi_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                               in_allvars_summarized = allvars_summarized,
+                               in_cor_matrices = cor_matrices_list_summarized,
+                               ssn_covtypes = ssn_covtypes)
   ),
   
   tar_target(
-    ssn_mods_bac_sedi_invsimpson__yr,
-    model_miv_invsimpson_yr(in_ssn_eu_summarized = ssn_eu_summarized,
-                            in_allvars_summarized = allvars_summarized,
-                            in_cor_matrices = cor_matrices_list_summarized,
-                            ssn_covtypes = ssn_covtypes)
+    ssn_mods_bac_sedi_invsimpson_yr,
+    model_bac_sedi_invsimpson_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                                 in_allvars_summarized = allvars_summarized,
+                                 in_cor_matrices = cor_matrices_list_summarized,
+                                 ssn_covtypes = ssn_covtypes)
   ),
   
   tar_target(
     ssn_mods_bac_biof_richness_yr,
-    model_miv_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
-                          in_allvars_summarized = allvars_summarized,
-                          in_cor_matrices = cor_matrices_list_summarized,
-                          ssn_covtypes = ssn_covtypes)
+    model_bac_biof_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                               in_allvars_summarized = allvars_summarized,
+                               in_cor_matrices = cor_matrices_list_summarized,
+                               ssn_covtypes = ssn_covtypes)
   ),
   
   tar_target(
-    ssn_mods_bac_biof_invsimpson__yr,
-    model_miv_invsimpson_yr(in_ssn_eu_summarized = ssn_eu_summarized,
-                            in_allvars_summarized = allvars_summarized,
-                            in_cor_matrices = cor_matrices_list_summarized,
-                            ssn_covtypes = ssn_covtypes)
+    ssn_mods_bac_biof_invsimpson_yr,
+    model_bac_biof_invsimpson_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                                 in_allvars_summarized = allvars_summarized,
+                                 in_cor_matrices = cor_matrices_list_summarized,
+                                 ssn_covtypes = ssn_covtypes)
   )
+  ,
+  
+  tar_target(
+    ssn_mod_yr_fit_multiorganism,
+    list(
+      miv_richness = ssn_mods_miv_richness_yr$ssn_mod_fit,
+      miv_invsimpson = ssn_mods_miv_invsimpson_yr$ssn_mod_fit,
+      dia_sedi_richness = ssn_mods_dia_sedi_richness_yr$ssn_mod_fit,
+      dia_sedi_invsimpson = ssn_mods_dia_sedi_invsimpson_yr$ssn_mod_fit,
+      dia_biof_richness = ssn_mods_dia_biof_richness_yr$ssn_mod_fit,
+      fun_sedi_richnes = ssn_mods_fun_sedi_richness_yr$ssn_mod_fit,
+      fun_sedi_invsimpson = ssn_mods_fun_sedi_invsimpson_yr$ssn_mod_fit,
+      fun_biof_richness = ssn_mods_fun_biof_richness_yr$ssn_mod_fit,
+      fun_biof_invsimpson = ssn_mods_fun_biof_invsimpson_yr$ssn_mod_fit,
+      bac_sedi_richness = ssn_mods_bac_sedi_richness_yr$ssn_mod_fit,
+      bac_sedi_invsimpson = ssn_mods_bac_sedi_invsimpson_yr$ssn_mod_fit,
+      bac_biof_richness = ssn_mods_bac_biof_richness_yr$ssn_mod_fit,
+      bac_biof_invsimpson = ssn_mods_bac_biof_invsimpson_yr$ssn_mod_fit
+    ) 
+  )
+  ,
+  
+  tar_target(
+    ssn_mod_yr_equations_multiorganism,
+    lapply(ssn_mod_yr_fit_multiorganism, function(mod_fit) {
+      format_ssn_glm_equation(mod_fit, greek = TRUE) 
+    }) %>% setNames(names(ssn_mod_yr_fit_multiorganism))
+  )
+  ,
+  
+  tar_target(
+    ssn_mod_yr_perf_multiorganism,
+    lapply(ssn_mod_yr_fit_multiorganism, function(x) {
+      if (!inherits(in_mod_fit, c('lm','glm','ssn_lm', 'ssn_glm', 'lme', 'merMod'))) {
+        return(NULL)
+      }
+      # print(x)
+      perf_table <- cbind(
+        Reduce(paste, deparse(x$formula)), 
+        glance(x), 
+        ifelse(length(attr(x$terms, "term.labels"))>=2,
+               max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), 
+               NA),
+        loocv(x))
+      return(perf_table)
+    }) %>% 
+      rbindlist %>%
+      .[, mod := names(ssn_mod_yr_fit_multiorganism)]
+  )
+  
+  
   
   # 
   # tar_target(
