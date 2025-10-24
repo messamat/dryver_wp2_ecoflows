@@ -683,21 +683,52 @@ analysis_targets <- list(
   )
   ,
   
-  
   tar_target(
     hydrostats_net_proj,
-    lapply(list.files(file.path(wp1_data_gouv_dir, 'projections'), 
+    future_lapply(list.files(file.path(wp1_data_gouv_dir, 'projections'), 
                       pattern='flowstate.*2015[-]2100',
                       full.names = TRUE),
-           function(in_path) {
-             print(in_path)
-             summarize_drn_hydroproj_stats(hydroproj_path=in_path)
+           function(hydroproj_ir_path) {
+             print(hydroproj_ir_path)
+             
+             #Get intermittence stats
+             hydroref_ir_path <- gsub('ssp[0-9]{3}', 'ssp370', hydroproj_ir_path) %>%
+               gsub('2015[-]2100', '1985-2014', .)
+             
+             ir_stats <- summarize_drn_hydroproj_stats(
+               hydroproj_path=hydroproj_ir_path,
+               hydroref_path=hydroref_ir_path,
+               subset_sites=T,
+               in_sites_dt = sites_dt,
+               in_drn_dt = drn_dt,
+               min_date = as.Date('1990-01-01'),
+               include_metadata = FALSE
+             )
+             
+             #Get Q stats
+             hydroproj_q_path <- gsub('flowstate', 'discharge', hydroproj_ir_path)
+             hydroref_q_path <-  gsub('flowstate', 'discharge', hydroref_ir_path)
+             
+             q_stats <- summarize_drn_hydroproj_stats(
+               hydroproj_path=hydroproj_q_path,
+               hydroref_path=hydroref_q_path,
+               subset_sites=T,
+               in_sites_dt = sites_dt,
+               in_drn_dt = drn_dt,
+               min_date = as.Date('1990-01-01'),
+               include_metadata = TRUE
+             )
+             
+             #Merge them
+             all_stats <- merge(ir_stats, q_stats, by=c('reach_id', 'year'))
+             
+             return(all_stats)
            }) %>% 
-      rbindlist %>%
-      .[catchment == "Lepsamanjoki", catchment := "Lepsamaanjoki"] %>%
-      merge(drn_dt[, .(country, catchment)], by='catchment')
+      rbindlist
   )
   ,
+  
+  #Fdist_mean_10past_undirected_avg_samp, STcon_m10_directed_avg_samp_log1
   
   tar_target(
     env_summarized,
@@ -1525,25 +1556,6 @@ analysis_targets <- list(
     })
   )
 
-  # in_mod_fit <- tar_read(ssn_mods_miv_richness_yr)$ssn_mod_fit
-  # write_plots=T
-  # out_dir = figdir
-  # response_var_label = 'Mean richness'
-  # in_drn_dt = drn_dt
-  # in_hydro_vars_dt = tar_read(hydro_vars_dt)
-  # plot_path_prefix <- 'ssn_mod_yr_miv_diagplot'
-  
-  
-  
-  # 
-  # tar_target(
-  #   ssn_mods_miv_yr_diagnose,
-  #   diagnose_ssn_mod(in_ssn_mods = ssn_mods_miv_yr,
-  #                    response_var_label = 'Mean ,
-  #                    write_plots = T,
-  #                    out_dir = figdir)
-  # ),
-  # 
   # tar_target(
   #   model_selection_table_path,
   #   fwrite(ssn_mods_miv_yr$model_selection_table,
