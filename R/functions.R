@@ -6193,8 +6193,7 @@ ordinate_local_env <- function(in_allvars_dt) {
 #' @return A list containing two spatial objects: one for historical prediction 
 #'      points and one for projected prediction points.
 create_ssn_pred_pts <- function(in_network_path) {
-  
-  # 1. Process the river network data
+  # Process the river network data
   # load and combine all country-specific river network shapefiles
   net_proj <- lapply(names(in_network_path), function(in_country) {
     #print(in_country)
