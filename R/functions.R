@@ -275,6 +275,22 @@ create_sitepoints_raw <- function(in_dt, lon_col, lat_col, out_points_path,
   return(out_points_path)
 }
 
+#------ preformat_intermittence_stats ------------------------------------------
+preformat_intermittence_stats <- function(dt) {
+  dt[!is.na(isflowing),
+     `:=`(noflow_period = rleid(isflowing==0), #Compute no-flow periods
+          last_noflow = zero_lomf(isflowing==0, first=FALSE) #Compute row index of last no flow day
+     ), by=.(reach_id)] %>%
+    .[isflowing == 1, noflow_period := NA] %>% 
+    .[last_noflow ==0, last_noflow := NA] %>%
+    .[!is.na(noflow_period), noflow_period_dur := .N,  #Compute duration of each no-flow period
+      by = .(noflow_period, reach_id)] %>%
+    .[, last_noflowdate := .SD[last_noflow, date], by = .(reach_id)] %>% #Convert to data
+    .[, PrdD := difftime(date, last_noflowdate, units='days'), #Compute time to last no flow date
+      by = .(reach_id)] %>%
+    .[, last_noflow := NULL]
+}
+
 #------ compute_ecdf_lookup ----------------------------------------------------
 #' Compute left-continuous ECDF values by group.
 #'
@@ -379,6 +395,60 @@ identify_drywet6mo <- function(in_dt, flow_col='isflowing', jday_col = 'doy') {
   return(in_dt[order(date),])
 }
 
+#------ compute_sd6 ------------------------------------------------------------
+compute_rolling_sd6 <- function(dt, time_window_yr) {
+  #Identify contiguous six months with the most zero-flow days for computing Sd6
+  daily_classified <- dt[, identify_drywet6mo(.SD), by = reach_id]
+  
+  # Add month
+  daily_classified[, ym := format(date, "%Y%m")]
+  
+  # Collapse by year-month based on majority vote (>50% of days in dry period)
+  monthly_classified <- daily_classified[
+    , .(dry_6mo = mean(dry_6mo, na.rm = TRUE) > 0.5),  
+    by = .(reach_id, ym)
+  ] %>%
+    .[, year := as.integer(substr(ym, 1, 4))]
+  
+  # For each month, check if no-flow occurred
+  noflow_by_month <- dt[
+    , list(ym = format(date, "%Y%m"), noflow_period = noflow_period)
+    ] %>%
+    .[, list(has_noflow = any(!is.na(noflow_period))), 
+      by = .(reach_id, ym)]
+  
+  # Join no-flow with dry/wet classification
+  monthly_dt <- merge(noflow_by_month, monthly_classified,
+                      by = c('reach_id', 'ym'), all.x=T)
+  
+  # Count number of months with no-flow per year & season
+  base_dt <- monthly_dt[
+    , .(n_months = sum(has_noflow, na.rm = TRUE)), 
+    by = .(year, dry_6mo, reach_id)
+  ] %>%
+    dcast(year + reach_id ~ dry_6mo, value.var = "n_months", fill = 0)
+  
+  #Compute SD6 in a rolling window
+  rolling_sd6_inner <- function(dt, k) {
+    colname <- paste0("sd6_", k, "yrpast")
+    
+    dt[, (colname) :=
+         frollapply(year, n = k, align = "right",
+                    FUN = function(yrs) {
+                      subdt <- .SD[year %in% yrs]   # only this reach_id’s rows
+                      val <- 1 - subdt[, (mean(`FALSE`, na.rm=TRUE) / mean(`TRUE`, na.rm=TRUE))]
+                      fifelse(is.na(val) | mean(`TRUE`, na.rm=TRUE) == 0, 1, val)
+                    }),
+       by = reach_id] 
+  }
+  
+  out_sd6_dt <- rolling_sd6_inner(base_dt, k = time_window_yr)
+  out_sd6_dt[, `:=`(ym=NULL, dry_6mo=NULL, `FALSE`=NULL, `TRUE`=NULL)]
+  
+  return(out_sd6_dt)
+}
+
+
 #------ compute_hydrostats_intermittence ---------------------------------------
 #' Compute intermittence statistics for hydrological data.
 #'
@@ -391,49 +461,6 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
                                              scale = 'all') {
   rollingstep_yr <- c(10, 30)
   
-  # -- Compute network-wide statistics ---------------------------------------
-  if (scale %in% c('all', 'drn')) {
-    #minimum 7-day and 30-day average over previous year
-    #average in previous 10, 30, 45, 60, 90, 120, 180, 365, 365*5, 365*10 
-    
-    #Total network length for normalization
-    total_reach_length <- unique(in_hydromod_dt, by='reach_id')[, sum(reach_length)]
-    
-    #RelFlow: Proportion of network length with flowing conditions (opposite of RelInt)
-    relF_dt <- in_hydromod_dt[isflowing == 1,
-                              list(relF = sum(reach_length)/total_reach_length)
-                              , by=.(date, hy)] %>%
-      setorder(date)
-    
-    #ggplot(relF_dt, aes(x=date, y=relF)) + geom_line()
-    
-    #Compute min 7-day and 30-day relF
-    relF_dt[, `:=`(
-      relF7mean = frollmean(x=relF, n=7, align='center', na.rm=T),
-      relF30mean = frollmean(x=relF, n=30, align='center', na.rm=T)
-    )] %>%
-      .[, `:=`(
-        relF7mean_yrmin = min(relF7mean, na.rm=T),
-        relF30mean_yrmin = min(relF30mean, na.rm=T)
-      ), by=hy] 
-    
-    
-    #Compute previous mean over many windows
-    meanstep <- c(10, 30, 60, 90, 120, 180, 365, 365*5, 365*10)
-    relF_dt[, paste0("relF", meanstep, "past") := frollmean(relF, meanstep, na.rm=T)]
-    
-    
-    relF_dt_yr <- relF_dt[!duplicated(hy), .(relF7mean_yrmin, hy)] %>%
-      .[, paste0("relF7mean_yrmin_cv", rollingstep_yr, "yrpast") :=  
-          frollapply(relF7mean_yrmin, n=rollingstep_yr, 
-                     FUN=function(x) sd(x, na.rm=T)/mean(x, na.rm=T), 
-                     align='right')
-      ] %>% 
-      .[, relF7mean_yrmin := NULL]
-    
-    relF_dt <- merge(relF_dt, relF_dt_yr, by='hy')
-  }
-  
   # -- Compute statistics for specific reaches -------------------------------
   # DurD: DryDuration
   # PDurD: DryDuration_relative_to_longterm
@@ -444,37 +471,12 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
       setorderv(c('reach_id', 'date'))
     
     #Compute duration of no-flow periods and time since last no-flow period #PrdD: prior days to last dry/pool/flowing event
-    hydromod_dt_sites[, `:=`(noflow_period = rleid(isflowing==0), #Compute no-flow periods
-                             last_noflow = zero_lomf(isflowing==0, first=FALSE) #Compute row index of last no flow day
-    ), by=.(reach_id)] %>%
-      .[isflowing == 1, noflow_period := NA] %>% 
-      .[last_noflow ==0, last_noflow := NA] %>%
-      .[!is.na(noflow_period), noflow_period_dur := .N,  #Compute duration of each no-flow period
-        by = .(noflow_period, reach_id)] %>%
-      .[, last_noflowdate := .SD[last_noflow, date], by = .(reach_id)] %>% #Convert to data
-      .[, PrdD := difftime(date, last_noflowdate, units='days'), #Compute time to last no flow date
-        by = .(reach_id)] %>%
-      .[, last_noflow := NULL]
+    preformat_intermittence_stats(hydromod_dt_sites)
+    
     
     # ggplot(hydromod_dt_sites, aes(x=date, y=time_to_lastzero)) +
     #   geom_line() +
     #   facet_wrap(~id)
-    
-    #Compute monthly statistics --------------------------------------------------
-    # qstats_absolute <- hydromod_dt_sites[,
-    #                             list(
-    #                               DurD = sum(isflowing==0),
-    #                               FreD = length(na.omit(unique(noflow_period, na.rm=T))) #faster than uniqueN
-    #                             ),
-    #                             by = .(month, hy, reach_id)
-    # ]
-    # 
-    # monthly_qstats_relative <- compute_ecdf_multimerge(
-    #   in_dt = qstats_absolute,
-    #   ecdf_columns = c('DurD', 'FreD'),
-    #   grouping_columns = c('reach_id', 'month'), 
-    #   keep_column = 'hy',
-    #   na.rm=TRUE)
     
     #Compute moving-window DurD and FreD statistics --------------------------------------------
     rollingstep_short <- c(10, 30, 60, 90, 120, 180)
@@ -482,28 +484,30 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
     rollingstep <- c(rollingstep_short, rollingstep_long)
     hydromod_dt_sites[, paste0("DurD", rollingstep, "past") :=  
                         frollapply(isflowing, n=rollingstep, 
-                                   FUN=function(x) sum(x==0), 
+                                   FUN=function(x) sum(x==0)/length(x[!is.na(x)]), 
                                    align='right'), by = .(reach_id)
     ]
-    hydromod_dt_sites[, paste0("FreD", rollingstep, "past") := 
-                        frollapply(noflow_period, n=rollingstep, 
-                                   FUN = function(x) { #45% faster than using na.omit; 75% faster than uniqueN
-                                     ux <- unique(x[!is.na(x)])
-                                     length(ux)
-                                   },
-                                   align='right')  
-                      , by = .(reach_id)
+
+    hydromod_dt_sites[
+      , paste0("FreD", rollingstep, "past") :=
+        frollapply(
+          seq_len(.N), n = rollingstep,
+          FUN = function(idx) {
+            # get the slice of the rolling window
+            i <- idx
+            x_noflow <- noflow_period[i]
+            x_valid  <- isflowing[i]  # use isflowing to know which days are valid
+            
+            valid_idx <- !is.na(x_valid)
+            if (!any(valid_idx)) return(NA_real_)
+            
+            # number of unique no-flow events in this window
+            length(unique(x_noflow[!is.na(x_noflow)]))/length(valid_idx)
+          },
+          align = "right"
+        ),
+      by = reach_id
     ]
-    
-    # hydromod_dt_sites[, paste0("MaxConD", rollingstep, "past") :=
-    #                     nafill(
-    #                       frollapply(noflow_period_dur, n=rollingstep,
-    #                                  FUN = function(x) max(x, na.rm=T),
-    #                                  align='right')
-    #                       , fill = 0
-    #                     ),
-    #                   by = .(reach_id)
-    # ]
     
     #Compute ecdf value by day of year for moving windows
     rolling_column_names_short <- expand.grid(c('DurD', 'FreD'), 
@@ -531,11 +535,10 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
       keep_column = 'date',
       na.rm=TRUE)
     
-    
     #Compute annual timing and interannual variability--------------------------
     hydromod_dt_yr <- hydromod_dt_sites[, list(
-      DurD_yr = sum(isflowing==0)/.N,
-      FreD_yr = length(unique(noflow_period[!is.na(noflow_period)])),
+      DurD_yr = sum(isflowing==0)/.SD[!is.na(isflowing), .N],
+      FreD_yr = length(unique(noflow_period[!is.na(noflow_period)]))/.SD[!is.na(isflowing), .N],
       FstDrE = .SD[isflowing==0, min(doy, na.rm=T)],
       meanConD_yr = .SD[!duplicated(noflow_period), mean(noflow_period_dur, na.rm=T)]             
     ), by=.(reach_id, year = as.integer(format(date, '%Y')))] %>%
@@ -590,53 +593,8 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
     ] 
     
     #SD6: seasonal predictability of no-flow events (Gallart et al. 2012)-------
-    #Identify contiguous six months with the most zero-flow days for computing Sd6
-    daily_classified <- hydromod_dt_sites[, identify_drywet6mo(.SD), by = reach_id]
-    
-    # Add month
-    daily_classified[, ym := format(date, "%Y%m")]
-    
-    # Collapse by year-month based on majority vote (>50% of days in dry period)
-    monthly_classified <- daily_classified[
-      , .(dry_6mo = mean(dry_6mo, na.rm = TRUE) > 0.5),  
-      by = .(reach_id, ym)
-    ] %>%
-      .[, year := as.integer(substr(ym, 1, 4))]
-    
-    # For each month, check if no-flow occurred
-    hydromod_dt_sites[, ym := format(date, "%Y%m")]
-    noflow_by_month <- hydromod_dt_sites[
-      , .(has_noflow = any(!is.na(noflow_period))), 
-      by = .(reach_id, ym)]
-    
-    # Join no-flow with dry/wet classification
-    monthly_dt <- merge(noflow_by_month, monthly_classified,
-                        by = c('reach_id', 'ym'), all.x=T)
-    
-    # Count number of months with no-flow per year & season
-    base_dt <- monthly_dt[
-      , .(n_months = sum(has_noflow, na.rm = TRUE)), 
-      by = .(year, dry_6mo, reach_id)
-    ] %>%
-      dcast(year + reach_id ~ dry_6mo, value.var = "n_months", fill = 0)
-    
-    #Compute SD6 in a rolling window
-    rolling_sd6 <- function(dt, k) {
-      colname <- paste0("sd6_", k, "yrpast")
-      
-      dt[, (colname) :=
-           frollapply(year, n = k, align = "right",
-                      FUN = function(yrs) {
-                        subdt <- .SD[year %in% yrs]   # only this reach_id’s rows
-                        val <- 1 - subdt[, (mean(`FALSE`, na.rm=TRUE) / mean(`TRUE`, na.rm=TRUE))]
-                        fifelse(is.na(val) | mean(`TRUE`, na.rm=TRUE) == 0, 1, val)
-                      }),
-         by = reach_id] 
-    }
-    
-    sd6_dt <- copy(base_dt)
-    sd6_dt <- rolling_sd6(sd6_dt, 10)
-    sd6_dt <- rolling_sd6(sd6_dt, 30)
+    sd6_10yr_dt <- compute_rolling_sd6(dt=hydromod_dt_sites, 10)
+    sd6_30yr_dt <- compute_rolling_sd6(dt=hydromod_dt_sites, 30)
     
     #Merge everything
     hydromod_dt_sites <- merge(in_sites_dt[, .(site, reach_id)], 
@@ -645,12 +603,56 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
                                allow.cartesian = T) %>%
       .[, year := as.integer(format(date, '%Y'))] %>%
       merge(hydromod_dt_yr, by=c('reach_id', 'year')) %>%
-      merge(sd6_dt, by=c('reach_id', 'year')) %>%
-      .[, `:=`(ym=NULL, dry_6mo=NULL, `FALSE`=NULL, `TRUE`=NULL)] %>%
+      merge(sd6_10yr_dt, by=c('reach_id', 'year')) %>%
+      merge(sd6_30yr_dt, by=c('reach_id', 'year')) %>%
       setorderv(c('reach_id', 'date'))
     
   }
   
+  # -- Compute network-wide statistics ---------------------------------------
+  if (scale %in% c('all', 'drn')) {
+    #minimum 7-day and 30-day average over previous year
+    #average in previous 10, 30, 45, 60, 90, 120, 180, 365, 365*5, 365*10 
+    
+    #Total network length for normalization
+    total_reach_length <- unique(in_hydromod_dt, by='reach_id')[, sum(reach_length)]
+    
+    #RelFlow: Proportion of network length with flowing conditions (opposite of RelInt)
+    relF_dt <- in_hydromod_dt[isflowing == 1,
+                              list(relF = sum(reach_length)/total_reach_length)
+                              , by=.(date, hy)] %>%
+      setorder(date)
+    
+    #ggplot(relF_dt, aes(x=date, y=relF)) + geom_line()
+    
+    #Compute min 7-day and 30-day relF
+    relF_dt[, `:=`(
+      relF7mean = frollmean(x=relF, n=7, align='center', na.rm=T),
+      relF30mean = frollmean(x=relF, n=30, align='center', na.rm=T)
+    )] %>%
+      .[, `:=`(
+        relF7mean_yrmin = min(relF7mean, na.rm=T),
+        relF30mean_yrmin = min(relF30mean, na.rm=T)
+      ), by=hy] 
+    
+    
+    #Compute previous mean over many windows
+    meanstep <- c(10, 30, 60, 90, 120, 180, 365, 365*5, 365*10)
+    relF_dt[, paste0("relF", meanstep, "past") := frollmean(relF, meanstep, na.rm=T)]
+    
+    
+    relF_dt_yr <- relF_dt[!duplicated(hy), .(relF7mean_yrmin, hy)] %>%
+      .[, paste0("relF7mean_yrmin_cv", rollingstep_yr, "yrpast") :=  
+          frollapply(relF7mean_yrmin, n=rollingstep_yr, 
+                     FUN=function(x) sd(x, na.rm=T)/mean(x, na.rm=T), 
+                     align='right')
+      ] %>% 
+      .[, relF7mean_yrmin := NULL]
+    
+    relF_dt <- merge(relF_dt, relF_dt_yr, by='hy')
+  }
+  
+
   # Output -----------------------------
   out_list <- list()
   if (scale %in% c('all', 'site')) {
@@ -5008,10 +5010,10 @@ summarize_sites_hydrocon <- function(in_hydrocon_compiled
     , list( #`:=`
       upstream_area_net = .SD[1, upstream_area_net],
       DurD_samp = sum(isflowing==0)/.N, #Total number of no-flow days 
-      DurD3650past = .SD[.N, DurD3650past]/3650,
+      DurD3650past = .SD[.N, DurD3650past],
       PDurD365past = .SD[.N, PDurD365past],
-      FreD_samp = length(.SD[!is.na(noflow_period), unique(noflow_period)])*.N/365, #Total number of no-flow periods 
-      FreD3650past = .SD[.N, FreD3650past]/10,
+      FreD_samp = length(.SD[!is.na(noflow_period), unique(noflow_period)])/.N, #Total number of no-flow periods per day
+      FreD3650past = .SD[.N, FreD3650past],
       PFreD365past = .SD[.N, PFreD365past],
       DurD_max_samp = nafill(as.integer(max(noflow_period_dur, na.rm=T)), fill=0), #Maximum duration of no-flow period
       DurD_avg_samp = nafill(.SD[!duplicated(noflow_period), mean(noflow_period_dur, na.rm=T)], fill=0), #AVerage duration of no-flow period (same as DurD/FreD)
@@ -5220,7 +5222,22 @@ summarize_env <- function(in_env_dt,
 #   wp1_data_gouv_dir,
 #   "projections",
 #   "Albarine_flowstate_projection_gfdl-esm4_ssp585_2015-2100_spatially-distributed.nc")
+# 
+# hydroref_path <- file.path(
+#   wp1_data_gouv_dir,
+#   "projections",
+#   "Albarine_flowstate_projection_gfdl-esm4_ssp370_1985-2014_spatially-distributed.nc")
+
+# hydroproj_path <- file.path(
+#     wp1_data_gouv_dir,
+#     "projections",
+#     "Albarine_discharge_projection_gfdl-esm4_ssp585_2015-2100_spatially-distributed.nc")
+
+# subset_sites = T
+# in_sites_dt <- tar_read(sites_dt)
 # varname = 'flowstate'
+# in_drn_dt <- drn_dt
+# min_date = as.Date('1990-01-01')
 
 #' @title Summarize drainage basin hydrological projection stats
 #' @description This function processes a NetCDF file containing hydrological 
@@ -5229,8 +5246,13 @@ summarize_env <- function(in_env_dt,
 #' @param hydroproj_path A character string specifying the path to the NetCDF file.
 #' @return A data.table containing summarized flow state statistics by year
 #'  for each reach, along with associated metadata.
-summarize_drn_hydroproj_stats <- function(hydroproj_path) {
-  
+summarize_drn_hydroproj_stats <- function(hydroproj_path,
+                                          hydroref_path,
+                                          subset_sites=TRUE,
+                                          in_sites_dt=NULL,
+                                          in_drn_dt=NULL,
+                                          min_date = as.Date('1990-01-01'),
+                                          include_metadata = TRUE) {
   #Decompose name
   metadata_dt <- str_split(basename(hydroproj_path), '_')[[1]] %>%
     setNames(c('catchment', 'varname', 'time_period', 'gcm', 
@@ -5238,38 +5260,171 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path) {
     as.list %>%
     data.frame %>%
     setDT %>%
-    .[, path := hydroproj_path]
+    .[catchment == "Lepsamanjoki", catchment := "Lepsamaanjoki"] %>%
+    merge(in_drn_dt[, .(catchment, country)], by='catchment') %>%
+  .[, path := hydroproj_path]
+
+  #Import and format reference hydrological data -------------------------------
+  nc_ref <- nc_open(hydroref_path) # open netcdf file
+  reachID_ref <- ncvar_get(nc_ref, "reachID") # get list of reaches IDs
+  dates_ref <- ncvar_get(nc_ref, "date") # get dates of simulation period
+  dates_ref <- as.Date(dates_ref, origin="1950-01-01") # convert dates into R date format
   
+  #Get simulated variable from the NetCDF file
+  hydro_ref_dt <- get_nc_var_present(nc = nc_ref, varname = metadata_dt$varname, # 0=dry, 1=flowing
+                                     reachID = reachID_ref, dates = dates_ref,
+                                     selected_sims = NULL)$data_all
+  
+  
+  #Import and format projected hydrological data -------------------------------
   nc <- nc_open(hydroproj_path) # open netcdf file
   reachID <- ncvar_get(nc, "reachID") # get list of reaches IDs
   dates <- ncvar_get(nc, "date") # get dates of simulation period
   dates <- as.Date(dates, origin="1950-01-01") # convert dates into R date format
   
-  # get simulated variable from the NetCDF file
-  hydro_dt <- get_nc_var_present(nc = nc, varname = metadata_dt$varname, # 0=dry, 1=flowing
+  #Get simulated variable from the NetCDF file
+  hydro_proj_dt <- get_nc_var_present(nc = nc, varname = metadata_dt$varname, # 0=dry, 1=flowing
                                  reachID = reachID, dates = dates,
-                                 selected_sims = NULL) 
-  setnames(hydro_dt$data_all, 'flowstate', 'isflowing', skip_absent = TRUE)
-  metadata_dt[varname=='flowstate', varname:='isflowing']
+                                 selected_sims = NULL)$data_all 
   
-  # qsim_samp_dt <- qsim_country$data_all[
-  #   (date >= min(in_samp_date_range)) &
-  #     (date <= max(in_samp_date_range)),  
-  #   list(qsim_avg_samp = mean(qsim, na.rm=T)), 
-  #   by=reach_id] 
+  # Bind reference and projected data ------------------------------------------
+  hydro_dt <- rbind(hydro_ref_dt[date<hydro_proj_dt[,min(date)],],
+                    hydro_proj_dt[date>hydro_ref_dt[,max(date)],])
+  remove(list=c('nc_ref', 'nc', 'hydro_ref_dt', 'hydro_proj_dt'))
   
-  # compute yearly drying duration stats if the variable is 'isflowing'
-  if (metadata_dt$varname == 'isflowing') {
-    stats_dt <- hydro_dt$data_all[(date > as.Date('2014-12-31')) &
-                                    (date < as.Date('2100-01-01')), 
-                                  list(DurD_yr = sum(isflowing==0)/.N), 
-                                  by=.(reach_id, format(date, '%Y'))] %>%
-      setnames('format', 'year')
+  setnames(hydro_dt, 
+           c('flowstate', 'discharge'),
+           c('isflowing', 'qsim'), 
+           skip_absent = TRUE)
+  
+  # Subset reaches to those where there are sampling sites ---------------------
+  if (subset_sites && (!is.null(in_sites_dt))) {
+    #Prepare site data for subsetting hydrological data
+    sites_reach_id <- in_sites_dt[country %in% metadata_dt$country, reach_id]
+    hydro_dt <- hydro_dt[reach_id %in% sites_reach_id,]
   }
   
-  return(cbind(stats_dt, metadata_dt[, .(catchment, gcm, scenario)])
-  )
+  #Add 30 years of NAs at the beginning to avoid NAs at the beginning ----------
+  hydro_dt <- rbind(
+    hydro_dt[, list(date=seq(min(date)-lubridate::years(30), 
+                                      min(date)-lubridate::days(1), 
+                                      by="day")),
+                      by=reach_id],
+    hydro_dt,
+    fill=T) %>%
+    setorderv(c('reach_id', 'date'))
+
+  #Compute yearly discharge statistics -----------------------------------------
+  if (metadata_dt$varname == 'discharge') {
+    metadata_dt[varname=='discharge', varname:='qsim']
+    
+    stats_dt_yr <- hydro_dt[, year := year(date)] %>%
+      .[(date >= min_date - lubridate::years(30)) 
+        & (date < as.Date('2100-01-01')),
+        list(meanQ = mean(qsim, na.rm = TRUE)),
+        by = .(reach_id, year)] %>%
+      .[ order(reach_id, year),
+         meanQ3650past := frollmean(meanQ, 10, na.rm = TRUE, align="right"),
+         by = reach_id] %>%
+      .[year >= year(min_date),]
+  }
+  
+  # compute yearly drying duration stats ---------------------------------------
+  if (metadata_dt$varname == 'flowstate') {
+    metadata_dt[varname=='flowstate', varname:='isflowing']
+    
+    stats_dt <- hydro_dt[(date >= min_date-lubridate::years(30)) &
+                                    (date < as.Date('2100-01-01')),]
+    stats_dt[, `:=`(doy  = as.numeric(format(date,"%j")),
+                    year =  as.integer(format(date, '%Y'))
+                    )]
+    
+    #Compute duration of no-flow periods and time since last no-flow period #PrdD: prior days to last dry/pool/flowing event
+    preformat_intermittence_stats(stats_dt)
+    
+    #Compute annual statistics of duration, freaquency, timing and variability----------
+    stats_dt_yr <- stats_dt[, list(
+      DurD_yr = sum(isflowing==0, na.rm=T)/.SD[!is.na(isflowing), .N],
+      FreD_yr = length(unique(noflow_period[!is.na(noflow_period)]))/.SD[!is.na(isflowing), .N],
+      # Store unique noflow_period IDs per year (for 10-year rolling union later)
+      noflow_periods = list(unique(noflow_period[!is.na(noflow_period)])),
+      n_valid = .SD[!is.na(isflowing), .N],
+      FstDrE = .SD[isflowing==0, min(doy, na.rm=T)],
+      meanConD_yr = .SD[!duplicated(noflow_period), mean(noflow_period_dur, na.rm=T)]             
+    ), by=.(reach_id, year)] %>%
+      .[is.infinite(FstDrE), FstDrE := 365] %>% #For sites that don't dry, set it to 365
+      .[is.na(meanConD_yr), meanConD_yr := 0] %>%
+      setorder(reach_id, year)
+    
+    #--- Compute FreD3650past (unique noflow_periods over the past 10 years) ------
+    stats_dt_yr[
+      , FreD3650past :=
+        # Apply over each row: union of the current and previous 9 years' lists
+        sapply(seq_len(.N), function(i) {
+          length(unique(unlist(noflow_periods[pmax(1, i-9):i])))/sum(n_valid[pmax(1, i-9):i])
+        }),
+      by = reach_id]
+    
+    #Drop the list column to keep the table tidy
+    stats_dt_yr[, `:=`(noflow_periods =NULL,
+                       n_valid=NULL)]
+    
+    #--- Compute ECDFs  ------------------------------------------------------
+    stats_dt_yr <- compute_ecdf_multimerge(
+      in_dt = stats_dt_yr,
+      ecdf_columns = c("DurD_yr", "FreD_yr"),
+      grouping_columns = "reach_id",
+      keep_column = "year",
+      na.rm = TRUE
+    )
+
+    #CV of annual number of no-flow days----------------------------------------
+    rollingstep_yr <- c(10, 30)
+    stats_dt_yr[
+      , paste0("DurD_CV", rollingstep_yr, "yrpast") :=  
+        frollapply(DurD_yr, n=rollingstep_yr, 
+                   FUN=function(x) fifelse(mean(x, na.rm=T)==0,
+                                           0,
+                                           sd(x, na.rm=T)/mean(x, na.rm=T)
+                   ), 
+                   align='right')
+      , by=.(reach_id)
+    ] 
+    
+    #CV of average annual event duration----------------------------------------
+    stats_dt_yr[
+      , paste0("meanConD_CV", rollingstep_yr, "yrpast") :=  
+        frollapply(meanConD_yr, n=rollingstep_yr, 
+                   FUN=function(x) fifelse(mean(x, na.rm=T)==0,
+                                           0,
+                                           sd(x, na.rm=T)/mean(x, na.rm=T)
+                   ), 
+                   align='right')
+      , by=.(reach_id)
+    ] 
+    
+    #SD No-flow start date - Julian day of the first drying event---------------
+    stats_dt_yr[
+      , paste0("FstDrE_SD", rollingstep_yr, "yrpast") :=  
+        frollapply(FstDrE, n=rollingstep_yr, 
+                   FUN=function(x) sd(x, na.rm=T)
+                   , 
+                   align='right')
+      , by=.(reach_id)
+    ] 
+    
+    #Format data before export -------------------------------------------------
+    setorderv(stats_dt_yr, c('reach_id', 'year'))
+    
+  }
+  
+  if (include_metadata) {
+    stats_dt_yr <- cbind(stats_dt_yr, metadata_dt[, .(country, gcm, scenario)])
+  }
+  
+  return(stats_dt_yr[year >= year(min_date),])
 }
+
 
 #------ merge_allvars_sites ----------------------------------------------------
 # in_country <- 'Spain'
@@ -6041,9 +6196,9 @@ ordinate_local_env <- function(in_allvars_dt) {
 #' @param in_hydrostats_net_proj A data frame with projected hydrological statistics for the river network.
 #' @return A list containing two spatial objects: one for historical prediction 
 #'      points and one for projected prediction points.
-create_ssn_preds <- function(in_network_path,
-                             in_hydrostats_net_hist,
-                             in_hydrostats_net_proj) {
+create_ssn_pred_pts <- function(in_network_path,
+                                in_hydrostats_net_hist,
+                                in_hydrostats_net_proj) {
   
   # 1. Process the river network data
   # load and combine all country-specific river network shapefiles
@@ -8257,8 +8412,13 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
   )
   
   #Transform some variables  
-  ssn_miv$obs$meanQ3650past_sqrt <- sqrt(ssn_miv$obs$meanQ3650past)
-  
+  ssn_miv$obs %>%
+    mutate(meanQ3650past_sqrt = sqrt(meanQ3650past))
+  ssn_miv$preds$preds_hist %>%
+    mutate(meanQ3650past_sqrt = sqrt(meanQ3650past))
+  ssn_miv$preds$preds_proj %>%
+    mutate(meanQ3650past_sqrt = sqrt(meanQ3650past))
+    
   allvars_dt <- as.data.table(ssn_miv$obs) %>%
     setorderv(c('country', 'site')) 
 
@@ -9101,6 +9261,8 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
   )
   
   ssn_miv$obs$basin_area_km2_log10 <- log10(ssn_miv$obs$basin_area_km2)
+  ssn_miv$preds$preds_hist$basin_area_km2_log10 <- log10(ssn_miv$preds$preds_hist$basin_area_km2)
+  ssn_miv$preds$preds_proj$basin_area_km2_log10 <- log10(ssn_miv$preds$preds_proj$basin_area_km2)
   
   allvars_dt <- as.data.table(ssn_miv$obs) %>%
     setorderv(c('country', 'site')) 
@@ -10018,6 +10180,8 @@ model_dia_sedi_richness_yr <- function(in_ssn_eu_summarized,
   )
   
   ssn_dia_sedi$obs$meanQ3650past_log10 <- log10(ssn_dia_sedi$obs$meanQ3650past)
+  ssn_dia_sedi$preds$preds_hist$meanQ3650past_log10 <- log10(ssn_dia_sedi$preds$preds_hist$meanQ3650past)
+  ssn_dia_sedi$preds$preds_proj$meanQ3650past_log10 <- log10(ssn_dia_sedi$preds$preds_proj$meanQ3650past)
   
   
   allvars_dt <- as.data.table(ssn_dia_sedi$obs) %>%
@@ -10537,6 +10701,9 @@ model_dia_biof_richness_yr <- function(in_ssn_eu_summarized,
   )
   
   ssn_dia_biof$obs$meanQ3650past_log10 <- log10(ssn_dia_biof$obs$meanQ3650past)
+  ssn_dia_biof$preds$preds_hist$meanQ3650past_log10 <- log10(ssn_dia_biof$preds$preds_hist$meanQ3650past)
+  ssn_dia_biof$preds$preds_proj$meanQ3650past_log10 <- log10(ssn_dia_biof$preds$preds_proj$meanQ3650past)
+  
   
   allvars_dt <- as.data.table(ssn_dia_biof$obs) %>%
     setorderv(c('country', 'site')) 
@@ -11017,6 +11184,8 @@ model_fun_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   )
   
   ssn_fun_sedi$obs$STcon_m10_directed_avg_samp_log10 <- log10(ssn_fun_sedi$obs$STcon_m10_directed_avg_samp)
+  ssn_fun_sedi$preds$preds_hist$STcon_m10_directed_avg_samp_log10 <- log10(ssn_fun_sedi$preds$preds_hist$STcon_m10_directed_avg_samp)
+  ssn_fun_sedi$preds$preds_proj$STcon_m10_directed_avg_samp_log10 <- log10(ssn_fun_sedi$preds$preds_proj$STcon_m10_directed_avg_samp)
   
 
   allvars_dt <- as.data.table(ssn_fun_sedi$obs) %>%
@@ -11505,6 +11674,14 @@ model_fun_sedi_richness_yr <- function(in_ssn_eu_summarized,
     log10(ssn_fun_sedi$obs$Fdist_mean_10past_undirected_avg_samp + 1)
   ssn_fun_sedi$obs$basin_area_km2_log10 <- log10(ssn_fun_sedi$obs$basin_area_km2)
   
+  ssn_fun_sedi$preds$preds_hist$Fdist_mean_10past_undirected_avg_samp_log10 <- 
+    log10(ssn_fun_sedi$preds$preds_hist$Fdist_mean_10past_undirected_avg_samp + 1)
+  ssn_fun_sedi$preds$preds_hist$basin_area_km2_log10 <- log10(ssn_fun_sedi$preds$preds_hist$basin_area_km2)
+  
+  ssn_fun_sedi$preds$preds_proj$Fdist_mean_10past_undirected_avg_samp_log10 <- 
+    log10(ssn_fun_sedi$preds$preds_proj$Fdist_mean_10past_undirected_avg_samp + 1)
+  ssn_fun_sedi$preds$preds_proj$basin_area_km2_log10 <- log10(ssn_fun_sedi$preds$preds_proj$basin_area_km2)
+  
   allvars_dt <- as.data.table(ssn_fun_sedi$obs) %>%
     setorderv(c('country', 'site')) 
   
@@ -11989,6 +12166,9 @@ model_fun_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
   )
   
   ssn_fun_biof$obs$DurD_CV10yrpast_sqrt <- sqrt(ssn_fun_biof$obs$DurD_CV10yrpast)
+  ssn_fun_biof$preds$preds_hist$DurD_CV10yrpast_sqrt <- sqrt(ssn_fun_biof$preds$preds_hist$DurD_CV10yrpast)
+  ssn_fun_biof$preds$preds_proj$DurD_CV10yrpast_sqrt <- sqrt(ssn_fun_biof$preds$preds_proj$DurD_CV10yrpast)
+  
   
   allvars_dt <- as.data.table(ssn_fun_biof$obs) %>%
     setorderv(c('country', 'site')) 
@@ -12972,6 +13152,8 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   )
   
   ssn_bac_sedi$obs$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_sedi$obs$STcon_m10_directed_avg_samp)
+  ssn_bac_sedi$preds$preds_hist$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_sedi$preds$preds_hist$STcon_m10_directed_avg_samp)
+  ssn_bac_sedi$preds$preds_proj$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_sedi$preds$preds_proj$STcon_m10_directed_avg_samp)
   
   allvars_dt <- as.data.table(ssn_bac_sedi$obs) %>%
     setorderv(c('country', 'site')) 
@@ -13967,6 +14149,8 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
   )
   
   ssn_bac_biof$obs$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_biof$obs$STcon_m10_directed_avg_samp)
+  # ssn_bac_biof$preds$preds_hist$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_biof$preds$preds_hist$STcon_m10_directed_avg_samp)
+  # ssn_bac_biof$preds$preds_proj$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_biof$preds$preds_proj$STcon_m10_directed_avg_samp)
   
   allvars_dt <- as.data.table(ssn_bac_biof$obs) %>%
     setorderv(c('country', 'site')) 
@@ -14951,11 +15135,6 @@ model_bac_biof_richness_yr <- function(in_ssn_eu_summarized,
   ))
 }
 
-################################################################################
-# Sub-select models (richness vs invsimpson)------------------------------------
-# Choose models to project under climate change --------------------------------
-################################################################################
-
 #------ get_perf_table_multiorganism-------------------------------------------
 
 get_perf_table_multiorganism <- function(in_mod_list) {
@@ -15048,221 +15227,8 @@ plot_ssn_mod_diagplot <- function(in_mod_fit,
   return(out_p)
 }
 
-#------ plot_ssn2_marginal_effects ---------------------------------------------
-# tar_load(ssn_mods_miv_yr)
-# write_plots=T
-# out_dir = figdir
-# in_mod <- ssn_mods_miv_yr$ssn_mod_fit_best
-
-# #Plot the "marginal" effect of each hydrological variable while
-# #keeping surface area at global mean and global intercept
-#' Plot Marginal Effects of Variables from a Fitted SSN2 Model
-#'
-#' This function is designed to visualize the marginal effect of a single
-#' hydrological variable on the predicted response, while holding a second
-#' variable constant at its mean. It handles both main effects and interaction
-#' terms with a grouping factor.
-#'
-#' @param in_mod A fitted SSN2 model object.
-#' @param hydro_var A character string specifying the name of the hydrological
-#'   covariate to vary on the x-axis.
-#' @param fixed_var A character string specifying the name of the covariate to
-#'   hold constant at its mean.
-#' @param fixed_var_mean The mean value of the fixed variable.
-#' @param group_var A character string specifying the name of the grouping
-#'   factor (e.g., "country"). Defaults to "country".
-#' @param n_points An integer specifying the number of points to use for the
-#'   prediction grid. Defaults to 100.
-#'
-#' @return A ggplot object visualizing the marginal effects.
-plot_ssn_summarized_marginal <- function(
-    in_mod,                # fitted SSN2 model
-    hydro_var,          # the covariate you want to VARY
-    fixed_var,          # the covariate you want to FIX at mean
-    fixed_var_mean,
-    group_var = "country",
-    n_points = 100
-) {
-  
-  in_mod_best <- ssn_mods_miv_yr$ssn_mod_fit_best
-  in_ssn <- in_mod_best$ssn.object
-  
-  emm_best_stream_type <- emmeans(in_mod_best, 
-                                  data=in_mod_best$ssn.object$obs, 
-                                  specs=~stream_type|country,
-                                  type = "response") %>%
-    data.frame %>%
-    ggplot(aes(x=country, y=prob, color=stream_type)) +
-    geom_point(size=2) +
-    geom_segment(aes(y=asymp.LCL, yend=asymp.UCL), linewidth=2, alpha=0.5) +
-    scale_color_manual(
-      name = 'Stream type',
-      labels = c('Perennial', 'Non-perennial'),
-      values=c('#2b8cbe', '#feb24c')) +
-    scale_y_continuous(name='Estimated marginal mean: mean invsimpson') +
-    # coord_flip() +
-    theme_classic() 
-  
-  
-  ggsave(
-    filename = file.path(resdir,
-                         'figures',
-                         'emm_miv_yr_best_stream_type.png'),
-    plot = emm_best_stream_type, 
-    width=5, height=5)
-  
-  
-  # Define a grid of basin areas
-  newdat_area <- data.frame(
-    basin_area_km2 = seq(round(100*min(in_ssn$obs$basin_area_km2, na.rm = TRUE)),
-                         round(100*max(in_ssn$obs$basin_area_km2, na.rm = TRUE)),
-                         length.out = 50)/100
-  )
-  
-  emm_best_areas <- emmeans(in_mod_best, 
-                            data=in_ssn$obs,
-                            ~ log10(basin_area_km2) | country, 
-                            at = list(basin_area_km2 = newdat_area$basin_area_km2),
-                            type='response') %>%
-    data.frame() %>%
-    setDT %>%
-    ggplot(aes(x=basin_area_km2, fill=country)) +
-    geom_line(aes(y=prob, color=country), linewidth=2) +
-    geom_ribbon(aes(ymin=asymp.LCL, ymax=asymp.UCL), alpha=0.1) +
-    scale_x_continuous(name=expression('Basin area -'~km^2)) +
-    scale_y_continuous(name='Estimated marginal mean: mean richness') +
-    theme_bw()
-  
-  ggsave(
-    filename = file.path(resdir,
-                         'figures',
-                         'emm_miv_yr_best_area.png'),
-    plot =emm_best_areas, 
-    width=5, height=5)
-  
-  
-  #################################################################
-  in_mod_predict <- ssn_mods_miv_yr$ssn_mod_fit
-  
-  # 
-  newdat_durd <- data.frame(
-    DurD_samp = seq(0, 0.75, 0.01)
-  )
-  
-  emm_predict_durd <- emmeans(in_mod_predict, 
-                              data=in_ssn$obs,
-                              ~ DurD_samp | country, 
-                              at = list(DurD_samp = newdat_durd$DurD_samp),
-                              type='response') %>%
-    data.frame() %>%
-    setDT %>%
-    ggplot(aes(x=DurD_samp, fill=country)) +
-    geom_line(aes(y=prob, color=country), size=2) +
-    geom_ribbon(aes(ymin=asymp.LCL, ymax=asymp.UCL), alpha=0.1) +
-    scale_x_continuous(name='Drying duration during sampling period') +
-    scale_y_continuous(name='Estimated marginal mean: mean richness') +
-    theme_bw()
-  
-  ggsave(
-    filename = file.path(resdir,
-                         'figures',
-                         'emm_miv_yr_final_durd_samp.png'),
-    plot = emm_predict_durd, 
-    width=5, height=5)
-  
-  # Define a grid of basin areas
-  newdat_area <- data.frame(
-    basin_area_km2 = seq(round(100*min(in_ssn$obs$basin_area_km2, na.rm = TRUE)),
-                         round(100*max(in_ssn$obs$basin_area_km2, na.rm = TRUE)),
-                         length.out = 50)/100
-  )
-  
-  emm_predict_areas <- emmeans(in_mod_predict, 
-                               data=in_ssn$obs,
-                               ~ log10(basin_area_km2) | country, 
-                               at = list(basin_area_km2 = newdat_area$basin_area_km2),
-                               type='response') %>%
-    data.frame() %>%
-    setDT %>%
-    ggplot(aes(x=basin_area_km2, fill=country)) +
-    geom_line(aes(y=prob, color=country), size=2) +
-    geom_ribbon(aes(ymin=asymp.LCL, ymax=asymp.UCL), alpha=0.1) +
-    scale_x_continuous(name=expression('Basin area -'~km^2)) +
-    scale_y_continuous(name='Estimated marginal mean: mean richness') +
-    theme_bw()
-  
-  ggsave(
-    filename = file.path(resdir,
-                         'figures',
-                         'emm_miv_yr_best_area.png'),
-    plot =emm_best_areas, 
-    width=5, height=5)
-  
-  
-  # Get fixed effects
-  fixef_dt <- SSN2::tidy(in_mod) %>% as.data.table()
-  
-  # Identify base terms
-  intercept <- fixef_dt[term == "(Intercept)", estimate]
-  b_hydro   <- fixef_dt[term == hydro_var, estimate]
-  b_fixed   <- fixef_dt[term == fixed_var, estimate]
-  
-  # Find interaction slopes for hydro
-  interaction_pattern <- paste0(group_var, ".*:", hydro_var)
-  hydro_interactions <- fixef_dt[grepl(interaction_pattern, term)]
-  hydro_interactions[, group := sub(paste0(group_var, "(.*):.*"), "\\1", term)]
-  hydro_interactions <- hydro_interactions[, .(group = group, b_hydro_group = estimate)]
-  
-  # Find interaction slopes for fixed covariate
-  fixed_pattern <- paste0(fixed_var, ":", group_var)
-  fixed_interactions <- fixef_dt[str_starts(term, fixed(fixed_pattern)),]
-  fixed_interactions[, group := sub(paste0(fixed_var, ":.*", group_var, "(.*)"), "\\1", term)]
-  fixed_interactions <- fixed_interactions[, .(group = group, b_fixed_group = estimate)]
-  
-  # Get observed data to build range & mean
-  mod_obs <- in_mod$ssn.object$obs %>% as.data.table()
-  
-  # Build new data grid: hydro varies, fixed stays constant
-  grid_hydro <- mod_obs[, .(
-    hydro = seq(min(get(hydro_var), na.rm = TRUE),
-                max(get(hydro_var), na.rm = TRUE),
-                length.out = n_points)
-  ), by = group_var]
-  
-  newdata_dt <- copy(grid_hydro)
-  setnames(newdata_dt, old = group_var, new = "group")
-  newdata_dt[, fixed := fixed_var_mean]
-  
-  # Merge interactions
-  newdata_dt <- merge(newdata_dt, hydro_interactions, by = "group", all.x = TRUE)
-  newdata_dt <- merge(newdata_dt, fixed_interactions, by = "group", all.x = TRUE)
-  
-  # Fill NA with 0 if no interaction
-  newdata_dt[is.na(b_hydro_group), b_hydro_group := 0]
-  newdata_dt[is.na(b_fixed_group), b_fixed_group := 0]
-  
-  # Calculate predicted
-  newdata_dt[, predicted :=
-               intercept +
-               (b_hydro + b_hydro_group) * hydro +
-               (b_fixed + b_fixed_group) * fixed
-  ]
-  
-  # Plot
-  out_plot <- ggplot(newdata_dt, aes(x = hydro, y = predicted, color = group)) +
-    geom_line(linewidth = 1) +
-    labs(
-      x = hydro_var,
-      y = "Predicted",
-      color = group_var
-    ) +
-    theme_bw()
-  
-  return(out_plot)
-}
-
 #------ predict_ssn_mod -------------------------------------------------------
-# in_ssn_mods = tar_read(ssn_mods_miv_yr)
+# in_ssn_mods = tar_read(ssn_mods_miv_richness_yr)
 # proj_years <- c(2025, 2026, 2030, 2035, 2041)
 
 
@@ -15291,7 +15257,6 @@ plot_ssn_summarized_marginal <- function(
 predict_ssn_mod <- function(in_ssn_mods, proj_years = NULL) {
   #Contemporary predictions ------------------------------------------------------
   # For the year 2021.
-  
   preds_hist_dt <- augment(in_ssn_mods$ssn_mod_fit 
                            , newdata = 'preds_hist'
                            , drop = FALSE
@@ -15657,3 +15622,216 @@ plot_alpha_cor <- function(in_alphadat_merged, out_dir, facet_wrap=F) {
   ))
 }
 
+
+#------ plot_ssn2_marginal_effects ---------------------------------------------
+# tar_load(ssn_mods_miv_richness_yr)
+# write_plots=T
+# out_dir = figdir
+# in_mod <- ssn_mods_miv_richness_yr$ssn_mod_fit
+
+# #Plot the "marginal" effect of each hydrological variable while
+# #keeping surface area at global mean and global intercept
+#' Plot Marginal Effects of Variables from a Fitted SSN2 Model
+#'
+#' This function is designed to visualize the marginal effect of a single
+#' hydrological variable on the predicted response, while holding a second
+#' variable constant at its mean. It handles both main effects and interaction
+#' terms with a grouping factor.
+#'
+#' @param in_mod A fitted SSN2 model object.
+#' @param hydro_var A character string specifying the name of the hydrological
+#'   covariate to vary on the x-axis.
+#' @param fixed_var A character string specifying the name of the covariate to
+#'   hold constant at its mean.
+#' @param fixed_var_mean The mean value of the fixed variable.
+#' @param group_var A character string specifying the name of the grouping
+#'   factor (e.g., "country"). Defaults to "country".
+#' @param n_points An integer specifying the number of points to use for the
+#'   prediction grid. Defaults to 100.
+#'
+#' @return A ggplot object visualizing the marginal effects.
+plot_ssn_summarized_marginal <- function(
+    in_mod,                # fitted SSN2 model
+    hydro_var,          # the covariate you want to VARY
+    fixed_var,          # the covariate you want to FIX at mean
+    fixed_var_mean,
+    group_var = "country",
+    n_points = 100
+) {
+  
+  in_mod_best <- ssn_mods_miv_yr$ssn_mod_fit_best
+  in_ssn <- in_mod_best$ssn.object
+  
+  emm_best_stream_type <- emmeans(in_mod, 
+                                  data=in_mod$ssn.object$obs, 
+                                  specs=~FreD3650past_z|country,
+                                  type = "response") %>%
+    data.frame %>%
+    ggplot(aes(x=country, y=prob, color=stream_type)) +
+    geom_point(size=2) +
+    geom_segment(aes(y=asymp.LCL, yend=asymp.UCL), linewidth=2, alpha=0.5) +
+    scale_color_manual(
+      name = 'Stream type',
+      labels = c('Perennial', 'Non-perennial'),
+      values=c('#2b8cbe', '#feb24c')) +
+    scale_y_continuous(name='Estimated marginal mean: mean invsimpson') +
+    # coord_flip() +
+    theme_classic() 
+  
+  
+  ggsave(
+    filename = file.path(resdir,
+                         'figures',
+                         'emm_miv_yr_best_stream_type.png'),
+    plot = emm_best_stream_type, 
+    width=5, height=5)
+  
+  
+  # Define a grid of basin areas
+  newdat_area <- data.frame(
+    basin_area_km2 = seq(round(100*min(in_ssn$obs$basin_area_km2, na.rm = TRUE)),
+                         round(100*max(in_ssn$obs$basin_area_km2, na.rm = TRUE)),
+                         length.out = 50)/100
+  )
+  
+  emm_best_areas <- emmeans(in_mod_best, 
+                            data=in_ssn$obs,
+                            ~ log10(basin_area_km2) | country, 
+                            at = list(basin_area_km2 = newdat_area$basin_area_km2),
+                            type='response') %>%
+    data.frame() %>%
+    setDT %>%
+    ggplot(aes(x=basin_area_km2, fill=country)) +
+    geom_line(aes(y=prob, color=country), linewidth=2) +
+    geom_ribbon(aes(ymin=asymp.LCL, ymax=asymp.UCL), alpha=0.1) +
+    scale_x_continuous(name=expression('Basin area -'~km^2)) +
+    scale_y_continuous(name='Estimated marginal mean: mean richness') +
+    theme_bw()
+  
+  ggsave(
+    filename = file.path(resdir,
+                         'figures',
+                         'emm_miv_yr_best_area.png'),
+    plot =emm_best_areas, 
+    width=5, height=5)
+  
+  
+  #################################################################
+  in_mod_predict <- ssn_mods_miv_yr$ssn_mod_fit
+  
+  # 
+  newdat_durd <- data.frame(
+    DurD_samp = seq(0, 0.75, 0.01)
+  )
+  
+  emm_predict_durd <- emmeans(in_mod_predict, 
+                              data=in_ssn$obs,
+                              ~ DurD_samp | country, 
+                              at = list(DurD_samp = newdat_durd$DurD_samp),
+                              type='response') %>%
+    data.frame() %>%
+    setDT %>%
+    ggplot(aes(x=DurD_samp, fill=country)) +
+    geom_line(aes(y=prob, color=country), size=2) +
+    geom_ribbon(aes(ymin=asymp.LCL, ymax=asymp.UCL), alpha=0.1) +
+    scale_x_continuous(name='Drying duration during sampling period') +
+    scale_y_continuous(name='Estimated marginal mean: mean richness') +
+    theme_bw()
+  
+  ggsave(
+    filename = file.path(resdir,
+                         'figures',
+                         'emm_miv_yr_final_durd_samp.png'),
+    plot = emm_predict_durd, 
+    width=5, height=5)
+  
+  # Define a grid of basin areas
+  newdat_area <- data.frame(
+    basin_area_km2 = seq(round(100*min(in_ssn$obs$basin_area_km2, na.rm = TRUE)),
+                         round(100*max(in_ssn$obs$basin_area_km2, na.rm = TRUE)),
+                         length.out = 50)/100
+  )
+  
+  emm_predict_areas <- emmeans(in_mod_predict, 
+                               data=in_ssn$obs,
+                               ~ log10(basin_area_km2) | country, 
+                               at = list(basin_area_km2 = newdat_area$basin_area_km2),
+                               type='response') %>%
+    data.frame() %>%
+    setDT %>%
+    ggplot(aes(x=basin_area_km2, fill=country)) +
+    geom_line(aes(y=prob, color=country), size=2) +
+    geom_ribbon(aes(ymin=asymp.LCL, ymax=asymp.UCL), alpha=0.1) +
+    scale_x_continuous(name=expression('Basin area -'~km^2)) +
+    scale_y_continuous(name='Estimated marginal mean: mean richness') +
+    theme_bw()
+  
+  ggsave(
+    filename = file.path(resdir,
+                         'figures',
+                         'emm_miv_yr_best_area.png'),
+    plot =emm_best_areas, 
+    width=5, height=5)
+  
+  
+  # Get fixed effects
+  fixef_dt <- SSN2::tidy(in_mod) %>% as.data.table()
+  
+  # Identify base terms
+  intercept <- fixef_dt[term == "(Intercept)", estimate]
+  b_hydro   <- fixef_dt[term == hydro_var, estimate]
+  b_fixed   <- fixef_dt[term == fixed_var, estimate]
+  
+  # Find interaction slopes for hydro
+  interaction_pattern <- paste0(group_var, ".*:", hydro_var)
+  hydro_interactions <- fixef_dt[grepl(interaction_pattern, term)]
+  hydro_interactions[, group := sub(paste0(group_var, "(.*):.*"), "\\1", term)]
+  hydro_interactions <- hydro_interactions[, .(group = group, b_hydro_group = estimate)]
+  
+  # Find interaction slopes for fixed covariate
+  fixed_pattern <- paste0(fixed_var, ":", group_var)
+  fixed_interactions <- fixef_dt[str_starts(term, fixed(fixed_pattern)),]
+  fixed_interactions[, group := sub(paste0(fixed_var, ":.*", group_var, "(.*)"), "\\1", term)]
+  fixed_interactions <- fixed_interactions[, .(group = group, b_fixed_group = estimate)]
+  
+  # Get observed data to build range & mean
+  mod_obs <- in_mod$ssn.object$obs %>% as.data.table()
+  
+  # Build new data grid: hydro varies, fixed stays constant
+  grid_hydro <- mod_obs[, .(
+    hydro = seq(min(get(hydro_var), na.rm = TRUE),
+                max(get(hydro_var), na.rm = TRUE),
+                length.out = n_points)
+  ), by = group_var]
+  
+  newdata_dt <- copy(grid_hydro)
+  setnames(newdata_dt, old = group_var, new = "group")
+  newdata_dt[, fixed := fixed_var_mean]
+  
+  # Merge interactions
+  newdata_dt <- merge(newdata_dt, hydro_interactions, by = "group", all.x = TRUE)
+  newdata_dt <- merge(newdata_dt, fixed_interactions, by = "group", all.x = TRUE)
+  
+  # Fill NA with 0 if no interaction
+  newdata_dt[is.na(b_hydro_group), b_hydro_group := 0]
+  newdata_dt[is.na(b_fixed_group), b_fixed_group := 0]
+  
+  # Calculate predicted
+  newdata_dt[, predicted :=
+               intercept +
+               (b_hydro + b_hydro_group) * hydro +
+               (b_fixed + b_fixed_group) * fixed
+  ]
+  
+  # Plot
+  out_plot <- ggplot(newdata_dt, aes(x = hydro, y = predicted, color = group)) +
+    geom_line(linewidth = 1) +
+    labs(
+      x = hydro_var,
+      y = "Predicted",
+      color = group_var
+    ) +
+    theme_bw()
+  
+  return(out_plot)
+}
