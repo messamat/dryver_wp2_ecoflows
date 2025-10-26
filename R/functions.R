@@ -399,9 +399,7 @@ identify_drywet6mo <- function(in_dt, flow_col='isflowing', jday_col = 'doy') {
 compute_rolling_sd6 <- function(dt, time_window_yr) {
   #Identify contiguous six months with the most zero-flow days for computing Sd6
   daily_classified <- dt[, identify_drywet6mo(.SD), by = reach_id]
-  
-  # Add month
-  daily_classified[, ym := format(date, "%Y%m")]
+  daily_classified[, ym := format(date, "%Y%m")] # Add month
   
   # Collapse by year-month based on majority vote (>50% of days in dry period)
   monthly_classified <- daily_classified[
@@ -412,10 +410,9 @@ compute_rolling_sd6 <- function(dt, time_window_yr) {
   
   # For each month, check if no-flow occurred
   noflow_by_month <- dt[
-    , list(ym = format(date, "%Y%m"), noflow_period = noflow_period)
-    ] %>%
-    .[, list(has_noflow = any(!is.na(noflow_period))), 
-      by = .(reach_id, ym)]
+    , .(has_noflow = any(!is.na(noflow_period))),
+    by = .(reach_id, ym = format(date, "%Y%m"))
+  ]
   
   # Join no-flow with dry/wet classification
   monthly_dt <- merge(noflow_by_month, monthly_classified,
@@ -8378,12 +8375,12 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
   )
   
   #Transform some variables  
-  ssn_miv$obs %>%
+  ssn_miv$obs %<>%
     mutate(meanQ3650past_sqrt = sqrt(meanQ3650past))
-  ssn_miv$preds$preds_hist %>%
-    mutate(meanQ3650past_sqrt = sqrt(meanQ3650past))
-  ssn_miv$preds$preds_proj %>%
-    mutate(meanQ3650past_sqrt = sqrt(meanQ3650past))
+  # ssn_miv$preds$preds_hist %>%
+  #   mutate(meanQ3650past_sqrt = sqrt(meanQ3650past))
+  # ssn_miv$preds$preds_proj %>%
+  #   mutate(meanQ3650past_sqrt = sqrt(meanQ3650past))
     
   allvars_dt <- as.data.table(ssn_miv$obs) %>%
     setorderv(c('country', 'site')) 
@@ -8400,7 +8397,7 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
       .SDcols = hydro_candidates]
     
     #Scale obs and preds
-    ssn_miv$obs <- ssn_miv$obs %>%
+    ssn_miv$obs %<>%
       mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
     
     # Compute scaling parameters from obs
@@ -8410,16 +8407,16 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
                             sd, na.rm = TRUE)
     
     # Apply same scaling to preds
-    vars_in_preds <- intersect(hydro_candidates, names(ssn_miv$preds$preds_proj))
-    
-    ssn_miv$preds$preds_hist <- ssn_miv$preds$preds_hist %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
-    ssn_miv$preds$preds_proj <- ssn_miv$preds$preds_proj %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
+    # vars_in_preds <- intersect(hydro_candidates, names(ssn_miv$preds$preds_proj))
+    # 
+    # ssn_miv$preds$preds_hist <- ssn_miv$preds$preds_hist %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
+    # ssn_miv$preds$preds_proj <- ssn_miv$preds$preds_proj %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
   }
   
   alpha_var <- 'mean_richness'
@@ -8908,7 +8905,7 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
       .SDcols = hydro_candidates]
     
     #Scale obs and preds
-    ssn_miv$obs <- ssn_miv$obs %>%
+    ssn_miv$obs %<>%
       mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
     
     # Compute scaling parameters from obs
@@ -8918,16 +8915,16 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
                             sd, na.rm = TRUE)
     
     # Apply same scaling to preds
-    vars_in_preds <- intersect(hydro_candidates, names(ssn_miv$preds$preds_proj))
-    
-    ssn_miv$preds$preds_hist <- ssn_miv$preds$preds_hist %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
-    ssn_miv$preds$preds_proj <- ssn_miv$preds$preds_proj %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
+    # vars_in_preds <- intersect(hydro_candidates, names(ssn_miv$preds$preds_proj))
+    # 
+    # ssn_miv$preds$preds_hist <- ssn_miv$preds$preds_hist %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
+    # ssn_miv$preds$preds_proj <- ssn_miv$preds$preds_proj %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
   }
   
   alpha_var <- 'mean_invsimpson'
@@ -9227,8 +9224,8 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
   )
   
   ssn_miv$obs$basin_area_km2_log10 <- log10(ssn_miv$obs$basin_area_km2)
-  ssn_miv$preds$preds_hist$basin_area_km2_log10 <- log10(ssn_miv$preds$preds_hist$basin_area_km2)
-  ssn_miv$preds$preds_proj$basin_area_km2_log10 <- log10(ssn_miv$preds$preds_proj$basin_area_km2)
+  # ssn_miv$preds$preds_hist$basin_area_km2_log10 <- log10(ssn_miv$preds$preds_hist$basin_area_km2)
+  # ssn_miv$preds$preds_proj$basin_area_km2_log10 <- log10(ssn_miv$preds$preds_proj$basin_area_km2)
   
   allvars_dt <- as.data.table(ssn_miv$obs) %>%
     setorderv(c('country', 'site')) 
@@ -9245,7 +9242,7 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
       .SDcols = hydro_candidates]
     
     #Scale obs and preds
-    ssn_miv$obs <- ssn_miv$obs %>%
+    ssn_miv$obs %<>%
       mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
     
     # Compute scaling parameters from obs
@@ -9255,16 +9252,16 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
                             sd, na.rm = TRUE)
     
     # Apply same scaling to preds
-    vars_in_preds <- intersect(hydro_candidates, names(ssn_miv$preds$preds_proj))
-    
-    ssn_miv$preds$preds_hist <- ssn_miv$preds$preds_hist %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
-    ssn_miv$preds$preds_proj <- ssn_miv$preds$preds_proj %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
+    # vars_in_preds <- intersect(hydro_candidates, names(ssn_miv$preds$preds_proj))
+    # 
+    # ssn_miv$preds$preds_hist <- ssn_miv$preds$preds_hist %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
+    # ssn_miv$preds$preds_proj <- ssn_miv$preds$preds_proj %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
   }
   
   #Exploratory plots-------
@@ -9683,7 +9680,7 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
       .SDcols = hydro_candidates]
     
     #Scale obs and preds
-    ssn_dia_sedi$obs <- ssn_dia_sedi$obs %>%
+    ssn_dia_sedi$obs %<>%
       mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
     
     # Compute scaling parameters from obs
@@ -9693,16 +9690,16 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
                             sd, na.rm = TRUE)
     
     # Apply same scaling to preds
-    vars_in_preds <- intersect(hydro_candidates, names(ssn_dia_sedi$preds$preds_proj))
-    
-    ssn_dia_sedi$preds$preds_hist <- ssn_dia_sedi$preds$preds_hist %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
-    ssn_dia_sedi$preds$preds_proj <- ssn_dia_sedi$preds$preds_proj %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
+    # vars_in_preds <- intersect(hydro_candidates, names(ssn_dia_sedi$preds$preds_proj))
+    # 
+    # ssn_dia_sedi$preds$preds_hist <- ssn_dia_sedi$preds$preds_hist %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
+    # ssn_dia_sedi$preds$preds_proj <- ssn_dia_sedi$preds$preds_proj %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
   }
   
   alpha_var <- 'mean_invsimpson'
@@ -10146,8 +10143,8 @@ model_dia_sedi_richness_yr <- function(in_ssn_eu_summarized,
   )
   
   ssn_dia_sedi$obs$meanQ3650past_log10 <- log10(ssn_dia_sedi$obs$meanQ3650past)
-  ssn_dia_sedi$preds$preds_hist$meanQ3650past_log10 <- log10(ssn_dia_sedi$preds$preds_hist$meanQ3650past)
-  ssn_dia_sedi$preds$preds_proj$meanQ3650past_log10 <- log10(ssn_dia_sedi$preds$preds_proj$meanQ3650past)
+  # ssn_dia_sedi$preds$preds_hist$meanQ3650past_log10 <- log10(ssn_dia_sedi$preds$preds_hist$meanQ3650past)
+  # ssn_dia_sedi$preds$preds_proj$meanQ3650past_log10 <- log10(ssn_dia_sedi$preds$preds_proj$meanQ3650past)
   
   
   allvars_dt <- as.data.table(ssn_dia_sedi$obs) %>%
@@ -10165,7 +10162,7 @@ model_dia_sedi_richness_yr <- function(in_ssn_eu_summarized,
       .SDcols = hydro_candidates]
     
     #Scale obs and preds
-    ssn_dia_sedi$obs <- ssn_dia_sedi$obs %>%
+    ssn_dia_sedi$obs %<>%
       mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
     
     # Compute scaling parameters from obs
@@ -10174,17 +10171,17 @@ model_dia_sedi_richness_yr <- function(in_ssn_eu_summarized,
     scaling_sds   <- sapply(st_drop_geometry(ssn_dia_sedi$obs[hydro_candidates]), 
                             sd, na.rm = TRUE)
     
-    # Apply same scaling to preds
-    vars_in_preds <- intersect(hydro_candidates, names(ssn_dia_sedi$preds$preds_proj))
-    
-    ssn_dia_sedi$preds$preds_hist <- ssn_dia_sedi$preds$preds_hist %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
-    ssn_dia_sedi$preds$preds_proj <- ssn_dia_sedi$preds$preds_proj %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
+    # # Apply same scaling to preds
+    # vars_in_preds <- intersect(hydro_candidates, names(ssn_dia_sedi$preds$preds_proj))
+    # 
+    # ssn_dia_sedi$preds$preds_hist <- ssn_dia_sedi$preds$preds_hist %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
+    # ssn_dia_sedi$preds$preds_proj <- ssn_dia_sedi$preds$preds_proj %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
   }
   
   alpha_var <- 'mean_richness'
@@ -10667,8 +10664,8 @@ model_dia_biof_richness_yr <- function(in_ssn_eu_summarized,
   )
   
   ssn_dia_biof$obs$meanQ3650past_log10 <- log10(ssn_dia_biof$obs$meanQ3650past)
-  ssn_dia_biof$preds$preds_hist$meanQ3650past_log10 <- log10(ssn_dia_biof$preds$preds_hist$meanQ3650past)
-  ssn_dia_biof$preds$preds_proj$meanQ3650past_log10 <- log10(ssn_dia_biof$preds$preds_proj$meanQ3650past)
+  # ssn_dia_biof$preds$preds_hist$meanQ3650past_log10 <- log10(ssn_dia_biof$preds$preds_hist$meanQ3650past)
+  # ssn_dia_biof$preds$preds_proj$meanQ3650past_log10 <- log10(ssn_dia_biof$preds$preds_proj$meanQ3650past)
   
   
   allvars_dt <- as.data.table(ssn_dia_biof$obs) %>%
@@ -10686,7 +10683,7 @@ model_dia_biof_richness_yr <- function(in_ssn_eu_summarized,
       .SDcols = hydro_candidates]
     
     #Scale obs and preds
-    ssn_dia_biof$obs <- ssn_dia_biof$obs %>%
+    ssn_dia_biof$obs %<>%
       mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
     
     # Compute scaling parameters from obs
@@ -10696,16 +10693,16 @@ model_dia_biof_richness_yr <- function(in_ssn_eu_summarized,
                             sd, na.rm = TRUE)
     
     # Apply same scaling to preds
-    vars_in_preds <- intersect(hydro_candidates, names(ssn_dia_biof$preds$preds_proj))
-    
-    ssn_dia_biof$preds$preds_hist <- ssn_dia_biof$preds$preds_hist %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
-    ssn_dia_biof$preds$preds_proj <- ssn_dia_biof$preds$preds_proj %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
+    # vars_in_preds <- intersect(hydro_candidates, names(ssn_dia_biof$preds$preds_proj))
+    # 
+    # ssn_dia_biof$preds$preds_hist <- ssn_dia_biof$preds$preds_hist %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
+    # ssn_dia_biof$preds$preds_proj <- ssn_dia_biof$preds$preds_proj %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
   }
   
   alpha_var <- 'mean_richness'
@@ -11150,8 +11147,8 @@ model_fun_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   )
   
   ssn_fun_sedi$obs$STcon_m10_directed_avg_samp_log10 <- log10(ssn_fun_sedi$obs$STcon_m10_directed_avg_samp)
-  ssn_fun_sedi$preds$preds_hist$STcon_m10_directed_avg_samp_log10 <- log10(ssn_fun_sedi$preds$preds_hist$STcon_m10_directed_avg_samp)
-  ssn_fun_sedi$preds$preds_proj$STcon_m10_directed_avg_samp_log10 <- log10(ssn_fun_sedi$preds$preds_proj$STcon_m10_directed_avg_samp)
+  # ssn_fun_sedi$preds$preds_hist$STcon_m10_directed_avg_samp_log10 <- log10(ssn_fun_sedi$preds$preds_hist$STcon_m10_directed_avg_samp)
+  # ssn_fun_sedi$preds$preds_proj$STcon_m10_directed_avg_samp_log10 <- log10(ssn_fun_sedi$preds$preds_proj$STcon_m10_directed_avg_samp)
   
 
   allvars_dt <- as.data.table(ssn_fun_sedi$obs) %>%
@@ -11169,7 +11166,7 @@ model_fun_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
       .SDcols = hydro_candidates]
     
     #Scale obs and preds
-    ssn_fun_sedi$obs <- ssn_fun_sedi$obs %>%
+    ssn_fun_sedi$obs %<>%
       mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
     
     # Compute scaling parameters from obs
@@ -11179,16 +11176,16 @@ model_fun_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
                             sd, na.rm = TRUE)
     
     # Apply same scaling to preds
-    vars_in_preds <- intersect(hydro_candidates, names(ssn_fun_sedi$preds$preds_proj))
-    
-    ssn_fun_sedi$preds$preds_hist <- ssn_fun_sedi$preds$preds_hist %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
-    ssn_fun_sedi$preds$preds_proj <- ssn_fun_sedi$preds$preds_proj %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
+    # vars_in_preds <- intersect(hydro_candidates, names(ssn_fun_sedi$preds$preds_proj))
+    # 
+    # ssn_fun_sedi$preds$preds_hist <- ssn_fun_sedi$preds$preds_hist %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
+    # ssn_fun_sedi$preds$preds_proj <- ssn_fun_sedi$preds$preds_proj %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
   }
   
   alpha_var <- 'mean_invsimpson'
@@ -11640,13 +11637,13 @@ model_fun_sedi_richness_yr <- function(in_ssn_eu_summarized,
     log10(ssn_fun_sedi$obs$Fdist_mean_10past_undirected_avg_samp + 1)
   ssn_fun_sedi$obs$basin_area_km2_log10 <- log10(ssn_fun_sedi$obs$basin_area_km2)
   
-  ssn_fun_sedi$preds$preds_hist$Fdist_mean_10past_undirected_avg_samp_log10 <- 
-    log10(ssn_fun_sedi$preds$preds_hist$Fdist_mean_10past_undirected_avg_samp + 1)
-  ssn_fun_sedi$preds$preds_hist$basin_area_km2_log10 <- log10(ssn_fun_sedi$preds$preds_hist$basin_area_km2)
-  
-  ssn_fun_sedi$preds$preds_proj$Fdist_mean_10past_undirected_avg_samp_log10 <- 
-    log10(ssn_fun_sedi$preds$preds_proj$Fdist_mean_10past_undirected_avg_samp + 1)
-  ssn_fun_sedi$preds$preds_proj$basin_area_km2_log10 <- log10(ssn_fun_sedi$preds$preds_proj$basin_area_km2)
+  # ssn_fun_sedi$preds$preds_hist$Fdist_mean_10past_undirected_avg_samp_log10 <- 
+  #   log10(ssn_fun_sedi$preds$preds_hist$Fdist_mean_10past_undirected_avg_samp + 1)
+  # ssn_fun_sedi$preds$preds_hist$basin_area_km2_log10 <- log10(ssn_fun_sedi$preds$preds_hist$basin_area_km2)
+  # 
+  # ssn_fun_sedi$preds$preds_proj$Fdist_mean_10past_undirected_avg_samp_log10 <- 
+  #   log10(ssn_fun_sedi$preds$preds_proj$Fdist_mean_10past_undirected_avg_samp + 1)
+  # ssn_fun_sedi$preds$preds_proj$basin_area_km2_log10 <- log10(ssn_fun_sedi$preds$preds_proj$basin_area_km2)
   
   allvars_dt <- as.data.table(ssn_fun_sedi$obs) %>%
     setorderv(c('country', 'site')) 
@@ -11664,7 +11661,7 @@ model_fun_sedi_richness_yr <- function(in_ssn_eu_summarized,
       .SDcols = hydro_candidates]
     
     #Scale obs and preds
-    ssn_fun_sedi$obs <- ssn_fun_sedi$obs %>%
+    ssn_fun_sedi$obs %<>%
       mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
     
     # Compute scaling parameters from obs
@@ -11674,16 +11671,16 @@ model_fun_sedi_richness_yr <- function(in_ssn_eu_summarized,
                             sd, na.rm = TRUE)
     
     # Apply same scaling to preds
-    vars_in_preds <- intersect(hydro_candidates, names(ssn_fun_sedi$preds$preds_proj))
-    
-    ssn_fun_sedi$preds$preds_hist <- ssn_fun_sedi$preds$preds_hist %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
-    ssn_fun_sedi$preds$preds_proj <- ssn_fun_sedi$preds$preds_proj %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
+    # vars_in_preds <- intersect(hydro_candidates, names(ssn_fun_sedi$preds$preds_proj))
+    # 
+    # ssn_fun_sedi$preds$preds_hist <- ssn_fun_sedi$preds$preds_hist %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
+    # ssn_fun_sedi$preds$preds_proj <- ssn_fun_sedi$preds$preds_proj %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
   }
   
   alpha_var <- 'mean_richness'
@@ -12132,8 +12129,8 @@ model_fun_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
   )
   
   ssn_fun_biof$obs$DurD_CV10yrpast_sqrt <- sqrt(ssn_fun_biof$obs$DurD_CV10yrpast)
-  ssn_fun_biof$preds$preds_hist$DurD_CV10yrpast_sqrt <- sqrt(ssn_fun_biof$preds$preds_hist$DurD_CV10yrpast)
-  ssn_fun_biof$preds$preds_proj$DurD_CV10yrpast_sqrt <- sqrt(ssn_fun_biof$preds$preds_proj$DurD_CV10yrpast)
+  # ssn_fun_biof$preds$preds_hist$DurD_CV10yrpast_sqrt <- sqrt(ssn_fun_biof$preds$preds_hist$DurD_CV10yrpast)
+  # ssn_fun_biof$preds$preds_proj$DurD_CV10yrpast_sqrt <- sqrt(ssn_fun_biof$preds$preds_proj$DurD_CV10yrpast)
   
   
   allvars_dt <- as.data.table(ssn_fun_biof$obs) %>%
@@ -12151,7 +12148,7 @@ model_fun_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
       .SDcols = hydro_candidates]
     
     #Scale obs and preds
-    ssn_fun_biof$obs <- ssn_fun_biof$obs %>%
+    ssn_fun_biof$obs %<>%
       mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
     
     # Compute scaling parameters from obs
@@ -12161,16 +12158,16 @@ model_fun_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
                             sd, na.rm = TRUE)
     
     # Apply same scaling to preds
-    vars_in_preds <- intersect(hydro_candidates, names(ssn_fun_biof$preds$preds_proj))
-    
-    ssn_fun_biof$preds$preds_hist <- ssn_fun_biof$preds$preds_hist %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
-    ssn_fun_biof$preds$preds_proj <- ssn_fun_biof$preds$preds_proj %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
+    # vars_in_preds <- intersect(hydro_candidates, names(ssn_fun_biof$preds$preds_proj))
+    # 
+    # ssn_fun_biof$preds$preds_hist <- ssn_fun_biof$preds$preds_hist %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
+    # ssn_fun_biof$preds$preds_proj <- ssn_fun_biof$preds$preds_proj %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
   }
   
   alpha_var <- 'mean_invsimpson'
@@ -12649,7 +12646,7 @@ model_fun_biof_richness_yr <- function(in_ssn_eu_summarized,
       .SDcols = hydro_candidates]
     
     #Scale obs and preds
-    ssn_fun_biof$obs <- ssn_fun_biof$obs %>%
+    ssn_fun_biof$obs %<>%
       mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
     
     # Compute scaling parameters from obs
@@ -12659,16 +12656,16 @@ model_fun_biof_richness_yr <- function(in_ssn_eu_summarized,
                             sd, na.rm = TRUE)
     
     # Apply same scaling to preds
-    vars_in_preds <- intersect(hydro_candidates, names(ssn_fun_biof$preds$preds_proj))
-    
-    ssn_fun_biof$preds$preds_hist <- ssn_fun_biof$preds$preds_hist %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
-    ssn_fun_biof$preds$preds_proj <- ssn_fun_biof$preds$preds_proj %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
+    # vars_in_preds <- intersect(hydro_candidates, names(ssn_fun_biof$preds$preds_proj))
+    # 
+    # ssn_fun_biof$preds$preds_hist <- ssn_fun_biof$preds$preds_hist %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
+    # ssn_fun_biof$preds$preds_proj <- ssn_fun_biof$preds$preds_proj %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
   }
   
   alpha_var <- 'mean_richness'
@@ -13118,8 +13115,8 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   )
   
   ssn_bac_sedi$obs$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_sedi$obs$STcon_m10_directed_avg_samp)
-  ssn_bac_sedi$preds$preds_hist$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_sedi$preds$preds_hist$STcon_m10_directed_avg_samp)
-  ssn_bac_sedi$preds$preds_proj$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_sedi$preds$preds_proj$STcon_m10_directed_avg_samp)
+  # ssn_bac_sedi$preds$preds_hist$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_sedi$preds$preds_hist$STcon_m10_directed_avg_samp)
+  # ssn_bac_sedi$preds$preds_proj$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_sedi$preds$preds_proj$STcon_m10_directed_avg_samp)
   
   allvars_dt <- as.data.table(ssn_bac_sedi$obs) %>%
     setorderv(c('country', 'site')) 
@@ -13136,7 +13133,7 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
       .SDcols = hydro_candidates]
     
     #Scale obs and preds
-    ssn_bac_sedi$obs <- ssn_bac_sedi$obs %>%
+    ssn_bac_sedi$obs %<>%
       mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
     
     # Compute scaling parameters from obs
@@ -13146,16 +13143,16 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
                             sd, na.rm = TRUE)
     
     # Apply same scaling to preds
-    vars_in_preds <- intersect(hydro_candidates, names(ssn_bac_sedi$preds$preds_proj))
+    # vars_in_preds <- intersect(hydro_candidates, names(ssn_bac_sedi$preds$preds_proj))
     
-    ssn_bac_sedi$preds$preds_hist <- ssn_bac_sedi$preds$preds_hist %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
-    ssn_bac_sedi$preds$preds_proj <- ssn_bac_sedi$preds$preds_proj %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
+    # ssn_bac_sedi$preds$preds_hist <- ssn_bac_sedi$preds$preds_hist %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
+    # ssn_bac_sedi$preds$preds_proj <- ssn_bac_sedi$preds$preds_proj %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
   }
   
   alpha_var <- 'mean_invsimpson'
@@ -13652,7 +13649,7 @@ model_bac_sedi_richness_yr <- function(in_ssn_eu_summarized,
       .SDcols = hydro_candidates]
     
     #Scale obs and preds
-    ssn_bac_sedi$obs <- ssn_bac_sedi$obs %>%
+    ssn_bac_sedi$obs %<>%
       mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
     
     # Compute scaling parameters from obs
@@ -13662,16 +13659,16 @@ model_bac_sedi_richness_yr <- function(in_ssn_eu_summarized,
                             sd, na.rm = TRUE)
     
     # Apply same scaling to preds
-    vars_in_preds <- intersect(hydro_candidates, names(ssn_bac_sedi$preds$preds_proj))
-    
-    ssn_bac_sedi$preds$preds_hist <- ssn_bac_sedi$preds$preds_hist %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
-    ssn_bac_sedi$preds$preds_proj <- ssn_bac_sedi$preds$preds_proj %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
+    # vars_in_preds <- intersect(hydro_candidates, names(ssn_bac_sedi$preds$preds_proj))
+    # 
+    # ssn_bac_sedi$preds$preds_hist <- ssn_bac_sedi$preds$preds_hist %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
+    # ssn_bac_sedi$preds$preds_proj <- ssn_bac_sedi$preds$preds_proj %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
   }
   
   alpha_var <- 'mean_richness'
@@ -14133,7 +14130,7 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
       .SDcols = hydro_candidates]
     
     #Scale obs and preds
-    ssn_bac_biof$obs <- ssn_bac_biof$obs %>%
+    ssn_bac_biof$obs %<>%
       mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
     
     # Compute scaling parameters from obs
@@ -14143,16 +14140,16 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
                             sd, na.rm = TRUE)
     
     # Apply same scaling to preds
-    vars_in_preds <- intersect(hydro_candidates, names(ssn_bac_biof$preds$preds_proj))
-    
-    ssn_bac_biof$preds$preds_hist <- ssn_bac_biof$preds$preds_hist %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
-    ssn_bac_biof$preds$preds_proj <- ssn_bac_biof$preds$preds_proj %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
+    # vars_in_preds <- intersect(hydro_candidates, names(ssn_bac_biof$preds$preds_proj))
+    # 
+    # ssn_bac_biof$preds$preds_hist <- ssn_bac_biof$preds$preds_hist %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
+    # ssn_bac_biof$preds$preds_proj <- ssn_bac_biof$preds$preds_proj %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
   }
   
   alpha_var <- 'mean_invsimpson'
@@ -14653,7 +14650,7 @@ model_bac_biof_richness_yr <- function(in_ssn_eu_summarized,
       .SDcols = hydro_candidates]
     
     #Scale obs and preds
-    ssn_bac_biof$obs <- ssn_bac_biof$obs %>%
+    ssn_bac_biof$obs %<>%
       mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
     
     # Compute scaling parameters from obs
@@ -14663,16 +14660,16 @@ model_bac_biof_richness_yr <- function(in_ssn_eu_summarized,
                             sd, na.rm = TRUE)
     
     # Apply same scaling to preds
-    vars_in_preds <- intersect(hydro_candidates, names(ssn_bac_biof$preds$preds_proj))
-    
-    ssn_bac_biof$preds$preds_hist <- ssn_bac_biof$preds$preds_hist %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
-    ssn_bac_biof$preds$preds_proj <- ssn_bac_biof$preds$preds_proj %>%
-      mutate(across(all_of(vars_in_preds),
-                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-                    .names = "{.col}_z"))
+    # vars_in_preds <- intersect(hydro_candidates, names(ssn_bac_biof$preds$preds_proj))
+    # 
+    # ssn_bac_biof$preds$preds_hist <- ssn_bac_biof$preds$preds_hist %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
+    # ssn_bac_biof$preds$preds_proj <- ssn_bac_biof$preds$preds_proj %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
   }
   
   alpha_var <- 'mean_richness'

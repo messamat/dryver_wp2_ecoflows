@@ -792,9 +792,7 @@ analysis_targets <- list(
   #Prepare prediction points and data for SSN
   tar_target(
     ssn_pred_pts,
-    create_ssn_preds(in_network_path = network_ssnready_shp_list,
-                     in_hydrostats_net_hist = hydrostats_net_hist,
-                     in_hydrostats_net_proj = hydrostats_net_proj)
+    create_ssn_pred_pts(in_network_path = network_ssnready_shp_list)
   )
   ,
   
