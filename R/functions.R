@@ -749,6 +749,70 @@ compute_hydrostats_q <- function(in_hydromod_dt = hydromod_dt_sites) {
   return(in_hydromod_dt)
 }
 
+#------ import_hydromod_gcm ----------------------------------------------------
+# hydroproj_path <- file.path(
+#   wp1_data_gouv_dir,
+#   "projections",
+#   "Albarine_flowstate_projection_gfdl-esm4_ssp585_2015-2100_spatially-distributed.nc")
+# 
+# hydroref_path <- file.path(
+#   wp1_data_gouv_dir,
+#   "projections",
+#   "Albarine_flowstate_projection_gfdl-esm4_ssp370_1985-2014_spatially-distributed.nc")
+
+# in_drn_dt <- drn_dt
+
+import_hydromod_gcm <- function(hydroproj_path, hydroref_path, in_drn_dt) {
+  #Decompose name
+  metadata_dt <- str_split(basename(hydroproj_path), '_')[[1]] %>%
+    setNames(c('catchment', 'varname', 'time_period', 'gcm', 
+               'scenario', 'date_range', 'file_end')) %>%
+    as.list %>%
+    data.frame %>%
+    setDT %>%
+    .[catchment == "Lepsamanjoki", catchment := "Lepsamaanjoki"] %>%
+    merge(in_drn_dt[, .(catchment, country)], by='catchment') %>%
+    .[, path := hydroproj_path]
+  
+  #Import and format reference hydrological data -------------------------------
+  nc_ref <- nc_open(hydroref_path) # open netcdf file
+  reachID_ref <- ncvar_get(nc_ref, "reachID") # get list of reaches IDs
+  dates_ref <- ncvar_get(nc_ref, "date") # get dates of simulation period
+  dates_ref <- as.Date(dates_ref, origin="1950-01-01") # convert dates into R date format
+  
+  #Get simulated variable from the NetCDF file
+  hydro_ref_dt <- get_nc_var_present(nc = nc_ref, varname = metadata_dt$varname, # 0=dry, 1=flowing
+                                     reachID = reachID_ref, dates = dates_ref,
+                                     selected_sims = NULL)$data_all
+  
+  
+  #Import and format projected hydrological data -------------------------------
+  nc <- nc_open(hydroproj_path) # open netcdf file
+  reachID <- ncvar_get(nc, "reachID") # get list of reaches IDs
+  dates <- ncvar_get(nc, "date") # get dates of simulation period
+  dates <- as.Date(dates, origin="1950-01-01") # convert dates into R date format
+  
+  #Get simulated variable from the NetCDF file
+  hydro_proj_dt <- get_nc_var_present(nc = nc, varname = metadata_dt$varname, # 0=dry, 1=flowing
+                                      reachID = reachID, dates = dates,
+                                      selected_sims = NULL)$data_all 
+  
+  # Bind reference and projected data ------------------------------------------
+  hydro_dt <- rbind(hydro_ref_dt[date<hydro_proj_dt[,min(date)],],
+                    hydro_proj_dt[date>hydro_ref_dt[,max(date)],])
+  remove(list=c('nc_ref', 'nc', 'hydro_ref_dt', 'hydro_proj_dt'))
+  
+  setnames(hydro_dt, 
+           c('flowstate', 'discharge'),
+           c('isflowing', 'qsim'), 
+           skip_absent = TRUE)
+  
+  return(list(
+    metadata_dt = metadata_dt,
+    hydro_dt = hydro_dt
+  ))
+}
+
 #------ dist_proj  -------------------------------------------------
 #' Create a two-point equidistant projection string for a bounding box
 #'
@@ -4899,6 +4963,112 @@ compute_Fdist_rolling <- function(in_Fdist_dt, in_sites_dt) {
 }
 
 
+#------ compute_connectivity_proj ----------------------------------------------
+# hydroref_path <- file.path(
+#   wp1_data_gouv_dir,
+#   "projections",
+#   "Albarine_flowstate_projection_gfdl-esm4_ssp370_1985-2014_spatially-distributed.nc")
+# 
+# hydroproj_path <- file.path(
+#   wp1_data_gouv_dir,
+#   "projections",
+#   "Albarine_flowstate_projection_gfdl-esm4_ssp585_2015-2100_spatially-distributed.nc")
+# 
+# tar_load(network_ssnready_shp_list)
+# 
+# subset_sites = T
+# in_sites_dt <- tar_read(sites_dt)
+# in_drn_dt <- drn_dt
+# min_date = as.Date('1990-01-01')
+# in_window = 365
+
+compute_connectivity_proj <- function(hydroproj_path, hydroref_path, in_drn_dt,
+                                  network_ssnready_shp_list,
+                                  subset_sites, in_sites_dt, 
+                                  STcon_window=365,
+                                  min_date = as.Date('1990-01-01')) {
+  
+  #Format data
+  hydromod_formatted <- import_hydromod_gcm(hydroproj_path, 
+                                            hydroref_path,
+                                            in_drn_dt)
+  
+  hydro_dt <- list()
+  hydro_dt$data_all <- hydromod_formatted$hydro_dt
+  
+  net_sf <- network_ssnready_shp_list[[hydromod_formatted$metadata_dt$country]]
+  
+  formatted_data <- prepare_data_for_STcon(in_hydromod_drn=hydro_dt, 
+                                           in_net_shp_path = net_sf)
+  
+  #Get December 31st of every year
+  in_dates <- hydro_dt$data_all[, .(date = date[.N]), 
+                                by = format(date, "%Y")] %>%
+    .[, .(date)]
+  
+  STcon_directed <- list()
+  STcon_directed$STcon_m365 <- compute_STcon_rolling(
+    in_preformatted_data = formatted_data,
+    ref = FALSE,
+    #in_nsim = hydromod_paths_dt[country == in_country,]$best_sim,
+    in_dates = in_dates,
+    window = STcon_window,
+    output = 'STcon',
+    direction = 'directed',
+    routing_mode = 'in',
+    weighting = FALSE,
+    rounding_factor = 1)
+  
+  # STcon_directed_ref <- list()
+  # STcon_directed_ref[[paste0('STcon_m', in_window)]] <- compute_STcon_rolling(
+  #   in_preformatted_data = formatted_data,
+  #   ref = TRUE,
+  #   #in_nsim = hydromod_paths_dt[country == in_country,]$best_sim,
+  #   in_dates = in_dates[1,],
+  #   window = in_window,
+  #   output = in_output,
+  #   direction = 'directed',
+  #   routing_mode = 'in',
+  #   weighting = FALSE,
+  #   rounding_factor = 1)
+  
+  STcon_directed_formatted <- postprocess_STcon(
+    in_STcon = STcon_directed,
+    in_net_shp_path = net_sf,
+    standardize_STcon = FALSE, 
+    in_STcon_ref = NULL)
+  
+  if (subset_sites) {
+    STcon_directed_formatted$STcon_dt <- merge(STcon_directed_formatted$STcon_dt,
+                                               st_drop_geometry(net_sf[,c('UID', 'cat')]),
+                                               by='UID') %>%
+      merge(in_sites_dt[, .(reach_id, site)], by.x='cat', by.y='reach_id', all.x=F)
+  }
+  
+  setnames(STcon_directed_formatted$STcon_dt, 'stcon_value', 'STcon_mean_yr')
+  STcon_directed_formatted$STcon_dt[, `:=`(year = format(date, '%Y'),
+                                           variable = NULL)]
+  
+  Fdist_undirected_proj <- compute_Fdist(
+    sites_status_matrix = formatted_data$sites_status_matrix,
+    network_structure = formatted_data$network_structure, 
+    routing_mode = 'all', 
+    raw_dist_matrix = formatted_data$river_dist_mat, 
+    in_net_shp_path = net_sf
+  ) %>%
+    .[is.infinite(Fdist), Fdist := .[!is.infinite(Fdist), 2*max(Fdist)]] %>% #Replace infinite Fdist with twice max otherwise
+    .[UID %in% STcon_directed_formatted$STcon_dt[, unique(UID)],] %>% 
+    .[, list(Fdist_undmean_yr = mean(Fdist)), by = .(UID, year=format(date, '%Y'))]
+  
+  
+  out_dt <- merge(STcon_directed_formatted$STcon_dt,
+                  Fdist_undirected_proj,
+                  by=c('UID', 'year')) %>%
+    cbind(hydromod_formatted$metadata_dt[, .(country, gcm, scenario)])
+  
+  return(out_dt)
+}
+
 #------ compile_hydrocon_sites_country -----------------------------------------------
 # in_hydrostats_sub_comb <- tar_read(hydrostats_sites_tsub_comb)
 # in_STcon_directed <- tar_read(STcon_directed_formatted)
@@ -5236,6 +5406,8 @@ summarize_env <- function(in_env_dt,
 # in_drn_dt <- drn_dt
 # min_date = as.Date('1990-01-01')
 
+
+
 #' @title Summarize drainage basin hydrological projection stats
 #' @description This function processes a NetCDF file containing hydrological 
 #' projection data. It extracts metadata, reads flow state data, and computes a 
@@ -5250,49 +5422,13 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path,
                                           in_drn_dt=NULL,
                                           min_date = as.Date('1990-01-01'),
                                           include_metadata = TRUE) {
-  #Decompose name
-  metadata_dt <- str_split(basename(hydroproj_path), '_')[[1]] %>%
-    setNames(c('catchment', 'varname', 'time_period', 'gcm', 
-               'scenario', 'date_range', 'file_end')) %>%
-    as.list %>%
-    data.frame %>%
-    setDT %>%
-    .[catchment == "Lepsamanjoki", catchment := "Lepsamaanjoki"] %>%
-    merge(in_drn_dt[, .(catchment, country)], by='catchment') %>%
-  .[, path := hydroproj_path]
+  
 
-  #Import and format reference hydrological data -------------------------------
-  nc_ref <- nc_open(hydroref_path) # open netcdf file
-  reachID_ref <- ncvar_get(nc_ref, "reachID") # get list of reaches IDs
-  dates_ref <- ncvar_get(nc_ref, "date") # get dates of simulation period
-  dates_ref <- as.Date(dates_ref, origin="1950-01-01") # convert dates into R date format
   
-  #Get simulated variable from the NetCDF file
-  hydro_ref_dt <- get_nc_var_present(nc = nc_ref, varname = metadata_dt$varname, # 0=dry, 1=flowing
-                                     reachID = reachID_ref, dates = dates_ref,
-                                     selected_sims = NULL)$data_all
-  
-  
-  #Import and format projected hydrological data -------------------------------
-  nc <- nc_open(hydroproj_path) # open netcdf file
-  reachID <- ncvar_get(nc, "reachID") # get list of reaches IDs
-  dates <- ncvar_get(nc, "date") # get dates of simulation period
-  dates <- as.Date(dates, origin="1950-01-01") # convert dates into R date format
-  
-  #Get simulated variable from the NetCDF file
-  hydro_proj_dt <- get_nc_var_present(nc = nc, varname = metadata_dt$varname, # 0=dry, 1=flowing
-                                 reachID = reachID, dates = dates,
-                                 selected_sims = NULL)$data_all 
-  
-  # Bind reference and projected data ------------------------------------------
-  hydro_dt <- rbind(hydro_ref_dt[date<hydro_proj_dt[,min(date)],],
-                    hydro_proj_dt[date>hydro_ref_dt[,max(date)],])
-  remove(list=c('nc_ref', 'nc', 'hydro_ref_dt', 'hydro_proj_dt'))
-  
-  setnames(hydro_dt, 
-           c('flowstate', 'discharge'),
-           c('isflowing', 'qsim'), 
-           skip_absent = TRUE)
+  hydromod_preformatted <- import_hydromod_gcm(hydroproj_path, 
+                                               hydroref_path, in_drn_dt) 
+  metadata_dt <- hydromod_preformatted$metadata_dt
+  hydro_dt <-   hydromod_preformatted$hydro_dt
   
   # Subset reaches to those where there are sampling sites ---------------------
   if (subset_sites && (!is.null(in_sites_dt))) {
@@ -15191,8 +15327,10 @@ plot_ssn_mod_diagplot <- function(in_mod_fit,
 }
 
 #------ predict_ssn_mod -------------------------------------------------------
-# in_ssn_mods = tar_read(ssn_mods_miv_richness_yr)
-# proj_years <- c(2025, 2026, 2030, 2035, 2041)
+in_ssn_mods = tar_read(ssn_mods_miv_yr)
+in_hydrocon_sites_proj = rbindlist(tar_read(hydrocon_sites_proj_gcm))
+# proj_years = c(seq(1990,2020), seq(2040, 2099)
+proj_years <- c(2025, 2026, 2030, 2035, 2041)
 
 
 #' Predict future richness from a fitted SSN model

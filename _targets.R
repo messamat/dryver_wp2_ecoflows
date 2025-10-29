@@ -487,6 +487,8 @@ combined_hydrotargets <- list(
   )
 )
 
+
+
 analysis_targets <- list(
   #Prepare data for STcon
   tar_target(
@@ -684,51 +686,73 @@ analysis_targets <- list(
   ,
   
   tar_target(
-    hydrostats_net_proj,
-    future_lapply(list.files(file.path(wp1_data_gouv_dir, 'projections'), 
-                      pattern='flowstate.*2015[-]2100',
-                      full.names = TRUE),
-           function(hydroproj_ir_path) {
-             print(hydroproj_ir_path)
-             
-             #Get intermittence stats
-             hydroref_ir_path <- gsub('ssp[0-9]{3}', 'ssp370', hydroproj_ir_path) %>%
-               gsub('2015[-]2100', '1985-2014', .)
-             
-             ir_stats <- summarize_drn_hydroproj_stats(
-               hydroproj_path=hydroproj_ir_path,
-               hydroref_path=hydroref_ir_path,
-               subset_sites=T,
-               in_sites_dt = sites_dt,
-               in_drn_dt = drn_dt,
-               min_date = as.Date('1990-01-01'),
-               include_metadata = FALSE
-             )
-             
-             #Get Q stats
-             hydroproj_q_path <- gsub('flowstate', 'discharge', hydroproj_ir_path)
-             hydroref_q_path <-  gsub('flowstate', 'discharge', hydroref_ir_path)
-             
-             q_stats <- summarize_drn_hydroproj_stats(
-               hydroproj_path=hydroproj_q_path,
-               hydroref_path=hydroref_q_path,
-               subset_sites=T,
-               in_sites_dt = sites_dt,
-               in_drn_dt = drn_dt,
-               min_date = as.Date('1990-01-01'),
-               include_metadata = TRUE
-             )
-             
-             #Merge them
-             all_stats <- merge(ir_stats, q_stats, by=c('reach_id', 'year'))
-             
-             return(all_stats)
-           }) %>% 
-      rbindlist
+    hydro_proj_files,
+    list.files(
+      file.path(wp1_data_gouv_dir, "projections"),
+      pattern = ".*flowstate.*2015[-]2100",
+      full.names = TRUE
+    )
   )
   ,
   
-  #Fdist_mean_10past_undirected_avg_samp, STcon_m10_directed_avg_samp_log1
+  tar_target(
+    hydrocon_sites_proj_gcm,
+    future_lapply(hydro_proj_files, function(in_hydro_proj_file) {
+      print(in_hydro_proj_file)
+      
+      hydroproj_ir_path <- in_hydro_proj_file  # dynamic value
+      hydroref_ir_path <- hydroproj_ir_path %>%
+        gsub("ssp[0-9]{3}", "ssp370", x = .) %>%
+        gsub("2015[-]2100", "1985-2014", x = .)
+      
+      ir_stats <- summarize_drn_hydroproj_stats(
+        hydroproj_path = hydroproj_ir_path,
+        hydroref_path  = hydroref_ir_path,
+        subset_sites = TRUE,
+        in_sites_dt = sites_dt,
+        in_drn_dt = drn_dt,
+        min_date = as.Date("1990-01-01"),
+        include_metadata = FALSE
+      )
+
+      hydroproj_q_path <- gsub("flowstate", "discharge", hydroproj_ir_path)
+      hydroref_q_path  <- gsub("flowstate", "discharge", hydroref_ir_path)
+
+      q_stats <- summarize_drn_hydroproj_stats(
+        hydroproj_path = hydroproj_q_path,
+        hydroref_path  = hydroref_q_path,
+        subset_sites = TRUE,
+        in_sites_dt = sites_dt,
+        in_drn_dt = drn_dt,
+        min_date = as.Date("1990-01-01"),
+        include_metadata = TRUE
+      )
+      
+      connectivity_stats <- compute_connectivity_proj(
+        hydroproj_path = hydroproj_ir_path,
+        hydroref_path  = hydroref_ir_path,
+        in_drn_dt = drn_dt,
+        STcon_window = 365,
+        network_ssnready_shp_list = network_ssnready_shp_list,
+        subset_sites = TRUE,
+        in_sites_dt = sites_dt,
+        min_date = as.Date("1990-01-01")
+      )
+      connectivity_stats[, year := as.integer(year)]
+      
+      all_stats <- merge(ir_stats,
+                         connectivity_stats[, .SD, .SDcols=!c('country', 'gcm', 'scenario')],
+                         by.x = c("reach_id", "year"),
+                         by.y=c("cat", "year")) %>%
+        merge(q_stats, by = c("reach_id", "year"))
+
+      return(all_stats)
+    }
+    )
+    # ,
+    # pattern = map(hydro_proj_files)
+  )
+  , 
   
   tar_target(
     env_summarized,
@@ -1077,7 +1101,7 @@ analysis_targets <- list(
   )
   ,
   
-  #Run SSN for each chosen variable and time window
+  #Run SSN for each chosen variable and time window ----------------------------
   tar_map(
     values = tidyr::expand_grid(
       in_response_var = c("invsimpson", "richness"),
@@ -1553,24 +1577,16 @@ analysis_targets <- list(
                             out_dir = figdir) 
     })
   )
-
-  # tar_target(
-  #   model_selection_table_path,
-  #   fwrite(ssn_mods_miv_yr$model_selection_table,
-  #          file.path(resdir, paste0('ssn_mods_miv_yr_model_selection_table_',
-  #                                   format(Sys.Date(), '%Y%m%d'),
-  #                                   '.csv')
-  #          )
-  #   )
-  # ),
-  # 
-  # #Compute statistics for two horizons: 2041-2070 and 2071-2100
-  # tar_target(
-  #   ssn_preds,
-  #   predict_ssn_mod(in_ssn_mods = ssn_mods_miv_yr,
-  #                   proj_years = c(seq(1990,2020), seq(2040, 2099))
-  #   )
-  # ),
+  ,
+  
+  #Compute statistics for two horizons: 2041-2070 and 2071-2100
+  tar_target(
+    ssn_proj_dt,
+    predict_ssn_mod(in_ssn_mods = ssn_mods_miv_yr,
+                    in_hydrocon_sites_proj = rbindlist(hydrocon_sites_proj_gcm),
+                    proj_years = c(seq(1990,2020), seq(2040, 2099))
+    )
+  ),
   # 
   # tar_target(
   #   ssn_proj_maps,
