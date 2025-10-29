@@ -1577,16 +1577,16 @@ analysis_targets <- list(
                             out_dir = figdir) 
     })
   )
-  ,
-  
-  #Compute statistics for two horizons: 2041-2070 and 2071-2100
-  tar_target(
-    ssn_proj_dt,
-    predict_ssn_mod(in_ssn_mods = ssn_mods_miv_yr,
-                    in_hydrocon_sites_proj = rbindlist(hydrocon_sites_proj_gcm),
-                    proj_years = c(seq(1990,2020), seq(2040, 2099))
-    )
-  ),
+  # ,
+  # 
+  # #Compute statistics for two horizons: 2041-2070 and 2071-2100
+  # tar_target(
+  #   ssn_proj_dt,
+  #   predict_ssn_mod(in_ssn_mods = ssn_mods_miv_yr,
+  #                   in_hydrocon_sites_proj = rbindlist(hydrocon_sites_proj_gcm),
+  #                   proj_years = c(seq(1990,2020), seq(2040, 2099))
+  #   )
+  # )
   # 
   # tar_target(
   #   ssn_proj_maps,
@@ -1596,13 +1596,6 @@ analysis_targets <- list(
   #               out_dir = figdir)
   # )
 )
-
-# ,
-# 
-# tar_target(
-#   varcomp_rbind,
-#   rbindlist(lapply(hydrowindow_varcomp, `[[`, "dt"), idcol = "organism")
-# )
 
 list(preformatting_targets, mapped_hydrotargets, 
      combined_hydrotargets, analysis_targets) %>%

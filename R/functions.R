@@ -1339,6 +1339,38 @@ trans_pca_wrapper <- function(in_dt, in_cols_to_ordinate, id_cols,
     ))
   }
 }
+#------ scale_ssn_predictors ---------------------------------------------------
+# Scale predictor data (mean of 0 and SD of 1)
+scale_ssn_predictors <- function(in_ssn, in_vars, scale_ssn_preds) {
+  #Scale obs and preds
+  in_ssn$obs %<>% mutate(across(all_of(in_vars), ~ scale(.x), 
+                                .names = "{.col}_z"))
+  
+  # Compute scaling parameters from obs
+  scaling_means <- in_ssn$obs[paste0(in_vars, '_z')] %>%
+    st_drop_geometry() %>%
+    sapply(function(x) attr(x, "scaled:center"))
+  scaling_sds <- in_ssn$obs[paste0(in_vars, '_z')] %>%
+    st_drop_geometry() %>%
+    sapply(function(x) attr(x, "scaled:scale"))
+  
+  in_ssn$obs %<>% mutate_at(paste0(in_vars, '_z'), as.numeric)
+  
+  # Apply same scaling to preds
+  if (scale_ssn_preds) {
+    vars_in_preds <- intersect(in_vars, names(in_ssn$preds$preds_proj))
+    # in_ssn$preds$preds_hist <- in_ssn$preds$preds_hist %>%
+    #   mutate(across(all_of(vars_in_preds),
+    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+    #                 .names = "{.col}_z"))
+    in_ssn$preds$preds_proj %<>%
+      mutate(across(all_of(vars_in_preds),
+                    ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
+                    .names = "{.col}_z"))
+  }
+  
+  return(in_ssn)
+}
 #------ get_hydro_var_root -----------------------------------------------------
 get_hydro_var_root <- function(dt, in_place=TRUE) {
   if (!in_place) {
@@ -8518,42 +8550,14 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
   # ssn_miv$preds$preds_proj %>%
   #   mutate(meanQ3650past_sqrt = sqrt(meanQ3650past))
     
-  allvars_dt <- as.data.table(ssn_miv$obs) %>%
-    setorderv(c('country', 'site')) 
-
   # Define candidate hydrological variables
   hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
                         'meanQ3650past_sqrt')
   
   #Scale predictor data (mean of 0 and SD of 1) -----
-  if (scale_predictors) {
-    allvars_dt[
-      , (hydro_candidates) := lapply(.SD,
-                                     function(x) base::scale(x, center=T, scale=T)),
-      .SDcols = hydro_candidates]
-    
-    #Scale obs and preds
-    ssn_miv$obs %<>%
-      mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
-    
-    # Compute scaling parameters from obs
-    scaling_means <- sapply(st_drop_geometry(ssn_miv$obs[hydro_candidates]), 
-                            mean, na.rm = TRUE)
-    scaling_sds   <- sapply(st_drop_geometry(ssn_miv$obs[hydro_candidates]), 
-                            sd, na.rm = TRUE)
-    
-    # Apply same scaling to preds
-    # vars_in_preds <- intersect(hydro_candidates, names(ssn_miv$preds$preds_proj))
-    # 
-    # ssn_miv$preds$preds_hist <- ssn_miv$preds$preds_hist %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-    # ssn_miv$preds$preds_proj <- ssn_miv$preds$preds_proj %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-  }
+  ssn_miv <- scale_ssn_predictors(in_ssn = ssn_miv,
+                                       in_vars = hydro_candidates,
+                                       scale_ssn_preds = FALSE) 
   
   alpha_var <- 'mean_richness'
   
@@ -8878,6 +8882,15 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
   
   miv_rich_modlist[['mod50']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + stream_type + log10(basin_area_km2) + country:log10(basin_area_km2)'))) 
   
+  
+  # allvars_dt <- as.data.table(ssn_miv$obs) %>%
+  #   setorderv(c('country', 'site')) 
+  # 
+  # allvars_dt[
+  #   , (hydro_candidates) := lapply(.SD,
+  #                                  function(x) base::scale(x, center=T, scale=T)),
+  #   .SDcols = hydro_candidates]
+  # 
   # check_rf <- ranger::ranger(mean_richness ~ ., 
   #                            data= allvars_dt[, c(hydro_candidates, 'mean_richness', 'country'), with=F])
   # allvars_dt[, mean_rich_preds := ranger::predictions(check_rf)]
@@ -9027,41 +9040,13 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
     overwrite = TRUE
   )
   
-  allvars_dt <- as.data.table(ssn_miv$obs) %>%
-    setorderv(c('country', 'site')) 
-  
   # Define candidate hydrological variables
   hydro_candidates <- in_allvars_summarized$cols$hydro_con_summarized
   
   #Scale predictor data (mean of 0 and SD of 1) -----
-  if (scale_predictors) {
-    allvars_dt[
-      , (hydro_candidates) := lapply(.SD,
-                                     function(x) base::scale(x, center=T, scale=T)),
-      .SDcols = hydro_candidates]
-    
-    #Scale obs and preds
-    ssn_miv$obs %<>%
-      mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
-    
-    # Compute scaling parameters from obs
-    scaling_means <- sapply(st_drop_geometry(ssn_miv$obs[hydro_candidates]), 
-                            mean, na.rm = TRUE)
-    scaling_sds   <- sapply(st_drop_geometry(ssn_miv$obs[hydro_candidates]), 
-                            sd, na.rm = TRUE)
-    
-    # Apply same scaling to preds
-    # vars_in_preds <- intersect(hydro_candidates, names(ssn_miv$preds$preds_proj))
-    # 
-    # ssn_miv$preds$preds_hist <- ssn_miv$preds$preds_hist %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-    # ssn_miv$preds$preds_proj <- ssn_miv$preds$preds_proj %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-  }
+  ssn_miv <- scale_ssn_predictors(in_ssn = ssn_miv,
+                                  in_vars = hydro_candidates,
+                                  scale_ssn_preds = FALSE) 
   
   alpha_var <- 'mean_invsimpson'
   
@@ -9363,42 +9348,14 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
   # ssn_miv$preds$preds_hist$basin_area_km2_log10 <- log10(ssn_miv$preds$preds_hist$basin_area_km2)
   # ssn_miv$preds$preds_proj$basin_area_km2_log10 <- log10(ssn_miv$preds$preds_proj$basin_area_km2)
   
-  allvars_dt <- as.data.table(ssn_miv$obs) %>%
-    setorderv(c('country', 'site')) 
-  
   # Define candidate hydrological variables
   hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
                         'basin_area_km2_log10')
   
   #Scale predictor data (mean of 0 and SD of 1) -----
-  if (scale_predictors) {
-    allvars_dt[
-      , (hydro_candidates) := lapply(.SD,
-                                     function(x) base::scale(x, center=T, scale=T)),
-      .SDcols = hydro_candidates]
-    
-    #Scale obs and preds
-    ssn_miv$obs %<>%
-      mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
-    
-    # Compute scaling parameters from obs
-    scaling_means <- sapply(st_drop_geometry(ssn_miv$obs[hydro_candidates]), 
-                            mean, na.rm = TRUE)
-    scaling_sds   <- sapply(st_drop_geometry(ssn_miv$obs[hydro_candidates]), 
-                            sd, na.rm = TRUE)
-    
-    # Apply same scaling to preds
-    # vars_in_preds <- intersect(hydro_candidates, names(ssn_miv$preds$preds_proj))
-    # 
-    # ssn_miv$preds$preds_hist <- ssn_miv$preds$preds_hist %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-    # ssn_miv$preds$preds_proj <- ssn_miv$preds$preds_proj %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-  }
+  ssn_miv <- scale_ssn_predictors(in_ssn = ssn_miv,
+                                  in_vars = hydro_candidates,
+                                  scale_ssn_preds = FALSE) 
   
   #Exploratory plots-------
   if (interactive) {
@@ -9802,41 +9759,12 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     overwrite = TRUE
   )
   
-  allvars_dt <- as.data.table(ssn_dia_sedi$obs) %>%
-    setorderv(c('country', 'site')) 
-  
   # Define candidate hydrological variables
   hydro_candidates <- in_allvars_summarized$cols$hydro_con_summarized
   
-  #Scale predictor data (mean of 0 and SD of 1) -----
-  if (scale_predictors) {
-    allvars_dt[
-      , (hydro_candidates) := lapply(.SD,
-                                     function(x) base::scale(x, center=T, scale=T)),
-      .SDcols = hydro_candidates]
-    
-    #Scale obs and preds
-    ssn_dia_sedi$obs %<>%
-      mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
-    
-    # Compute scaling parameters from obs
-    scaling_means <- sapply(st_drop_geometry(ssn_dia_sedi$obs[hydro_candidates]), 
-                            mean, na.rm = TRUE)
-    scaling_sds   <- sapply(st_drop_geometry(ssn_dia_sedi$obs[hydro_candidates]), 
-                            sd, na.rm = TRUE)
-    
-    # Apply same scaling to preds
-    # vars_in_preds <- intersect(hydro_candidates, names(ssn_dia_sedi$preds$preds_proj))
-    # 
-    # ssn_dia_sedi$preds$preds_hist <- ssn_dia_sedi$preds$preds_hist %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-    # ssn_dia_sedi$preds$preds_proj <- ssn_dia_sedi$preds$preds_proj %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-  }
+  ssn_dia_sedi <- scale_ssn_predictors(in_ssn = ssn_dia_sedi,
+                                       in_vars = hydro_candidates,
+                                       scale_ssn_preds = FALSE)
   
   alpha_var <- 'mean_invsimpson'
   
@@ -10099,14 +10027,20 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
                      in_drn_dt = drn_dt,
                      plot=T)
     
-    
-    # check_rf <- ranger::ranger(mean_invsimpson ~ ., 
+    #Model with RF to see
+    # allvars_dt <- as.data.table(in_ssn$obs) %>%
+    #   setorderv(c('country', 'site')) 
+    # 
+    # allvars_dt[
+    #   , (in_vars) := lapply(.SD, function(x) base::scale(x, center=T, scale=T)),
+    #   .SDcols = in_vars]
+    #
+    # check_rf <- ranger::ranger(mean_invsimpson ~ .,
     #                            data= allvars_dt[, c(hydro_candidates, 'mean_invsimpson', 'country'), with=F])
     # allvars_dt[, mean_simps_preds := ranger::predictions(check_rf)]
     # ggplot(allvars_dt, aes(x=mean_simps_preds, y=mean_invsimpson, color=stream_type)) + 
     #   geom_point() +
     #   facet_wrap(~country)
-    
   }
   
   #####CHOOSE MOD 19 for continuous predictions###########
@@ -10282,43 +10216,13 @@ model_dia_sedi_richness_yr <- function(in_ssn_eu_summarized,
   # ssn_dia_sedi$preds$preds_hist$meanQ3650past_log10 <- log10(ssn_dia_sedi$preds$preds_hist$meanQ3650past)
   # ssn_dia_sedi$preds$preds_proj$meanQ3650past_log10 <- log10(ssn_dia_sedi$preds$preds_proj$meanQ3650past)
   
-  
-  allvars_dt <- as.data.table(ssn_dia_sedi$obs) %>%
-    setorderv(c('country', 'site')) 
-  
   # Define candidate hydrological variables
   hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
                         'meanQ3650past_log10')
   
-  #Scale predictor data (mean of 0 and SD of 1) -----
-  if (scale_predictors) {
-    allvars_dt[
-      , (hydro_candidates) := lapply(.SD,
-                                     function(x) base::scale(x, center=T, scale=T)),
-      .SDcols = hydro_candidates]
-    
-    #Scale obs and preds
-    ssn_dia_sedi$obs %<>%
-      mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
-    
-    # Compute scaling parameters from obs
-    scaling_means <- sapply(st_drop_geometry(ssn_dia_sedi$obs[hydro_candidates]), 
-                            mean, na.rm = TRUE)
-    scaling_sds   <- sapply(st_drop_geometry(ssn_dia_sedi$obs[hydro_candidates]), 
-                            sd, na.rm = TRUE)
-    
-    # # Apply same scaling to preds
-    # vars_in_preds <- intersect(hydro_candidates, names(ssn_dia_sedi$preds$preds_proj))
-    # 
-    # ssn_dia_sedi$preds$preds_hist <- ssn_dia_sedi$preds$preds_hist %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-    # ssn_dia_sedi$preds$preds_proj <- ssn_dia_sedi$preds$preds_proj %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-  }
+  ssn_dia_sedi <- scale_ssn_predictors(in_ssn = ssn_dia_sedi,
+                                       in_vars = hydro_candidates,
+                                       scale_ssn_preds = FALSE)
   
   alpha_var <- 'mean_richness'
   
@@ -10803,43 +10707,13 @@ model_dia_biof_richness_yr <- function(in_ssn_eu_summarized,
   # ssn_dia_biof$preds$preds_hist$meanQ3650past_log10 <- log10(ssn_dia_biof$preds$preds_hist$meanQ3650past)
   # ssn_dia_biof$preds$preds_proj$meanQ3650past_log10 <- log10(ssn_dia_biof$preds$preds_proj$meanQ3650past)
   
-  
-  allvars_dt <- as.data.table(ssn_dia_biof$obs) %>%
-    setorderv(c('country', 'site')) 
-  
   # Define candidate hydrological variables
   hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
                         "meanQ3650past_log10", "particle_size")
   
-  #Scale predictor data (mean of 0 and SD of 1) -----
-  if (scale_predictors) {
-    allvars_dt[
-      , (hydro_candidates) := lapply(.SD,
-                                     function(x) base::scale(x, center=T, scale=T)),
-      .SDcols = hydro_candidates]
-    
-    #Scale obs and preds
-    ssn_dia_biof$obs %<>%
-      mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
-    
-    # Compute scaling parameters from obs
-    scaling_means <- sapply(st_drop_geometry(ssn_dia_biof$obs[hydro_candidates]), 
-                            mean, na.rm = TRUE)
-    scaling_sds   <- sapply(st_drop_geometry(ssn_dia_biof$obs[hydro_candidates]), 
-                            sd, na.rm = TRUE)
-    
-    # Apply same scaling to preds
-    # vars_in_preds <- intersect(hydro_candidates, names(ssn_dia_biof$preds$preds_proj))
-    # 
-    # ssn_dia_biof$preds$preds_hist <- ssn_dia_biof$preds$preds_hist %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-    # ssn_dia_biof$preds$preds_proj <- ssn_dia_biof$preds$preds_proj %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-  }
+  ssn_dia_biof <- scale_ssn_predictors(in_ssn = ssn_dia_biof,
+                                       in_vars = hydro_candidates,
+                                       scale_ssn_preds = FALSE)
   
   alpha_var <- 'mean_richness'
   
@@ -11286,43 +11160,14 @@ model_fun_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   # ssn_fun_sedi$preds$preds_hist$STcon_m10_directed_avg_samp_log10 <- log10(ssn_fun_sedi$preds$preds_hist$STcon_m10_directed_avg_samp)
   # ssn_fun_sedi$preds$preds_proj$STcon_m10_directed_avg_samp_log10 <- log10(ssn_fun_sedi$preds$preds_proj$STcon_m10_directed_avg_samp)
   
-
-  allvars_dt <- as.data.table(ssn_fun_sedi$obs) %>%
-    setorderv(c('country', 'site')) 
   
   # Define candidate hydrological variables
   hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
                         'STcon_m10_directed_avg_samp_log10')
   
-  #Scale predictor data (mean of 0 and SD of 1) -----
-  if (scale_predictors) {
-    allvars_dt[
-      , (hydro_candidates) := lapply(.SD,
-                                     function(x) base::scale(x, center=T, scale=T)),
-      .SDcols = hydro_candidates]
-    
-    #Scale obs and preds
-    ssn_fun_sedi$obs %<>%
-      mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
-    
-    # Compute scaling parameters from obs
-    scaling_means <- sapply(st_drop_geometry(ssn_fun_sedi$obs[hydro_candidates]), 
-                            mean, na.rm = TRUE)
-    scaling_sds   <- sapply(st_drop_geometry(ssn_fun_sedi$obs[hydro_candidates]), 
-                            sd, na.rm = TRUE)
-    
-    # Apply same scaling to preds
-    # vars_in_preds <- intersect(hydro_candidates, names(ssn_fun_sedi$preds$preds_proj))
-    # 
-    # ssn_fun_sedi$preds$preds_hist <- ssn_fun_sedi$preds$preds_hist %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-    # ssn_fun_sedi$preds$preds_proj <- ssn_fun_sedi$preds$preds_proj %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-  }
+  ssn_fun_sedi <- scale_ssn_predictors(in_ssn = ssn_fun_sedi,
+                                       in_vars = hydro_candidates,
+                                       scale_ssn_preds = FALSE)
   
   alpha_var <- 'mean_invsimpson'
   
@@ -11781,43 +11626,14 @@ model_fun_sedi_richness_yr <- function(in_ssn_eu_summarized,
   #   log10(ssn_fun_sedi$preds$preds_proj$Fdist_mean_10past_undirected_avg_samp + 1)
   # ssn_fun_sedi$preds$preds_proj$basin_area_km2_log10 <- log10(ssn_fun_sedi$preds$preds_proj$basin_area_km2)
   
-  allvars_dt <- as.data.table(ssn_fun_sedi$obs) %>%
-    setorderv(c('country', 'site')) 
-  
   # Define candidate hydrological variables
   hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
                         "Fdist_mean_10past_undirected_avg_samp_log10",
                         "basin_area_km2_log10")
   
-  #Scale predictor data (mean of 0 and SD of 1) -----
-  if (scale_predictors) {
-    allvars_dt[
-      , (hydro_candidates) := lapply(.SD,
-                                     function(x) base::scale(x, center=T, scale=T)),
-      .SDcols = hydro_candidates]
-    
-    #Scale obs and preds
-    ssn_fun_sedi$obs %<>%
-      mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
-    
-    # Compute scaling parameters from obs
-    scaling_means <- sapply(st_drop_geometry(ssn_fun_sedi$obs[hydro_candidates]), 
-                            mean, na.rm = TRUE)
-    scaling_sds   <- sapply(st_drop_geometry(ssn_fun_sedi$obs[hydro_candidates]), 
-                            sd, na.rm = TRUE)
-    
-    # Apply same scaling to preds
-    # vars_in_preds <- intersect(hydro_candidates, names(ssn_fun_sedi$preds$preds_proj))
-    # 
-    # ssn_fun_sedi$preds$preds_hist <- ssn_fun_sedi$preds$preds_hist %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-    # ssn_fun_sedi$preds$preds_proj <- ssn_fun_sedi$preds$preds_proj %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-  }
+  ssn_fun_sedi <- scale_ssn_predictors(in_ssn = ssn_fun_sedi,
+                                       in_vars = hydro_candidates,
+                                       scale_ssn_preds = FALSE)
   
   alpha_var <- 'mean_richness'
   
@@ -12269,42 +12085,13 @@ model_fun_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
   # ssn_fun_biof$preds$preds_proj$DurD_CV10yrpast_sqrt <- sqrt(ssn_fun_biof$preds$preds_proj$DurD_CV10yrpast)
   
   
-  allvars_dt <- as.data.table(ssn_fun_biof$obs) %>%
-    setorderv(c('country', 'site')) 
-  
   # Define candidate hydrological variables
   hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
                         "DurD_CV10yrpast_sqrt")
   
-  #Scale predictor data (mean of 0 and SD of 1) -----
-  if (scale_predictors) {
-    allvars_dt[
-      , (hydro_candidates) := lapply(.SD,
-                                     function(x) base::scale(x, center=T, scale=T)),
-      .SDcols = hydro_candidates]
-    
-    #Scale obs and preds
-    ssn_fun_biof$obs %<>%
-      mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
-    
-    # Compute scaling parameters from obs
-    scaling_means <- sapply(st_drop_geometry(ssn_fun_biof$obs[hydro_candidates]), 
-                            mean, na.rm = TRUE)
-    scaling_sds   <- sapply(st_drop_geometry(ssn_fun_biof$obs[hydro_candidates]), 
-                            sd, na.rm = TRUE)
-    
-    # Apply same scaling to preds
-    # vars_in_preds <- intersect(hydro_candidates, names(ssn_fun_biof$preds$preds_proj))
-    # 
-    # ssn_fun_biof$preds$preds_hist <- ssn_fun_biof$preds$preds_hist %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-    # ssn_fun_biof$preds$preds_proj <- ssn_fun_biof$preds$preds_proj %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-  }
+  ssn_fun_biof <- scale_ssn_predictors(in_ssn = ssn_fun_biof,
+                                       in_vars = hydro_candidates,
+                                       scale_ssn_preds = FALSE)
   
   alpha_var <- 'mean_invsimpson'
   
@@ -12768,41 +12555,13 @@ model_fun_biof_richness_yr <- function(in_ssn_eu_summarized,
     overwrite = TRUE
   )
   
-  allvars_dt <- as.data.table(ssn_fun_biof$obs) %>%
-    setorderv(c('country', 'site')) 
-  
   # Define candidate hydrological variables
   hydro_candidates <- in_allvars_summarized$cols$hydro_con_summarized
   
-  #Scale predictor data (mean of 0 and SD of 1) -----
-  if (scale_predictors) {
-    allvars_dt[
-      , (hydro_candidates) := lapply(.SD,
-                                     function(x) base::scale(x, center=T, scale=T)),
-      .SDcols = hydro_candidates]
-    
-    #Scale obs and preds
-    ssn_fun_biof$obs %<>%
-      mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
-    
-    # Compute scaling parameters from obs
-    scaling_means <- sapply(st_drop_geometry(ssn_fun_biof$obs[hydro_candidates]), 
-                            mean, na.rm = TRUE)
-    scaling_sds   <- sapply(st_drop_geometry(ssn_fun_biof$obs[hydro_candidates]), 
-                            sd, na.rm = TRUE)
-    
-    # Apply same scaling to preds
-    # vars_in_preds <- intersect(hydro_candidates, names(ssn_fun_biof$preds$preds_proj))
-    # 
-    # ssn_fun_biof$preds$preds_hist <- ssn_fun_biof$preds$preds_hist %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-    # ssn_fun_biof$preds$preds_proj <- ssn_fun_biof$preds$preds_proj %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-  }
+  # Scale 
+  ssn_fun_biof <- scale_ssn_predictors(in_ssn = ssn_fun_biof,
+                                       in_vars = hydro_candidates,
+                                       scale_ssn_preds = FALSE)
   
   alpha_var <- 'mean_richness'
   
@@ -13254,42 +13013,14 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   # ssn_bac_sedi$preds$preds_hist$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_sedi$preds$preds_hist$STcon_m10_directed_avg_samp)
   # ssn_bac_sedi$preds$preds_proj$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_sedi$preds$preds_proj$STcon_m10_directed_avg_samp)
   
-  allvars_dt <- as.data.table(ssn_bac_sedi$obs) %>%
-    setorderv(c('country', 'site')) 
-  
   # Define candidate hydrological variables
   hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
                         'STcon_m10_directed_avg_samp_log10')
   
   #Scale predictor data (mean of 0 and SD of 1) -----
-  if (scale_predictors) {
-    allvars_dt[
-      , (hydro_candidates) := lapply(.SD,
-                                     function(x) base::scale(x, center=T, scale=T)),
-      .SDcols = hydro_candidates]
-    
-    #Scale obs and preds
-    ssn_bac_sedi$obs %<>%
-      mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
-    
-    # Compute scaling parameters from obs
-    scaling_means <- sapply(st_drop_geometry(ssn_bac_sedi$obs[hydro_candidates]), 
-                            mean, na.rm = TRUE)
-    scaling_sds   <- sapply(st_drop_geometry(ssn_bac_sedi$obs[hydro_candidates]), 
-                            sd, na.rm = TRUE)
-    
-    # Apply same scaling to preds
-    # vars_in_preds <- intersect(hydro_candidates, names(ssn_bac_sedi$preds$preds_proj))
-    
-    # ssn_bac_sedi$preds$preds_hist <- ssn_bac_sedi$preds$preds_hist %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-    # ssn_bac_sedi$preds$preds_proj <- ssn_bac_sedi$preds$preds_proj %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-  }
+  ssn_bac_sedi <- scale_ssn_predictors(in_ssn = ssn_bac_sedi,
+                                       in_vars = hydro_candidates,
+                                       scale_ssn_preds = FALSE)
   
   alpha_var <- 'mean_invsimpson'
   
@@ -13770,43 +13501,14 @@ model_bac_sedi_richness_yr <- function(in_ssn_eu_summarized,
     among_predpts = TRUE,
     overwrite = TRUE
   )
-  
-  allvars_dt <- as.data.table(ssn_bac_sedi$obs) %>%
-    setorderv(c('country', 'site')) 
-  
+
   # Define candidate hydrological variables
   hydro_candidates <- in_allvars_summarized$cols$hydro_con_summarized
   
   #Scale predictor data (mean of 0 and SD of 1) -----
-  if (scale_predictors) {
-    allvars_dt[
-      , (hydro_candidates) := lapply(.SD,
-                                     function(x) base::scale(x, center=T, scale=T)),
-      .SDcols = hydro_candidates]
-    
-    #Scale obs and preds
-    ssn_bac_sedi$obs %<>%
-      mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
-    
-    # Compute scaling parameters from obs
-    scaling_means <- sapply(st_drop_geometry(ssn_bac_sedi$obs[hydro_candidates]), 
-                            mean, na.rm = TRUE)
-    scaling_sds   <- sapply(st_drop_geometry(ssn_bac_sedi$obs[hydro_candidates]), 
-                            sd, na.rm = TRUE)
-    
-    # Apply same scaling to preds
-    # vars_in_preds <- intersect(hydro_candidates, names(ssn_bac_sedi$preds$preds_proj))
-    # 
-    # ssn_bac_sedi$preds$preds_hist <- ssn_bac_sedi$preds$preds_hist %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-    # ssn_bac_sedi$preds$preds_proj <- ssn_bac_sedi$preds$preds_proj %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-  }
-  
+  ssn_bac_sedi <- scale_ssn_predictors(in_ssn = ssn_bac_sedi,
+                                       in_vars = hydro_candidates,
+                                       scale_ssn_preds = FALSE)
   alpha_var <- 'mean_richness'
   
   #Exploratory plots-------
@@ -14250,44 +13952,15 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
   ssn_bac_biof$obs$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_biof$obs$STcon_m10_directed_avg_samp)
   # ssn_bac_biof$preds$preds_hist$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_biof$preds$preds_hist$STcon_m10_directed_avg_samp)
   # ssn_bac_biof$preds$preds_proj$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_biof$preds$preds_proj$STcon_m10_directed_avg_samp)
-  
-  allvars_dt <- as.data.table(ssn_bac_biof$obs) %>%
-    setorderv(c('country', 'site')) 
-  
+
   # Define candidate hydrological variables
   hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
                         "STcon_m10_directed_avg_samp_log10")
   
   #Scale predictor data (mean of 0 and SD of 1) -----
-  if (scale_predictors) {
-    allvars_dt[
-      , (hydro_candidates) := lapply(.SD,
-                                     function(x) base::scale(x, center=T, scale=T)),
-      .SDcols = hydro_candidates]
-    
-    #Scale obs and preds
-    ssn_bac_biof$obs %<>%
-      mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
-    
-    # Compute scaling parameters from obs
-    scaling_means <- sapply(st_drop_geometry(ssn_bac_biof$obs[hydro_candidates]), 
-                            mean, na.rm = TRUE)
-    scaling_sds   <- sapply(st_drop_geometry(ssn_bac_biof$obs[hydro_candidates]), 
-                            sd, na.rm = TRUE)
-    
-    # Apply same scaling to preds
-    # vars_in_preds <- intersect(hydro_candidates, names(ssn_bac_biof$preds$preds_proj))
-    # 
-    # ssn_bac_biof$preds$preds_hist <- ssn_bac_biof$preds$preds_hist %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-    # ssn_bac_biof$preds$preds_proj <- ssn_bac_biof$preds$preds_proj %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-  }
-  
+  ssn_bac_biof <- scale_ssn_predictors(in_ssn = ssn_bac_biof,
+                                       in_vars = hydro_candidates,
+                                       scale_ssn_preds = FALSE)
   alpha_var <- 'mean_invsimpson'
   
   #Exploratory plots-------
@@ -14772,41 +14445,13 @@ model_bac_biof_richness_yr <- function(in_ssn_eu_summarized,
     overwrite = TRUE
   )
   
-  allvars_dt <- as.data.table(ssn_bac_biof$obs) %>%
-    setorderv(c('country', 'site')) 
-  
   # Define candidate hydrological variables
   hydro_candidates <- in_allvars_summarized$cols$hydro_con_summarized
   
   #Scale predictor data (mean of 0 and SD of 1) -----
-  if (scale_predictors) {
-    allvars_dt[
-      , (hydro_candidates) := lapply(.SD,
-                                     function(x) base::scale(x, center=T, scale=T)),
-      .SDcols = hydro_candidates]
-    
-    #Scale obs and preds
-    ssn_bac_biof$obs %<>%
-      mutate(across(all_of(hydro_candidates), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
-    
-    # Compute scaling parameters from obs
-    scaling_means <- sapply(st_drop_geometry(ssn_bac_biof$obs[hydro_candidates]), 
-                            mean, na.rm = TRUE)
-    scaling_sds   <- sapply(st_drop_geometry(ssn_bac_biof$obs[hydro_candidates]), 
-                            sd, na.rm = TRUE)
-    
-    # Apply same scaling to preds
-    # vars_in_preds <- intersect(hydro_candidates, names(ssn_bac_biof$preds$preds_proj))
-    # 
-    # ssn_bac_biof$preds$preds_hist <- ssn_bac_biof$preds$preds_hist %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-    # ssn_bac_biof$preds$preds_proj <- ssn_bac_biof$preds$preds_proj %>%
-    #   mutate(across(all_of(vars_in_preds),
-    #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
-    #                 .names = "{.col}_z"))
-  }
+  ssn_bac_biof <- scale_ssn_predictors(in_ssn = ssn_bac_biof,
+                                       in_vars = hydro_candidates,
+                                       scale_ssn_preds = FALSE)
   
   alpha_var <- 'mean_richness'
   
@@ -15327,10 +14972,10 @@ plot_ssn_mod_diagplot <- function(in_mod_fit,
 }
 
 #------ predict_ssn_mod -------------------------------------------------------
-in_ssn_mods = tar_read(ssn_mods_miv_yr)
-in_hydrocon_sites_proj = rbindlist(tar_read(hydrocon_sites_proj_gcm))
-# proj_years = c(seq(1990,2020), seq(2040, 2099)
-proj_years <- c(2025, 2026, 2030, 2035, 2041)
+# in_ssn_mods = tar_read(ssn_mods_miv_richness_yr)
+# in_hydrocon_sites_proj = rbindlist(tar_read(hydrocon_sites_proj_gcm))
+# # proj_years = c(seq(1990,2020), seq(2040, 2099)
+# proj_years <- c(2025, 2026, 2030, 2035, 2041)
 
 
 #' Predict future richness from a fitted SSN model
@@ -15356,6 +15001,23 @@ proj_years <- c(2025, 2026, 2030, 2035, 2041)
 #'       GCM and scenario information.
 #'   }
 predict_ssn_mod <- function(in_ssn_mods, proj_years = NULL) {
+  
+  in_ssn_mods$ssn_mod_fit
+  
+  #Format projected variable
+  names(in_hydrocon_sites_proj)
+  setnames(in_hydrocon_sites_proj,
+           c('DurD_yr', 'FreD_yr'), 
+           c('DurD_samp', 'FreD_samp')
+  )
+  
+  in_hydrocon_sites_proj[, `:=`(
+    meanQ3650past_sqrt = sqrt(meanQ3650past)
+  )]
+  
+  in_ssn_mods$ssn_mod_fit$ssn.object$obs$meanQ3650past_sqrt
+  
+  
   #Contemporary predictions ------------------------------------------------------
   # For the year 2021.
   preds_hist_dt <- augment(in_ssn_mods$ssn_mod_fit 
