@@ -33,7 +33,6 @@ drn_dt <- data.table(
   color = c("#8c510a", "#bf812d", "#01665e", "#80cdc1", "#8073ac", "#543005")
 )
 
-
 hydro_combi <- expand.grid(
   in_country = drn_dt$country,
   in_varname =  c('isflowing', 'qsim'),
@@ -455,6 +454,16 @@ mapped_hydrotargets <- tarchetypes::tar_map(
     #selected_sims = 1:20)
   ),
   
+  #Fill missing data for reaches that have not been modeled (a handful)
+  tar_target(
+    hydromod_hist_filled_dt,
+    impute_hydromod(in_network_path = network_ssnready_gpkg_list[[in_country]],
+                    varname = in_varname,
+                    in_hydromod_drn = hydromod_hist_dt,
+                    in_network_idcol = 'cat_cor'
+    )
+  ),
+  
   #Compute hydrological statistics for a given DRN for all dates
   tar_target(
     hydrostats_sites_hist,
@@ -462,7 +471,7 @@ mapped_hydrotargets <- tarchetypes::tar_map(
       in_network_path = network_ssnready_shp_list[[in_country]],
       in_sites_dt = sites_dt[country == in_country,],
       varname = in_varname,
-      in_hydromod_drn = hydromod_hist_dt,
+      in_hydromod_filled = hydromod_hist_filled_dt,
       in_network_idcol = 'cat')
   ),
   
@@ -477,7 +486,7 @@ mapped_hydrotargets <- tarchetypes::tar_map(
 combined_hydrotargets <- list(
   tar_combine(
     hydromod_comb_hist,
-    mapped_hydrotargets[['hydromod_hist_dt']],
+    mapped_hydrotargets[['hydromod_hist_filled_dt']],
     command = list(!!!.x)
   ),
   tar_combine(
@@ -489,7 +498,7 @@ combined_hydrotargets <- list(
 
 
 
-analysis_targets <- list(
+formatting_targets <- list(
   #Prepare data for STcon
   tar_target(
     preformatted_data_STcon,
@@ -497,7 +506,7 @@ analysis_targets <- list(
       # print(in_country)
       prepare_data_for_STcon(
         in_hydromod_drn = hydromod_comb_hist[[paste0(
-          "hydromod_hist_dt_", in_country, '_isflowing')]], 
+          "hydromod_hist_filled_dt_", in_country, '_isflowing')]], 
         in_net_shp_path = network_ssnready_shp_list[[in_country]]
       )
     }) %>% setNames(names(network_ssnready_shp_list))
@@ -714,10 +723,10 @@ analysis_targets <- list(
         min_date = as.Date("1990-01-01"),
         include_metadata = FALSE
       )
-
+      
       hydroproj_q_path <- gsub("flowstate", "discharge", hydroproj_ir_path)
       hydroref_q_path  <- gsub("flowstate", "discharge", hydroref_ir_path)
-
+      
       q_stats <- summarize_drn_hydroproj_stats(
         hydroproj_path = hydroproj_q_path,
         hydroref_path  = hydroref_q_path,
@@ -745,7 +754,7 @@ analysis_targets <- list(
                          by.x = c("reach_id", "year"),
                          by.y=c("cat", "year")) %>%
         merge(q_stats, by = c("reach_id", "year"))
-
+      
       return(all_stats)
     }
     )
@@ -821,7 +830,7 @@ analysis_targets <- list(
   ,
   
   ##############################################################################
-  # ANALYZE DATA
+  # EXPLORE DATA
   ##############################################################################
   #All organisms: max 12
   tar_target(
@@ -1036,9 +1045,10 @@ analysis_targets <- list(
     hydro_vars_dt,
     create_hydro_vars_dt(in_hydro_vars_forssn = hydro_vars_forssn)
   )
-  ,
-  
-  
+)
+
+
+temporal_analysis_targets <- list(   
   # Run a first SSN with a single hydrological variable for each organism
   # to determine the top spatial covariance types
   tar_target(
@@ -1371,11 +1381,13 @@ analysis_targets <- list(
     write_plot = T,
     out_dir = figdir)
   )
-  ,
-  
-  ##############################################################################
-  # MODEL SITES SUMMARIZED
-  ##############################################################################
+)
+
+##############################################################################
+# MODEL SITES SUMMARIZED
+##############################################################################
+
+annual_analysis_targets <- list(   
   #Ordinate local environmental variables to use axes in regression models
   tar_target(
     local_env_pca_summarized,
@@ -1577,17 +1589,20 @@ analysis_targets <- list(
                             out_dir = figdir) 
     })
   )
-  # ,
-  # 
-  # #Compute statistics for two horizons: 2041-2070 and 2071-2100
-  # tar_target(
-  #   ssn_proj_dt,
-  #   predict_ssn_mod(in_ssn_mods = ssn_mods_miv_yr,
-  #                   in_hydrocon_sites_proj = rbindlist(hydrocon_sites_proj_gcm),
-  #                   proj_years = c(seq(1990,2020), seq(2040, 2099))
-  #   )
-  # )
-  # 
+  ,
+  
+  #Compute statistics for two horizons: 2041-2070 and 2071-2100
+  tar_target(
+    ssn_proj_dt,
+    lapply(ssn_mod_yr_fit_multiorganism, function(in_mod_fit) {
+      print(in_mod_fit)
+      predict_ssn_mod(in_ssn_mod_fit = in_mod_fit,
+                      in_hydrocon_sites_proj = rbindlist(hydrocon_sites_proj_gcm),
+                      type_predict = 'link',
+                      predict_years = c(seq(1991, 2020), seq(2041, 2100)))
+    }) %>% rbindlist(fill=T)
+  )
+  
   # tar_target(
   #   ssn_proj_maps,
   #   map_ssn_mod(in_ssn = ssn_eu_summarized,
@@ -1597,6 +1612,12 @@ analysis_targets <- list(
   # )
 )
 
-list(preformatting_targets, mapped_hydrotargets, 
-     combined_hydrotargets, analysis_targets) %>%
+
+list(preformatting_targets
+     , mapped_hydrotargets
+     , combined_hydrotargets
+     , formatting_targets
+     # , temporal_analysis_targets
+     # , annual_analysis_targets
+) %>%
   unlist(recursive = FALSE)

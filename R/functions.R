@@ -1343,22 +1343,26 @@ trans_pca_wrapper <- function(in_dt, in_cols_to_ordinate, id_cols,
 # Scale predictor data (mean of 0 and SD of 1)
 scale_ssn_predictors <- function(in_ssn, in_vars, scale_ssn_preds) {
   #Scale obs and preds
-  in_ssn$obs %<>% mutate(across(all_of(in_vars), ~ scale(.x), 
+  vars_in_obs <- intersect(in_vars, names(in_ssn$obs))
+  
+  in_ssn$obs %<>% mutate(across(all_of(vars_in_obs), ~ scale(.x), 
                                 .names = "{.col}_z"))
   
   # Compute scaling parameters from obs
-  scaling_means <- in_ssn$obs[paste0(in_vars, '_z')] %>%
+  scaling_means <- in_ssn$obs[paste0(vars_in_obs, '_z')] %>%
     st_drop_geometry() %>%
     sapply(function(x) attr(x, "scaled:center"))
-  scaling_sds <- in_ssn$obs[paste0(in_vars, '_z')] %>%
+  names(scaling_means) <- gsub('_z$', '', names(scaling_means))
+  scaling_sds <- in_ssn$obs[paste0(vars_in_obs, '_z')] %>%
     st_drop_geometry() %>%
     sapply(function(x) attr(x, "scaled:scale"))
+  names(scaling_sds) <- gsub('_z$', '', names(scaling_sds))
   
-  in_ssn$obs %<>% mutate_at(paste0(in_vars, '_z'), as.numeric)
+  in_ssn$obs %<>% mutate_at(paste0(vars_in_obs, '_z'), as.numeric)
   
   # Apply same scaling to preds
   if (scale_ssn_preds) {
-    vars_in_preds <- intersect(in_vars, names(in_ssn$preds$preds_proj))
+    vars_in_preds <- intersect(vars_in_obs, names(in_ssn$preds$preds_proj))
     # in_ssn$preds$preds_hist <- in_ssn$preds$preds_hist %>%
     #   mutate(across(all_of(vars_in_preds),
     #                 ~ (.x - scaling_means[cur_column()]) / scaling_sds[cur_column()],
@@ -1592,6 +1596,34 @@ check_resid_corr <- function(in_ssn_mod, in_idcol='site',
   
   return(resid_corr_plot)
 }
+#------ get_link_function ------------------------------------------------------
+get_inverse_link_function <- function(fam) {
+  inv_link <- switch(
+    tolower(fam),
+    
+    # Gaussian / Identity link
+    "gaussian"   = identity,
+    "identity"   = identity,
+    
+    # Poisson, Negative Binomial, Lognormal, Exponential
+    "poisson"    = exp,
+    "nbinomial"  = exp,
+    "lognormal"  = exp,
+    "exponential"= exp,
+    
+    # Binomial
+    "binomial"   = plogis,   # inverse logit
+    
+    # Gamma (inverse link)
+    "gamma"      = function(eta) 1 / eta,
+    
+    # Fallback
+    stop(sprintf("Family '%s' not recognized or no inverse link defined.", fam))
+  )
+    
+ return(inv_link) 
+}
+
 #------ format_ssn_glm_equation ------------------------------------------------
 # in_mod_fit <- tar_read(ssn_mods_miv_invsimpson_yr)$ssn_mod_fit
 # in_mod_fit <- tar_read(ssn_mods_miv_richness_yr)$ssn_mod_fit
@@ -1629,6 +1661,7 @@ format_ssn_glm_equation <- function(in_mod_fit, greek = TRUE) {
   
   # Detect family (for SSN2)
   fam <- in_mod_fit$family
+
   if (!is.null(fam)) {
     link <- switch(
       fam,
@@ -3528,7 +3561,7 @@ remove_pseudonodes <- function(in_net, equal_cols = FALSE,
 }
 
 #Parameters
-# in_country <- 'Croatia'
+# in_country <- 'France'
 # rivnet_path <- tar_read(network_nocomplexconf_gpkg_list)[[in_country]]
 # strahler_dt <- tar_read(network_strahler)[[in_country]]
 # in_reaches_hydromod_dt <- tar_read(reaches_dt)[country==in_country,]
@@ -3961,12 +3994,84 @@ reassign_netids <- function(rivnet_path, strahler_dt,
   
   return(out_path)
 }
+#------ impute_hydromod --------------------------------------------------------
+# in_country <- 'Hungary'
+# varname <- 'isflowing' #'qsim' #
+# in_network_path <- tar_read(network_ssnready_gpkg_list)[[in_country]]
+# in_hydromod_drn <- tar_read_raw((paste0('hydromod_hist_dt_', in_country, '_', varname)))
+# in_network_idcol = 'cat_cor'
+
+impute_hydromod <- function(in_network_path,
+                            varname,
+                            in_hydromod_drn,
+                            in_network_idcol = 'cat_cor') {
+  setDT(in_hydromod_drn$data_all)
+  setDT(in_hydromod_drn$dates_format) 
+  
+  #Import network shapefiles and get their length
+  network_v <- terra::vect(in_network_path)
+  network_v$reach_length <- terra::perim(network_v)
+  reach_dt <- as.data.table(network_v) %>%
+    setnames(in_network_idcol, 'reach_id', skip_absent=TRUE)
+  remove(network_v)
+  
+  #Merge hydro data and reach length for computing network-wide statistics
+  #qdat[, unique(reach_id)[!(unique(reach_id) %in% reach_dt$reach_id)]] 
+  #Two IDs are not in the shapefile for Finland? maybe a hydrological unit not associated
+  hydromod_sub <- in_hydromod_drn$data_all[reach_id %in% 
+                                             unique(reach_dt$reach_id),]
+  
+  #For those segments that are in the network but that were not modeled,
+  # get the intermittence status of the upstream segment with the largest
+  # drainage area
+  #(i.e.: their ID exists topologically, and they were corrected to be correct
+  # but they were not modeled, so they have no discharge or intermittence data,
+  unmodeled_reaches_dt <- reach_dt[!(reach_id %in% 
+                                       unique(hydromod_sub$reach_id)),]
+  
+  if (varname == 'isflowing') {
+    
+    unmodeled_hydromod <- reach_dt[
+      to_reach_hydromod %in% unmodeled_reaches_dt$reach_id, 
+      list(
+        largest_upstream_cat_cor = .SD[which.max(upstream_area_net), reach_id]
+      ),
+      by=to_reach_hydromod] %>%
+      merge(hydromod_sub, by.x='largest_upstream_cat_cor', by.y='reach_id') %>%
+      .[, largest_upstream_cat_cor := NULL] %>%
+      setnames('to_reach_hydromod', 'reach_id')
+    
+  } else  if (varname == 'qsim') {
+    
+    unmodeled_hydromod <- in_hydromod_drn$data_all[
+      reach_id %in% reach_dt[to_reach_hydromod %in% unmodeled_reaches_dt$reach_id, reach_id], ] %>%
+      merge(reach_dt[, .(reach_id, to_reach_hydromod)], by='reach_id', all.x=T) %>%
+      .[to_reach_hydromod %in% unmodeled_reaches_dt$reach_id, 
+        .(qsim = sum(get(varname), na.rm=TRUE)),
+        by=.(to_reach_hydromod, date)] %>%
+      setnames('to_reach_hydromod', 'reach_id')
+    
+  }
+  
+  #Bind back to modeled data and format dates
+  hydromod_filled <- rbind(hydromod_sub, unmodeled_hydromod) %>%
+    merge(in_hydromod_drn$dates_format[, .(date, month, hy, doy)],
+          by='date', all.x=T, all.y=F)
+  
+  return(hydromod_filled)
+  # ggplot(hydromod_filled[reach_id %in% c('2424600', '2490400',
+  #                                         '2504000', '2504200',
+  #                                         '2424400', '2503800') &
+  #                          date < as.Date('1970-01-01'),]) +
+  #   geom_line(aes(x=date, y=qsim, color=as.factor(reach_id))) +
+  #   scale_y_log10()
+}
 #------ compute_hydrostats_drn -------------------------------------------------
-# in_country <- 'Croatia'
-# varname <-  'isflowing' #qsim
+# in_country <- 'Hungary'
+# varname <- 'qsim' #'isflowing'
 # in_sites_dt <- tar_read(sites_dt)[country == in_country,]
 # in_network_path <- tar_read(network_ssnready_gpkg_list)[[in_country]]
-# in_hydromod_drn <- tar_read_raw((paste0('hydromod_dt_', in_country, '_', varname)))
+# in_hydromod_filled <- tar_read_raw((paste0('hydromod_hist_filled_dt_', in_country, '_', varname)))
 # in_network_idcol = 'cat_cor'
 
 #' @title Compute hydrological statistics for a DRN
@@ -3987,28 +4092,23 @@ reassign_netids <- function(rivnet_path, strahler_dt,
 compute_hydrostats_drn <- function(in_network_path,
                                    in_sites_dt,
                                    varname,
-                                   in_hydromod_drn,
+                                   in_hydromod_filled,
                                    in_network_idcol = 'cat') {
-  setDT(in_hydromod_drn$data_all)
-  setDT(in_hydromod_drn$dates_format) 
-  
   #-------------------- Compute intermittence statistics -----------------------
   if (varname == 'isflowing') {
     #Import network shapefiles and get their length
     network_v <- terra::vect(in_network_path)
     network_v$reach_length <- terra::perim(network_v)
     reach_dt <- as.data.table(network_v[, c(in_network_idcol, 'reach_length')]) %>%
-      setnames(in_network_idcol, 'reach_id') %>%
+      setnames(in_network_idcol, 'reach_id', skip_absent=T) %>%
       .[, list(reach_length = sum(reach_length)), by=reach_id]
     remove(network_v)
     
     #Merge hydro data and reach length for computing network-wide statistics
     #qdat[, unique(reach_id)[!(unique(reach_id) %in% reach_dt$reach_id)]] 
     #Two IDs are not in the shapefile for Finland? maybe a hydrological unit not associated
-    intermod_dt <- merge(in_hydromod_drn$data_all, reach_dt, 
-                         by='reach_id', all.x=F, all.y=F) %>%
-      merge(in_hydromod_drn$dates_format[, .(date, month, hy, doy)],
-            by='date', all.x=T, all.y=F)
+    intermod_dt <- merge(in_hydromod_filled, reach_dt, 
+                         by='reach_id', all.x=T, all.y=F)
     
     if ('nsim' %in% names(intermod_dt)) {
       q_stats <- list()
@@ -4038,11 +4138,9 @@ compute_hydrostats_drn <- function(in_network_path,
   #-------------------- Compute discharge statistics ---------------------------
   if (varname == 'qsim') {
     #Keep only hydrological data for sampled reaches
-    hydromod_dt_sites <- in_hydromod_drn$data_all[
+    hydromod_dt_sites <- in_hydromod_filled[
       reach_id %in% unique(in_sites_dt$reach_id),] %>%
-      setorderv(c('reach_id', 'date')) %>%
-      merge(in_hydromod_drn$dates_format[, .(date, month, hy, doy)],
-            by='date', all.x=T, all.y=F)
+      setorderv(c('reach_id', 'date'))
     
     q_stats <- compute_hydrostats_q(in_hydromod_dt = hydromod_dt_sites) %>%
       merge(in_sites_dt[, .(site, reach_id)], .,
@@ -4499,7 +4597,7 @@ snap_barrier_sites <- function(in_sites_path,
 
 #------ prepare_data_for_STcon ---------------------------------------------------
 # in_country <- in_drn <- 'Czechia'
-# in_hydromod_drn <- tar_read(hydromod_comb_hist)[[paste0("hydromod_hist_dt_", in_country, '_isflowing')]]
+# in_hydromod_drn <- tar_read(hydromod_comb_hist)[[paste0("hydromod_hist_filled_dt_", in_country, '_isflowing')]]
 # in_net_shp_path <- tar_read(network_ssnready_shp_list)[[in_country]]
 
 #' @title Prepare data for STcon analysis
@@ -4545,12 +4643,12 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
   river_dist_mat <- igraph::distances(net_graph)
   
   #Format intermittence data
-  setDT(in_hydromod_drn$data_all) %>%
+  setDT(in_hydromod_drn) %>%
     setnames('reach_id', 'cat')
   
   # Create the "End_point" site that will correspond to the 111111 in the flow_intermittence dataset
   # this point will be added with the same frequency of any other reach
-  end_point_interm <- in_hydromod_drn$data_all %>%
+  end_point_interm <- in_hydromod_drn %>%
     .[cat == .[1, cat],] %>% #select whatever reach
     .[, `:=`(UID = 11111,  from = outlet_to, value = 1)] %>% #format
     .[, .(date, UID, isflowing, from)] 
@@ -4558,11 +4656,12 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
   # Merge shapefile with flow intermittence data
   # Merge the Endpoint site and "pivot_wide" the table to obtain the TRUE intermittence table, 
   # where each row corresponds to a day (dates as factors) and columns to all nodes of the network.
-  nsims <- isTRUE('nsim' %in% names(in_hydromod_drn$data_all))
+  nsims <- isTRUE('nsim' %in% names(in_hydromod_drn))
   
   cast_formula <- if (nsims) {as.formula('date + nsim ~ from')} else {'date ~ from'}
-  sites_status_matrix <- merge(net_dt, in_hydromod_drn$data_all,
-                               by='cat', all.x=T) %>%
+  sites_status_matrix <- merge(net_dt, in_hydromod_drn,
+                               by='cat', all.x=T, 
+                               allow.cartesian=TRUE) %>% #To allow UIDs that have the same cat
     rbind(end_point_interm, fill=T) %>%
     .[, isflowing := as.integer(isflowing)] %>%
     setorder(from) %>%
@@ -5026,7 +5125,7 @@ compute_connectivity_proj <- function(hydroproj_path, hydroref_path, in_drn_dt,
                                             in_drn_dt)
   
   hydro_dt <- list()
-  hydro_dt$data_all <- hydromod_formatted$hydro_dt
+  hydro_dt <- hydromod_formatted$hydro_dt
   
   net_sf <- network_ssnready_shp_list[[hydromod_formatted$metadata_dt$country]]
   
@@ -5034,8 +5133,8 @@ compute_connectivity_proj <- function(hydroproj_path, hydroref_path, in_drn_dt,
                                            in_net_shp_path = net_sf)
   
   #Get December 31st of every year
-  in_dates <- hydro_dt$data_all[, .(date = date[.N]), 
-                                by = format(date, "%Y")] %>%
+  in_dates <- hydro_dt[, .(date = date[.N]), 
+                       by = format(date, "%Y")] %>%
     .[, .(date)]
   
   STcon_directed <- list()
@@ -5437,8 +5536,7 @@ summarize_env <- function(in_env_dt,
 # varname = 'flowstate'
 # in_drn_dt <- drn_dt
 # min_date = as.Date('1990-01-01')
-
-
+# include_metadata = FALSE
 
 #' @title Summarize drainage basin hydrological projection stats
 #' @description This function processes a NetCDF file containing hydrological 
@@ -5459,6 +5557,7 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path,
   
   hydromod_preformatted <- import_hydromod_gcm(hydroproj_path, 
                                                hydroref_path, in_drn_dt) 
+  
   metadata_dt <- hydromod_preformatted$metadata_dt
   hydro_dt <-   hydromod_preformatted$hydro_dt
   
@@ -6456,11 +6555,18 @@ create_ssn_europe <- function(in_network_path,
       st_set_geometry('geometry') %>%
       st_transform(3035)
     
-    net_hydro <- merge(net_proj, in_hydrostats_net_hist[country==in_country,],
-                       by.x = 'cat', by.y = 'reach_id')
+    net_hydro <- merge(net_proj, 
+                       in_hydrostats_net_hist[country==in_country,],
+                       by.x = 'cat', by.y = 'reach_id',
+                       all.x=T)
     
     return(net_hydro)
   }) %>% do.call(rbind, .)
+  
+  
+  # net_proj[!net_proj$cat %in% in_hydrostats_net_hist[country=='France',]$reach_id,]
+  
+  # st_write(net_eu, file.path(resdir, 'test.gpkg'))
   
   edges_lsn <- SSNbler::lines_to_lsn(
     streams = net_eu,
@@ -8237,7 +8343,7 @@ save_ssn_div_hydrowindow_plots <- function(
       ggsave(out_path, 
              plot = plot_varcomp$plots[[i]], 
              width = 12, height = 9, units = "in", 
-             dpi = 600)
+             dpi = 300)
       return(out_path)
     }, character(1))
     out_paths$plot_varcomp <- vc_paths
@@ -8266,7 +8372,7 @@ save_ssn_div_hydrowindow_plots <- function(
       ggsave(out_path, 
              plot = single_plots[[pname]], 
              width = 12, height = 9, units = "in", 
-             dpi = 600)
+             dpi = 300)
       out_paths[[pname]] <- out_path
     }
   }
@@ -14972,11 +15078,14 @@ plot_ssn_mod_diagplot <- function(in_mod_fit,
 }
 
 #------ predict_ssn_mod -------------------------------------------------------
-# in_ssn_mods = tar_read(ssn_mods_miv_richness_yr)
+# in_ssn_mod_fit = tar_read(ssn_mods_dia_sedi_richness_yr)$ssn_mod_fit
+# in_ssn_mod_fit <- tar_read(ssn_mods_bac_sedi_invsimpson_yr)$ssn_mod_fit
+# in_ssn_mod_fit <- tar_read(ssn_mods_fun_sedi_invsimpson_yr)$ssn_mod_fit
+# in_ssn_mod_fit = tar_read(ssn_mods_miv_richness_yr)$ssn_mod_fit
+# 
 # in_hydrocon_sites_proj = rbindlist(tar_read(hydrocon_sites_proj_gcm))
-# # proj_years = c(seq(1990,2020), seq(2040, 2099)
-# proj_years <- c(2025, 2026, 2030, 2035, 2041)
-
+# type_predict='link'
+# predict_years=c(seq(1991, 2020), seq(2041, 2100))
 
 #' Predict future richness from a fitted SSN model
 #'
@@ -15000,101 +15109,168 @@ plot_ssn_mod_diagplot <- function(in_mod_fit,
 #'     \item \strong{proj}: A data table with future predictions, including
 #'       GCM and scenario information.
 #'   }
-predict_ssn_mod <- function(in_ssn_mods, proj_years = NULL) {
-  
-  in_ssn_mods$ssn_mod_fit
-  
-  #Format projected variable
-  names(in_hydrocon_sites_proj)
-  setnames(in_hydrocon_sites_proj,
-           c('DurD_yr', 'FreD_yr'), 
-           c('DurD_samp', 'FreD_samp')
-  )
-  
-  in_hydrocon_sites_proj[, `:=`(
-    meanQ3650past_sqrt = sqrt(meanQ3650past)
-  )]
-  
-  in_ssn_mods$ssn_mod_fit$ssn.object$obs$meanQ3650past_sqrt
+predict_ssn_mod <- function(in_ssn_mod_fit, in_hydrocon_sites_proj, 
+                            type_predict, predict_years) {
   
   
-  #Contemporary predictions ------------------------------------------------------
-  # For the year 2021.
-  preds_hist_dt <- augment(in_ssn_mods$ssn_mod_fit 
-                           , newdata = 'preds_hist'
-                           , drop = FALSE
-                           , type.predict = 'response'
-                           , interval = 'prediction'
-  ) %>% 
-    .[, c('rid', 'country', '.fitted', '.lower', '.upper')] %>%
-    st_drop_geometry %>%
-    as.data.table %>%
-    .[, `:=`(year = 2021,
-             colname = 'historical')]
-  
-  #Future predictions  ---------------------------------------------------------
-  preds_proj_colnames <- names(in_ssn_mods$ssn_mod_fit$ssn.object$preds$preds_proj)
-  
-  # Create a data.table to organize projection column names by GCM, scenario, and year.
-  durd_proj_col_dt <- data.table(
-    colname = setdiff(
-      preds_proj_colnames,
-      c(names(in_ssn_mods$ssn_mod_fit$ssn.object$obs),
-        names(in_ssn_mods$ssn_mod_fit$ssn.object$edges))
-    ) 
-  ) %>%
-    .[, c('gcm', 'scenario', 'year') := tstrsplit(colname, '_')]
-  
-  # Determine the projection years to use
-  if (is.null(proj_years)) {
-    proj_years <- as.integer(unique(durd_proj_col_dt$year))
+  if (!(class(in_ssn_mod_fit) %in% c('ssn_lm', 'ssn_glm'))) {
+    return(data.table(formula=NULL))
+  } else if (class(in_ssn_mod_fit)=='ssn_lm') {
+    type_predict <- NULL
   }
   
-  # Loop through each projection year and generate predictions
-  preds_proj_dt <- lapply(
-    durd_proj_col_dt[(as.integer(year) %in% proj_years), colname],
-    function(in_colname) {
-      print(paste0('Predicting for ', in_colname))
-      
-      ssn_mod_fit_copy <- copy(in_ssn_mods$ssn_mod_fit)
-      
-      #Subset reaches to only keep those associated with sites for COMPUTATION ONLY
-      ssn_mod_fit_copy$ssn.object$preds$preds_proj <- 
-        filter(ssn_mod_fit_copy$ssn.object$preds$preds_proj,
-               rid %in%  unique(ssn_mod_fit_copy$ssn.object$obs$rid))
-      
-      # Rename the current projection column to match the model's formula
-      names(ssn_mod_fit_copy$ssn.object$preds$preds_proj)[
-        preds_proj_colnames == in_colname] <- 'DurD_samp'
-      
-      # Generate predictions using the augmented data.
-      preds_proj_pts <- SSN2::augment(ssn_mod_fit_copy  
-                                      , newdata = 'preds_proj'
-                                      , drop = FALSE
-                                      , type.predict = 'response',
-                                      , interval = 'prediction'
-      ) %>% 
-        .[, c('rid', 'country', '.fitted', '.lower', '.upper')] %>%
-        st_drop_geometry %>%
-        as.data.table %>%
-        .[, colname := in_colname]
-      
-      return(preds_proj_pts)
-    }
-  ) %>%
-    rbindlist %>%
-    merge(durd_proj_col_dt,
-          by='colname')
+  #Get basin area and particle size
+  formatted_proj_dt <- in_ssn_mod_fit$ssn.object$obs %>%
+    st_drop_geometry %>%
+    .[, c('site', 'rid', 'basin_area_km2', 'particle_size', 'organism')] %>%
+    merge(in_hydrocon_sites_proj, ., by=c('site')) %>%
+    .[year %in% predict_years,]
+  
+  #Format projected variables
+  names(formatted_proj_dt)
+  setnames(formatted_proj_dt,
+           c('DurD_yr', 'FreD_yr', 'PDurD_yr', 'PFreD_yr',
+             'STcon_mean_yr', 'Fdist_undmean_yr'), 
+           c('DurD_samp', 'FreD_samp', 'PDurD365past', 'PFreD365past',
+             'STcon_m10_directed_avg_samp', 'Fdist_mean_10past_undirected_avg_samp')
+  )
+  
+  formatted_proj_dt[, `:=`(
+    meanQ3650past_sqrt = sqrt(meanQ3650past),
+    meanQ3650past_log10 = log10(meanQ3650past),
+    STcon_m10_directed_avg_samp_log10 = log10(STcon_m10_directed_avg_samp),
+    DurD_CV10yrpast_sqrt = sqrt(DurD_CV10yrpast),
+    Fdist_mean_10past_undirected_avg_samp_log10 = log10(Fdist_mean_10past_undirected_avg_samp + 1),
+    basin_area_km2_log10 = log10(basin_area_km2)
+  )]
+  
+  #Get LSN preds
+  lsn_path <- gsub(paste0('_', formatted_proj_dt$organism[[1]], '.ssn'), 
+                   '_lsn',
+                   in_ssn_mod_fit$ssn.object$path)
+  
+  # Create a clean prediction layer (e.g. sf object)
+  preds_proj_lsn <- st_read(file.path(lsn_path, 'preds_proj.gpkg'))
+  cols_to_keep <- c('country', 'rid', 'UID', 
+                    setdiff(names(formatted_proj_dt), names(preds_proj_lsn)))
+  
+  new_preds_proj_lsn <- merge(
+    preds_proj_lsn,
+    formatted_proj_dt[, cols_to_keep, with=F], 
+    by = c("country", "rid", "UID"))
+  
+  # Re-assemble an SSN object
+  proj_ssn_path <- gsub(formatted_proj_dt$organism[[1]],
+                  paste0(formatted_proj_dt$organism[[1]], '_proj'),
+                  in_ssn_mod_fit$ssn.object$path)
+  
+  if (!dir.exists(proj_ssn_path)) {
+    in_ssn_mod_fit$ssn.object <- SSNbler::ssn_assemble(
+      edges = in_ssn_mod_fit$ssn.object$edges,
+      lsn_path = gsub(paste0('_', formatted_proj_dt$organism[[1]], '.ssn'), 
+                      '_lsn',
+                      in_ssn_mod_fit$ssn.object$path),
+      obs =   in_ssn_mod_fit$ssn.object$obs,
+      preds = list(preds_proj=new_preds_proj_lsn),
+      ssn_path =  proj_ssn_path,
+      import = TRUE,
+      check = TRUE,
+      afv_col = "afv_qsqrt",
+      overwrite = TRUE
+    )
+    
+  } else {
+    in_ssn_mod_fit$ssn.object <- SSN2::ssn_import(proj_ssn_path,
+                                                  predpts = 'preds_proj')
+  }
+
+  
+  #Re-compute distance matrices
+  if (verbose) {
+    print('Creating distance matrix')
+  }
+  SSN2::ssn_create_distmat(
+    ssn.object = in_ssn_mod_fit$ssn.object,
+    predpts = "preds_proj",
+    among_predpts = FALSE,
+    overwrite = TRUE
+  )
+  
+  #Scale variables
+  if (verbose) {
+    print('Scaling variables')
+  }
+  in_ssn_mod_fit$ssn.object <- scale_ssn_predictors(
+    in_ssn = in_ssn_mod_fit$ssn.object, 
+    in_vars = setdiff(names(formatted_proj_dt), 
+                      c('reach_id', 'year', 'UID', 'date', 'site', 
+                        'country', 'gcm', 'scenario', 'organism', 'rid')), 
+    scale_ssn_preds = TRUE)
+  
+  #Generate predictions means and CI
+  if (verbose) {
+    print('Producing predictions')
+  }
+  preds_proj_dt <- SSN2::augment(in_ssn_mod_fit,  
+                                 , newdata = 'preds_proj'
+                                 , drop = FALSE
+                                 , type.predict = type_predict
+                                 , interval = 'prediction'
+                                 , se_fit = TRUE
+  ) %>% 
+    .[, c('rid','organism', 'site', 'country', 'scenario', 'gcm', 'year',
+          '.fitted', '.lower', '.upper', '.se.fit')] %>%
+    st_drop_geometry %>%
+    as.data.table
+  
+  # Check that values make sense and are comparable between those used for 
+  # training models and those from GCMs
+  # check <- merge(in_hydrocon_sites_proj[year==2021,],
+  #                st_drop_geometry(ssn_obj$obs[, c('site', 'country',
+  #                                                 'STcon_m10_directed_avg_samp',
+  #                                                 'Fdist_mean_10past_undirected_avg_samp',
+  #                                                 'meanQ3650past')]),
+  #                by=c('site', 'country'))
+  # 
+  # ggplot(check, aes(x=STcon_mean_yr, y=STcon_m10_directed_avg_samp, color=interaction(gcm, scenario))) +
+  #   geom_point()+
+  #   geom_abline() +
+  #   scale_x_sqrt() +
+  #   scale_y_sqrt()
+  # 
+  # ggplot(check[country='Hungary',], 
+  #        aes(x=Fdist_undmean_yr, y=Fdist_mean_10past_undirected_avg_samp, 
+  #            color=interaction(gcm, scenario))) +
+  #   geom_point()+
+  #   geom_abline() +
+  #   scale_x_sqrt() +
+  #   scale_y_sqrt()
+  # 
+  # ggplot(check, aes(x=meanQ3650past.x, y=meanQ3650past.y, color=interaction(gcm, scenario))) +
+  #   geom_point()+
+  #   geom_abline() +
+  #   scale_x_log10() +
+  #   scale_y_log10()
   
   #Write out results  ---------------------------------------------------------
-  return(list(
-    hist = preds_hist_dt,
-    proj = preds_proj_dt
-  )
-  )
+  return(preds_proj_dt)
 }
 
-#------ map_ssn_mod --------------------------------------------------------
+
+#------ compute_future_change --------------------------------------------------
+# in_preds_proj_dt <- preds_proj_dt
+# reference_years <- seq(1991, 2020)
+# future_years <- list(mid_century=seq(2041, 2070), late_century=seq(2071, 2100))
+
+compute_future_changes <- function(in_preds_proj_dt,
+                                   reference_years,
+                                   future_years) {
+  
+  
+  
+}
+
+#------ map_ssn_mod ------------------------------------------------------------
 # in_ssn_mods <- tar_read(ssn_mods_miv_yr)
 # in_ssn <- tar_read(ssn_eu_summarized)
 # in_ssn_preds <- tar_read(ssn_preds)
