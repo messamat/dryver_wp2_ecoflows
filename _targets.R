@@ -1603,9 +1603,24 @@ annual_analysis_targets <- list(
                       verbose = TRUE,
                       overwrite = FALSE
                       )
-    }) %>% rbindlist(fill=T)
+    }) %>% 
+      .[, mod := in_mod_fit]
   )
+  ,
   
+  tar_target(
+    future_change_dt,
+    lapply(names(ssn_mod_yr_fit_multiorganism), function(in_mod_fit) {
+      print(in_mod_fit)
+      compute_div_change(in_mod_fit = ssn_mod_yr_fit_multiorganism[[in_mod_fit]],
+                         in_ssn_proj_dt = in_proj_dt,
+                         reference_years = seq(1991, 2020), 
+                         future_years = list(mid_century=seq(2041, 2070), 
+                                             late_century=seq(2071, 2100)),
+                         n_sim = 100)
+    })
+  )
+    
   # tar_target(
   #   ssn_proj_maps,
   #   map_ssn_mod(in_ssn = ssn_eu_summarized,

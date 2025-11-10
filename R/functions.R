@@ -15128,6 +15128,8 @@ predict_ssn_mod <- function(in_ssn_mod_fit, in_hydrocon_sites_proj,
     print('Re-assembling SSN')
   }
   
+  response_var <- all.vars(in_mod_fit$formula)[[1]]
+  
   #Get basin area and particle size
   formatted_proj_dt <- in_ssn_mod_fit$ssn.object$obs %>%
     st_drop_geometry %>%
@@ -15226,7 +15228,9 @@ predict_ssn_mod <- function(in_ssn_mod_fit, in_hydrocon_sites_proj,
     .[, c('rid','organism', 'site', 'country', 'scenario', 'gcm', 'year',
           '.fitted', '.lower', '.upper', '.se.fit')] %>%
     st_drop_geometry %>%
-    as.data.table
+    as.data.table 
+  
+  preds_proj_dt[, response_var := response_var]
   
   # Check that values make sense and are comparable between those used for 
   # training models and those from GCMs
@@ -15267,12 +15271,41 @@ predict_ssn_mod <- function(in_ssn_mod_fit, in_hydrocon_sites_proj,
 # reference_years <- seq(1991, 2020)
 # future_years <- list(mid_century=seq(2041, 2070), late_century=seq(2071, 2100))
 
-compute_future_changes <- function(in_preds_proj_dt,
-                                   reference_years,
-                                   future_years) {
+compute_div_change <- function(in_ssn_mod_fit, in_ssn_proj_dt,
+                               reference_years, future_years, n_sim) {
+  # Back transform from link space
+  inv_link <- get_inverse_link_function(in_ssn_mod_fit$family)   # change if your model uses a different link
+  
+  #Simulate data and assign to corresponding period
+  years_dt <- as.data.table(future_years) %>% 
+    melt(variable.name="period", value.name="year") %>%
+    rbind(data.table(year=reference_years, period='reference'))
+  
+  sim_dt <- df_pred[,  
+                    list(
+                      n = seq(n_sim),
+                      sim = inv_link(
+                        rnorm(n = n_sim, mean = .fitted, sd = .se.fit))),
+                    by=.(organism, site, country, scenario, gcm, year)] %>%
+    merge(years_dt, by='year')
+  
+  #Compute change statistics
+  sim_change_dt <- sim_dt[, list(mean_div = mean(sim)),
+                          by=.(organism, site, country, scenario, gcm, period, n)] %>%
+    dcast(organism+site+country+scenario+gcm+n~period, value.var='mean_div') %>%
+    .[, `:=`(div_change_mid = 100*(mid_century - reference)/reference,
+             div_change_late = 100*(late_century - reference)/reference_years
+    )] %>%
+    melt(id.vars=c('organism', 'site', 'country', 'scenario', 'gcm', 'n'),
+         measure.vars = c('div_change_mid', 'div_change_late')) %>%
+    .[, list(mean_change = mean(value),
+             lower_change = quantile(value, probs=0.025),
+             upper_change = quantile(value, probs=0.975)
+    ),
+    by=.(organism, site, country, scenario, gcm, variable)]
   
   
-  
+  return(sim_change_dt)
 }
 
 #------ map_ssn_mod ------------------------------------------------------------
