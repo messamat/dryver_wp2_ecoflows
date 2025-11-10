@@ -5372,29 +5372,29 @@ summarize_network_hydrostats <- function(
   
   #Extract discharge and isflowing data for the specified country
   qsim_country <- in_hydromod[[
-    paste0('hydromod_hist_dt_', in_country, '_qsim')]]
+    paste0('hydromod_hist_filled_dt_', in_country, '_qsim')]]
   isflowing_country <- in_hydromod[[
-    paste0('hydromod_hist_dt_', in_country, '_isflowing')]]
+    paste0('hydromod_hist_filled_dt_', in_country, '_isflowing')]]
   
   #Link q data - keep only full hydrological years, 
   #Exclude 2022 because includes period after sampling
   
   #Calculate average discharge over the full historical period
-  qsim_all_dt <- qsim_country$data_all[
+  qsim_all_dt <- qsim_country[
     (date >= min(in_all_date_range)) &
       (date < max(in_all_date_range)),  
     list(qsim_avg = mean(qsim, na.rm=T)), 
     by=reach_id] 
   
   #Calculate average discharge over the sampling period
-  qsim_samp_dt <- qsim_country$data_all[
+  qsim_samp_dt <- qsim_country[
     (date >= min(in_samp_date_range)) &
       (date <= max(in_samp_date_range)),  
     list(qsim_avg_samp = mean(qsim, na.rm=T)), 
     by=reach_id] 
   
   #Calculate flow duration (proportion of dry days) over the sampling period
-  isflowing_samp_dt <- isflowing_country$data_all[
+  isflowing_samp_dt <- isflowing_country[
     (date >= min(in_samp_date_range)) &
       (date <= max(in_samp_date_range)),  
     list(DurD_samp = sum(isflowing==0)/.N), 
@@ -8805,9 +8805,9 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
       estmethod='reml'
     )
     
-    loocv(ssn_nbin_cov$ssn_list$none_none_none)
-    loocv(ssn_nbin_cov$ssn_list$none_none_spherical)
-    loocv(ssn_nbin_cov$ssn_list$none_epa_gaussian)
+    SSN2::loocv(ssn_nbin_cov$ssn_list$none_none_none)
+    SSN2::loocv(ssn_nbin_cov$ssn_list$none_none_spherical)
+    SSN2::loocv(ssn_nbin_cov$ssn_list$none_epa_gaussian)
     lapply(list(
       ssn_nbin_cov$ssn_list$none_none_none,
       ssn_nbin_cov$ssn_list$none_none_spherical,
@@ -9009,7 +9009,7 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
     cbind(Reduce(paste, deparse(x$formula)), 
           glance(x), 
           ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
-          loocv(x))
+          SSN2::loocv(x))
   }) %>% 
     rbindlist %>%
     .[, mod := names(miv_rich_modlist)]
@@ -9288,9 +9288,9 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
     
     ssn_lognorm_cov$ssn_glance
     
-    loocv(ssn_lognorm_cov$ssn_list$none_none_none)
-    loocv(ssn_lognorm_cov$ssn_list$none_none_spherical)
-    loocv(ssn_lognorm_cov$ssn_list$none_none_exponential)
+    SSN2::loocv(ssn_lognorm_cov$ssn_list$none_none_none)
+    SSN2::loocv(ssn_lognorm_cov$ssn_list$none_none_spherical)
+    SSN2::loocv(ssn_lognorm_cov$ssn_list$none_none_exponential)
     lapply(list(
       ssn_lognorm_cov$ssn_list$none_none_none,
       ssn_lognorm_cov$ssn_list$none_none_spherical,
@@ -9368,7 +9368,7 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
     cbind(Reduce(paste, deparse(x$formula)), 
           glance(x), 
           ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
-          loocv(x))
+          SSN2::loocv(x))
   }) %>% 
     rbindlist %>%
     .[, mod := names(miv_simps_modlist)]
@@ -9551,9 +9551,9 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
     )
     View(ssn_nbin_cov$ssn_glance)
     
-    loocv(ssn_nbin_cov$ssn_list$none_none_spherical)
-    loocv(ssn_nbin_cov$ssn_list$linear_none_gaussian)
-    loocv(ssn_nbin_cov$ssn_list$linear_none_none )
+    SSN2::loocv(ssn_nbin_cov$ssn_list$none_none_spherical)
+    SSN2::loocv(ssn_nbin_cov$ssn_list$linear_none_gaussian)
+    SSN2::loocv(ssn_nbin_cov$ssn_list$linear_none_none )
     lapply(list(
       ssn_nbin_cov$ssn_list$none_none_spherical,
       ssn_nbin_cov$ssn_list$linear_none_gaussian,
@@ -9668,7 +9668,7 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
     cbind(Reduce(paste, deparse(x$formula)), 
           glance(x), 
           ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
-          loocv(x))
+          SSN2::loocv(x))
   }) %>% 
     rbindlist %>%
     .[, mod := names(ept_rich_modlist)]
@@ -10094,7 +10094,7 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     cbind(Reduce(paste, deparse(x$formula)), 
           glance(x), 
           ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
-          loocv(x))
+          SSN2::loocv(x))
   }) %>% 
     rbindlist %>%
     .[, mod := names(dia_sedi_simps_modlist)]
@@ -10474,9 +10474,9 @@ model_dia_sedi_richness_yr <- function(in_ssn_eu_summarized,
     
     View(ssn_pois_cov$ssn_glance)
     
-    loocv(ssn_pois_cov$ssn_list$spherical_none_none)
-    loocv(ssn_pois_cov$ssn_list$mariah_none_none)
-    loocv(ssn_pois_cov$ssn_list$epa_none_none)
+    SSN2::loocv(ssn_pois_cov$ssn_list$spherical_none_none)
+    SSN2::loocv(ssn_pois_cov$ssn_list$mariah_none_none)
+    SSN2::loocv(ssn_pois_cov$ssn_list$epa_none_none)
     lapply(list(
       ssn_pois_cov$ssn_list$sherical_none_none,
       ssn_pois_cov$ssn_list$mariah_none_none,
@@ -10556,7 +10556,7 @@ model_dia_sedi_richness_yr <- function(in_ssn_eu_summarized,
     cbind(Reduce(paste, deparse(x$formula)), 
           glance(x), 
           ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
-          loocv(x))
+          SSN2::loocv(x))
   }) %>% 
     rbindlist %>%
     .[, mod := names(dia_sedi_rich_modlist)]
@@ -10627,7 +10627,7 @@ model_dia_sedi_richness_yr <- function(in_ssn_eu_summarized,
     cbind(Reduce(paste, deparse(x$formula)), 
           glance(x), 
           ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
-          loocv(x))
+          SSN2::loocv(x))
   }) %>% 
     rbindlist %>%
     .[, mod := names(dia_sedi_rich_modlist)]
@@ -10973,9 +10973,9 @@ model_dia_biof_richness_yr <- function(in_ssn_eu_summarized,
     
     View(ssn_pois_cov$ssn_glance)
     
-    loocv(ssn_pois_cov$ssn_list$none_none_gaussian)
-    loocv(ssn_pois_cov$ssn_list$none_none_spherical)
-    loocv(ssn_pois_cov$ssn_list$none_none_exponential)
+    SSN2::loocv(ssn_pois_cov$ssn_list$none_none_gaussian)
+    SSN2::loocv(ssn_pois_cov$ssn_list$none_none_spherical)
+    SSN2::loocv(ssn_pois_cov$ssn_list$none_none_exponential)
     lapply(list(
       ssn_pois_cov$ssn_list$none_none_gaussian,
       ssn_pois_cov$ssn_list$none_none_spherical,
@@ -11066,7 +11066,7 @@ model_dia_biof_richness_yr <- function(in_ssn_eu_summarized,
     cbind(Reduce(paste, deparse(x$formula)), 
           glance(x), 
           ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
-          loocv(x))
+          SSN2::loocv(x))
   }) %>% 
     rbindlist %>%
     .[, mod := names(dia_biof_rich_modlist)]
@@ -11430,9 +11430,9 @@ model_fun_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     )
     
     View(ssn_lognorm_cov$ssn_glance)
-    loocv(ssn_lognorm_cov$ssn_list$mariah_none_none)
+    SSN2::loocv(ssn_lognorm_cov$ssn_list$mariah_none_none)
     plot(ssn_lognorm_cov$ssn_list$mariah_none_none)
-    loocv(ssn_lognorm_cov$ssn_list$none_none_spherical)
+    SSN2::loocv(ssn_lognorm_cov$ssn_list$none_none_spherical)
     plot(ssn_lognorm_cov$ssn_list$none_none_spherical)
     
   }
@@ -11504,7 +11504,7 @@ model_fun_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     cbind(Reduce(paste, deparse(x$formula)), 
           glance(x), 
           ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
-          loocv(x))
+          SSN2::loocv(x))
   }) %>% 
     rbindlist %>%
     .[, mod := names(fun_sedi_simps_modlist)]
@@ -11894,9 +11894,9 @@ model_fun_sedi_richness_yr <- function(in_ssn_eu_summarized,
     
     View(ssn_nbin_cov$ssn_glance)
     
-    loocv(ssn_nbin_cov$ssn_list$epa_none_none)
-    loocv(ssn_nbin_cov$ssn_list$linear_none_none)
-    loocv(ssn_nbin_cov$ssn_list$spherical_none_none)
+    SSN2::loocv(ssn_nbin_cov$ssn_list$epa_none_none)
+    SSN2::loocv(ssn_nbin_cov$ssn_list$linear_none_none)
+    SSN2::loocv(ssn_nbin_cov$ssn_list$spherical_none_none)
     lapply(list(
       ssn_nbin_cov$ssn_list$epa_none_none,
       ssn_nbin_cov$ssn_list$linear_none_none,
@@ -11975,7 +11975,7 @@ model_fun_sedi_richness_yr <- function(in_ssn_eu_summarized,
     cbind(Reduce(paste, deparse(x$formula)), 
           glance(x), 
           ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
-          loocv(x))
+          SSN2::loocv(x))
   }) %>% 
     rbindlist %>%
     .[, mod := names(fun_sedi_rich_modlist)]
@@ -12354,11 +12354,11 @@ model_fun_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
     )
     
     View(ssn_lognorm_cov$ssn_glance)
-    loocv(ssn_lognorm_cov$ssn_list$exponential_none_none)
+    SSN2::loocv(ssn_lognorm_cov$ssn_list$exponential_none_none)
     plot(ssn_lognorm_cov$ssn_list$exponential_none_none)
-    loocv(ssn_lognorm_cov$ssn_list$linear_none_none)
+    SSN2::loocv(ssn_lognorm_cov$ssn_list$linear_none_none)
     plot(ssn_lognorm_cov$ssn_list$linear_none_none)
-    loocv(ssn_lognorm_cov$ssn_list$none_none_gaussian)
+    SSN2::loocv(ssn_lognorm_cov$ssn_list$none_none_gaussian)
     plot(ssn_lognorm_cov$ssn_list$none_none_gaussian)
   }
   
@@ -12438,7 +12438,7 @@ model_fun_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
     cbind(Reduce(paste, deparse(x$formula)), 
           glance(x), 
           ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
-          loocv(x))
+          SSN2::loocv(x))
   }) %>% 
     rbindlist %>%
     .[, mod := names(fun_biof_simps_modlist)]
@@ -12819,9 +12819,9 @@ model_fun_biof_richness_yr <- function(in_ssn_eu_summarized,
     
     View(ssn_pois_cov$ssn_glance)
     
-    loocv(ssn_pois_cov$ssn_list$epa_exponential_none)
-    loocv(ssn_pois_cov$ssn_list$epa_epa_none)
-    loocv(ssn_pois_cov$ssn_list$mariah_none_none)
+    SSN2::loocv(ssn_pois_cov$ssn_list$epa_exponential_none)
+    SSN2::loocv(ssn_pois_cov$ssn_list$epa_epa_none)
+    SSN2::loocv(ssn_pois_cov$ssn_list$mariah_none_none)
     lapply(list(
       ssn_pois_cov$ssn_list$epa_exponential_none,
       ssn_pois_cov$ssn_list$epa_epa_none,
@@ -12911,7 +12911,7 @@ model_fun_biof_richness_yr <- function(in_ssn_eu_summarized,
     cbind(Reduce(paste, deparse(x$formula)), 
           glance(x), 
           ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
-          loocv(x))
+          SSN2::loocv(x))
   }) %>% 
     rbindlist %>%
     .[, mod := names(fun_biof_rich_modlist)]
@@ -13293,13 +13293,13 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     
     View(ssn_norm_cov$ssn_glance)
     
-    loocv(ssn_norm_cov$ssn_list$spherical_none_none)
+    SSN2::loocv(ssn_norm_cov$ssn_list$spherical_none_none)
     plot(ssn_norm_cov$ssn_list$spherical_none_none)
     print('plot')
-    loocv(ssn_norm_cov$ssn_list$epa_none_none)
+    SSN2::loocv(ssn_norm_cov$ssn_list$epa_none_none)
     plot(ssn_norm_cov$ssn_list$epa_none_none)
     print('plot')
-    loocv(ssn_norm_cov$ssn_list$exponential_none_none)
+    SSN2::loocv(ssn_norm_cov$ssn_list$exponential_none_none)
     plot(ssn_norm_cov$ssn_list$exponential_none_none)
     print('plot')
     
@@ -13390,7 +13390,7 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
     cbind(Reduce(paste, deparse(x$formula)), 
           glance(x), 
           ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
-          loocv(x))
+          SSN2::loocv(x))
   }) %>% 
     rbindlist %>%
     .[, mod := names(bac_sedi_simps_modlist)]
@@ -13778,9 +13778,9 @@ model_bac_sedi_richness_yr <- function(in_ssn_eu_summarized,
     
     View(ssn_norm_cov$ssn_glance)
     
-    loocv(ssn_norm_cov$ssn_list$none_none_none)
+    SSN2::loocv(ssn_norm_cov$ssn_list$none_none_none)
     plot(ssn_norm_cov$ssn_list$none_none_none)
-    loocv(ssn_norm_cov$ssn_list$none_spherical_none)
+    SSN2::loocv(ssn_norm_cov$ssn_list$none_spherical_none)
     plot(ssn_norm_cov$ssn_list$none_spherical_none)
     
     lapply(list(
@@ -13859,7 +13859,7 @@ model_bac_sedi_richness_yr <- function(in_ssn_eu_summarized,
     cbind(Reduce(paste, deparse(x$formula)), 
           glance(x), 
           ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
-          loocv(x))
+          SSN2::loocv(x))
   }) %>% 
     rbindlist %>%
     .[, mod := names(bac_sedi_rich_modlist)]
@@ -14036,7 +14036,7 @@ model_bac_sedi_richness_yr <- function(in_ssn_eu_summarized,
 # in_cor_matrices <- tar_read(cor_matrices_list_summarized)
 # tar_load(ssn_covtypes)
 # tar_load(cor_heatmaps_summarized)
-# interactive = T
+# interactive = F
 # scale_predictors = T
 
 model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
@@ -14233,12 +14233,12 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
     )
     
     View(ssn_lognorm_cov$ssn_glance)
-    loocv(ssn_lognorm_cov$ssn_list$none_none_gaussian)
+    SSN2::loocv(ssn_lognorm_cov$ssn_list$none_none_gaussian)
     plot(ssn_lognorm_cov$ssn_list$none_none_gaussian)
     print('plot')
     print('plot')
     
-    loocv(ssn_lognorm_cov$ssn_list$none_epa_gaussian)
+    SSN2::loocv(ssn_lognorm_cov$ssn_list$none_epa_gaussian)
     plot(ssn_lognorm_cov$ssn_list$none_epa_gaussian)
     print('plot')
     print('plot')
@@ -14332,7 +14332,7 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
     cbind(Reduce(paste, deparse(x$formula)), 
           glance(x), 
           ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
-          loocv(x))
+          SSN2::loocv(x))
   }) %>% 
     rbindlist %>%
     .[, mod := names(bac_biof_simps_modlist)]
@@ -14490,13 +14490,13 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
 }
 
 #------ model_bac_biof_richness_yr ---------------------------------------------
-# in_allvars_summarized <- tar_read(allvars_summarized)
-# in_ssn_eu_summarized <- tar_read(ssn_eu_summarized)
-# in_cor_matrices <- tar_read(cor_matrices_list_summarized)
-# tar_load(ssn_covtypes)
-# tar_load(cor_heatmaps_summarized)
-# interactive = T
-# scale_predictors = T
+in_allvars_summarized <- tar_read(allvars_summarized)
+in_ssn_eu_summarized <- tar_read(ssn_eu_summarized)
+in_cor_matrices <- tar_read(cor_matrices_list_summarized)
+tar_load(ssn_covtypes)
+tar_load(cor_heatmaps_summarized)
+interactive = T
+scale_predictors = T
 
 #' Bacteria model for annual data
 #'
@@ -14717,10 +14717,10 @@ model_bac_biof_richness_yr <- function(in_ssn_eu_summarized,
     
     View(ssn_norm_cov$ssn_glance)
     
-    loocv(ssn_norm_cov$ssn_list$none_none_spherical)
+    SSN2::loocv(ssn_norm_cov$ssn_list$none_none_spherical)
     plot(ssn_norm_cov$ssn_list$none_none_spherical, which=1:2)
-    loocv(ssn_norm_cov$ssn_list$none_none_exponential)
-    loocv(ssn_norm_cov$ssn_list$none_epa_gaussian)
+    SSN2::loocv(ssn_norm_cov$ssn_list$none_none_exponential)
+    SSN2::loocv(ssn_norm_cov$ssn_list$none_epa_gaussian)
     plot(ssn_norm_cov$ssn_list$none_epa_gaussian, which=1:2)
     
     lapply(list(
@@ -14792,11 +14792,11 @@ model_bac_biof_richness_yr <- function(in_ssn_eu_summarized,
   bac_biof_rich_modlist[['mod18']] <- quick_bac_biof_ssn(as.formula(paste(alpha_var,  '~ country*DurD3650past')))
   
   mod_perf_tab <- lapply(bac_biof_rich_modlist, function(x) {
-    # print(x)
+    print(x)
     cbind(Reduce(paste, deparse(x$formula)), 
           glance(x), 
           ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
-          loocv(x))
+          SSN2::loocv(x))
   }) %>% 
     rbindlist %>%
     .[, mod := names(bac_biof_rich_modlist)]
@@ -15000,7 +15000,7 @@ get_perf_table_multiorganism <- function(in_mod_list) {
       GVIF = ifelse(length(attr(in_mod_fit$terms, "term.labels"))>=2,
                     max(as.data.frame(vif(in_mod_fit))[['GVIF^(1/(2*Df))']]), 
                     NA),
-      loocv(in_mod_fit))
+      SSN2::loocv(in_mod_fit))
     return(perf_table)
   }) %>% 
     rbindlist(fill=T, idcol='organism') 
@@ -15083,9 +15083,13 @@ plot_ssn_mod_diagplot <- function(in_mod_fit,
 # in_ssn_mod_fit <- tar_read(ssn_mods_fun_sedi_invsimpson_yr)$ssn_mod_fit
 # in_ssn_mod_fit = tar_read(ssn_mods_miv_richness_yr)$ssn_mod_fit
 # 
+# in_ssn_mod_fit <- tar_read(ssn_mods_fun_sedi_richness_yr)$ssn_mod_fit
+#
 # in_hydrocon_sites_proj = rbindlist(tar_read(hydrocon_sites_proj_gcm))
 # type_predict='link'
 # predict_years=c(seq(1991, 2020), seq(2041, 2100))
+# verbose = TRUE
+# overwrite=TRUE
 
 #' Predict future richness from a fitted SSN model
 #'
@@ -15110,13 +15114,18 @@ plot_ssn_mod_diagplot <- function(in_mod_fit,
 #'       GCM and scenario information.
 #'   }
 predict_ssn_mod <- function(in_ssn_mod_fit, in_hydrocon_sites_proj, 
-                            type_predict, predict_years) {
+                            type_predict, predict_years, 
+                            overwrite=FALSE, verbose=TRUE) {
   
   
   if (!(class(in_ssn_mod_fit) %in% c('ssn_lm', 'ssn_glm'))) {
     return(data.table(formula=NULL))
   } else if (class(in_ssn_mod_fit)=='ssn_lm') {
     type_predict <- NULL
+  }
+  
+  if (verbose) {
+    print('Re-assembling SSN')
   }
   
   #Get basin area and particle size
@@ -15161,30 +15170,26 @@ predict_ssn_mod <- function(in_ssn_mod_fit, in_hydrocon_sites_proj,
   
   # Re-assemble an SSN object
   proj_ssn_path <- gsub(formatted_proj_dt$organism[[1]],
-                  paste0(formatted_proj_dt$organism[[1]], '_proj'),
+                  paste0(formatted_proj_dt$organism[[1]], '_', 
+                         
+                         '_proj_', 
+                         format(Sys.Date(), '%Y%m%d')),
                   in_ssn_mod_fit$ssn.object$path)
   
-  if (!dir.exists(proj_ssn_path)) {
-    in_ssn_mod_fit$ssn.object <- SSNbler::ssn_assemble(
-      edges = in_ssn_mod_fit$ssn.object$edges,
-      lsn_path = gsub(paste0('_', formatted_proj_dt$organism[[1]], '.ssn'), 
-                      '_lsn',
-                      in_ssn_mod_fit$ssn.object$path),
-      obs =   in_ssn_mod_fit$ssn.object$obs,
-      preds = list(preds_proj=new_preds_proj_lsn),
-      ssn_path =  proj_ssn_path,
-      import = TRUE,
-      check = TRUE,
-      afv_col = "afv_qsqrt",
-      overwrite = TRUE
-    )
-    
-  } else {
-    in_ssn_mod_fit$ssn.object <- SSN2::ssn_import(proj_ssn_path,
-                                                  predpts = 'preds_proj')
-  }
+  in_ssn_mod_fit$ssn.object <- SSNbler::ssn_assemble(
+    edges = in_ssn_mod_fit$ssn.object$edges,
+    lsn_path = gsub(paste0('_', formatted_proj_dt$organism[[1]], '.ssn'), 
+                    '_lsn',
+                    in_ssn_mod_fit$ssn.object$path),
+    obs =   in_ssn_mod_fit$ssn.object$obs,
+    preds = list(preds_proj=new_preds_proj_lsn),
+    ssn_path =  proj_ssn_path,
+    import = TRUE,
+    check = TRUE,
+    afv_col = "afv_qsqrt",
+    overwrite = TRUE
+  )
 
-  
   #Re-compute distance matrices
   if (verbose) {
     print('Creating distance matrix')

@@ -41,10 +41,10 @@ hydro_combi <- expand.grid(
 if (!interactive()) {
   perf_ratio <- 0.7 #Set how much you want to push your computer (% of cores and RAM)
   nthreads <- round(parallel::detectCores(logical=F)*perf_ratio)
-  future::plan("future::multisession", workers=nthreads)
+  # future::plan("future::multisession", workers=nthreads)
   total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
   options(future.globals.maxSize = perf_ratio*total_ram)
-  # tar_option_set(controller = crew_controller_local(workers = nthreads)) #Set up parallel computing in targets
+  tar_option_set(controller = crew_controller_local(workers = nthreads)) #Set up parallel computing in targets
 }
 
 #--------------------------  Define targets plan -------------------------------
@@ -1594,12 +1594,15 @@ annual_analysis_targets <- list(
   #Compute statistics for two horizons: 2041-2070 and 2071-2100
   tar_target(
     ssn_proj_dt,
-    lapply(ssn_mod_yr_fit_multiorganism, function(in_mod_fit) {
+    lapply(names(ssn_mod_yr_fit_multiorganism), function(in_mod_fit) {
       print(in_mod_fit)
-      predict_ssn_mod(in_ssn_mod_fit = in_mod_fit,
+      predict_ssn_mod(in_ssn_mod_fit = ssn_mod_yr_fit_multiorganism[[in_mod_fit]],
                       in_hydrocon_sites_proj = rbindlist(hydrocon_sites_proj_gcm),
                       type_predict = 'link',
-                      predict_years = c(seq(1991, 2020), seq(2041, 2100)))
+                      predict_years = c(seq(1991, 2020), seq(2041, 2100)),
+                      verbose = TRUE,
+                      overwrite = FALSE
+                      )
     }) %>% rbindlist(fill=T)
   )
   
@@ -1617,7 +1620,7 @@ list(preformatting_targets
      , mapped_hydrotargets
      , combined_hydrotargets
      , formatting_targets
-     # , temporal_analysis_targets
-     # , annual_analysis_targets
+     , temporal_analysis_targets
+     , annual_analysis_targets
 ) %>%
   unlist(recursive = FALSE)
