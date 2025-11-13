@@ -10,7 +10,7 @@ source("R/SpaTemp_function_Mathis_edit.R")
 #                 destfil = file.path("bin", "03_diversity_metrics.R")
 #   )
 # }
-source("bin/03_diversity_metrics.R") #From 
+source("bin/03_diversity_metrics.R") 
 
 hydromod_present_dir <- file.path('data', 'wp1', 'Results_present_period_final')
 wp1_data_gouv_dir <- file.path('data', 'wp1', 'data_gouv') #Official WP1 data published later, with fuller attributes (upstream drainage area)
