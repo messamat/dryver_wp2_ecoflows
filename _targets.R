@@ -44,7 +44,7 @@ if (!interactive()) {
   # future::plan("future::multisession", workers=nthreads)
   total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
   options(future.globals.maxSize = perf_ratio*total_ram)
-  tar_option_set(controller = crew_controller_local(workers = nthreads)) #Set up parallel computing in targets
+  # tar_option_set(controller = crew_controller_local(workers = nthreads)) #Set up parallel computing in targets
 }
 
 #--------------------------  Define targets plan -------------------------------
@@ -1602,9 +1602,9 @@ annual_analysis_targets <- list(
                       predict_years = c(seq(1991, 2020), seq(2041, 2100)),
                       verbose = TRUE,
                       overwrite = FALSE
-                      )
-    }) %>% 
-      .[, mod := in_mod_fit]
+                      ) %>% 
+        .[, mod := in_mod_fit]
+    }) 
   )
   ,
   
@@ -1612,8 +1612,8 @@ annual_analysis_targets <- list(
     future_change_dt,
     lapply(names(ssn_mod_yr_fit_multiorganism), function(in_mod_fit) {
       print(in_mod_fit)
-      compute_div_change(in_mod_fit = ssn_mod_yr_fit_multiorganism[[in_mod_fit]],
-                         in_ssn_proj_dt = in_proj_dt,
+      compute_div_change(in_ssn_mod_fit = ssn_mod_yr_fit_multiorganism[[in_mod_fit]],
+                         in_ssn_proj_dt = rbindlist(ssn_proj_dt, fill=T)[mod==in_mod_fit,],
                          reference_years = seq(1991, 2020), 
                          future_years = list(mid_century=seq(2041, 2070), 
                                              late_century=seq(2071, 2100)),
