@@ -5111,7 +5111,7 @@ compute_Fdist_rolling <- function(in_Fdist_dt, in_sites_dt) {
 # in_sites_dt <- tar_read(sites_dt)
 # in_drn_dt <- drn_dt
 # min_date = as.Date('1990-01-01')
-# in_window = 365
+# STcon_window=10
 
 compute_connectivity_proj <- function(hydroproj_path, hydroref_path, in_drn_dt,
                                   network_ssnready_shp_list,
@@ -5176,10 +5176,42 @@ compute_connectivity_proj <- function(hydroproj_path, hydroref_path, in_drn_dt,
       merge(in_sites_dt[, .(reach_id, site)], by.x='cat', by.y='reach_id', all.x=F)
   }
   
-  setnames(STcon_directed_formatted$STcon_dt, 'stcon_value', 'STcon_mean_yr')
+  setnames(STcon_directed_formatted$STcon_dt, 'stcon_value', 'STcon_directed_mean_yr')
   STcon_directed_formatted$STcon_dt[, `:=`(year = format(date, '%Y'),
                                            variable = NULL)]
   
+  #Compute STcon_undirected
+  STcon_undirected <- list()
+  STcon_undirected$STcon_m365 <- compute_STcon_rolling(
+    in_preformatted_data = formatted_data,
+    ref = FALSE,
+    #in_nsim = hydromod_paths_dt[country == in_country,]$best_sim,
+    in_dates = in_dates,
+    window = STcon_window,
+    output = 'STcon',
+    direction = 'undirected',
+    routing_mode = 'in',
+    weighting = FALSE,
+    rounding_factor = 1)
+  
+  STcon_undirected_formatted <- postprocess_STcon(
+    in_STcon = STcon_undirected,
+    in_net_shp_path = net_sf,
+    standardize_STcon = FALSE, 
+    in_STcon_ref = NULL)
+  
+  if (subset_sites) {
+    STcon_undirected_formatted$STcon_dt <- merge(STcon_undirected_formatted$STcon_dt,
+                                               st_drop_geometry(net_sf[,c('UID', 'cat')]),
+                                               by='UID') %>%
+      merge(in_sites_dt[, .(reach_id, site)], by.x='cat', by.y='reach_id', all.x=F)
+  }
+  
+  setnames(STcon_undirected_formatted$STcon_dt, 'stcon_value', 'STcon_undirected_mean_yr')
+  STcon_undirected_formatted$STcon_dt[, `:=`(year = format(date, '%Y'),
+                                           variable = NULL)]
+  
+  #Compute Fdist undirected
   Fdist_undirected_proj <- compute_Fdist(
     sites_status_matrix = formatted_data$sites_status_matrix,
     network_structure = formatted_data$network_structure, 
@@ -5193,8 +5225,10 @@ compute_connectivity_proj <- function(hydroproj_path, hydroref_path, in_drn_dt,
   
   
   out_dt <- merge(STcon_directed_formatted$STcon_dt,
-                  Fdist_undirected_proj,
-                  by=c('UID', 'year')) %>%
+                  STcon_undirected_formatted$STcon_dt,
+                  by=c('UID', 'site', 'cat','date', 'year')) %>%
+    merge(Fdist_undirected_proj,
+          by=c('UID', 'year')) %>%
     cbind(hydromod_formatted$metadata_dt[, .(country, gcm, scenario)])
   
   return(out_dt)
@@ -9571,7 +9605,8 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
   
   # Define candidate hydrological variables
   hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
-                        'basin_area_km2_log10')
+                        'basin_area_km2_log10',
+                        'meanQ3650past_log10')
   
   #Scale predictor data (mean of 0 and SD of 1) -----
   ssn_miv <- scale_ssn_predictors(in_ssn = ssn_miv,
@@ -9985,7 +10020,8 @@ model_dia_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   ssn_dia_sedi$obs$meanQ3650past_log10 <- log10(ssn_dia_sedi$obs$meanQ3650past)
   
   # Define candidate hydrological variables
-  hydro_candidates <- in_allvars_summarized$cols$hydro_con_summarized
+  hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
+                        'meanQ3650past_log10')
   
   ssn_dia_sedi <- scale_ssn_predictors(in_ssn = ssn_dia_sedi,
                                        in_vars = c(hydro_candidates,
@@ -13267,13 +13303,18 @@ model_bac_sedi_invsimpson_yr <- function(in_ssn_eu_summarized,
   
   in_ssn_eu_summarized$bac_sedi_nopools$ssn$obs %<>%
     mutate(STcon_m10_directed_avg_samp_log10=log10(STcon_m10_directed_avg_samp))
-  ssn_bac_sedi$obs$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_sedi$obs$STcon_m10_directed_avg_samp)
+  ssn_bac_sedi$obs %<>%
+    mutate(STcon_m10_directed_avg_samp_log10 = log10(STcon_m10_directed_avg_samp),
+           STcon_m10_undirected_avg_samp_log10 = log10(STcon_m10_undirected_avg_samp)
+    )
+  
   # ssn_bac_sedi$preds$preds_hist$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_sedi$preds$preds_hist$STcon_m10_directed_avg_samp)
   # ssn_bac_sedi$preds$preds_proj$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_sedi$preds$preds_proj$STcon_m10_directed_avg_samp)
   
   # Define candidate hydrological variables
   hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
-                        'STcon_m10_directed_avg_samp_log10')
+                        'STcon_m10_directed_avg_samp_log10',
+                        'STcon_m10_undirected_avg_samp_log10')
   
   #Scale predictor data (mean of 0 and SD of 1) -----
   ssn_bac_sedi <- scale_ssn_predictors(in_ssn = ssn_bac_sedi,
@@ -15115,6 +15156,7 @@ model_bac_biof_richness_yr <- function(in_ssn_eu_summarized,
 }
 
 #------ get_perf_table_multiorganism-------------------------------------------
+# in_mod_list = tar_read(ssn_mod_yr_fit_multiorganism)
 
 get_perf_table_multiorganism <- function(in_mod_list) {
   
@@ -15129,6 +15171,34 @@ get_perf_table_multiorganism <- function(in_mod_list) {
       .[, `.`:=NULL] %>%
       setnames(names(.), paste0('varcomp_', names(.)))
     
+    #If there is a country fixed effect, 
+    # re-fit with only that and get fixed-effect R2
+    if (any((grepl('country\\s*([*]|[+])', 
+              as.character(formula(in_mod_fit)))))) {
+      
+      country_formula <- as.formula(
+        paste(as.character(in_mod_fit$call$formula)[2], '~ country'))
+      
+      country_fit <- stats::update(in_mod_fit, 
+                                   formula.=country_formula, 
+                                   evaluate=TRUE,
+                                   ssn.object = in_mod_fit$ssn.object)
+      country_r2 <- SSN2::varcomp(country_fit) %>%
+        filter(varcomp=="Covariates (PR-sq)") %>%
+        .[['proportion']]
+      
+      
+      varcomp_cols[,varcomp_hydroenv_covariates := 
+                     `varcomp_Covariates (PR-sq)`-country_r2]
+      
+    } else {
+      country_r2 <- NA
+      varcomp_cols[,varcomp_hydroenv_covariates := 
+                     `varcomp_Covariates (PR-sq)`]
+    }
+    
+    varcomp_cols[,`varcomp_Covariates (PR-sq)`:=NULL]
+    
     # print(in_mod_fit)
     perf_table <- cbind(
       formula = format_ssn_glm_equation(in_mod_fit, greek = TRUE), 
@@ -15136,6 +15206,7 @@ get_perf_table_multiorganism <- function(in_mod_list) {
       GVIF = ifelse(length(attr(in_mod_fit$terms, "term.labels"))>=2,
                     max(as.data.frame(vif(in_mod_fit))[['GVIF^(1/(2*Df))']]), 
                     NA),
+      varcomp_country_only = country_r2,
       varcomp_cols,
       SSN2::loocv(in_mod_fit))
     return(perf_table)
@@ -15218,10 +15289,9 @@ plot_ssn_mod_diagplot <- function(in_mod_fit,
 # in_ssn_mod_fit = tar_read(ssn_mods_dia_sedi_richness_yr)$ssn_mod_fit
 # in_ssn_mod_fit <- tar_read(ssn_mods_bac_sedi_invsimpson_yr)$ssn_mod_fit
 # in_ssn_mod_fit <- tar_read(ssn_mods_fun_sedi_invsimpson_yr)$ssn_mod_fit
-# in_ssn_mod_fit = tar_read(ssn_mods_miv_richness_yr)$ssn_mod_fit
-
 # in_ssn_mod_fit <- tar_read(ssn_mods_fun_sedi_richness_yr)$ssn_mod_fit
-#
+
+# in_ssn_mod_fit = tar_read(ssn_mods_miv_richness_yr)$ssn_mod_fit
 # in_hydrocon_sites_proj = rbindlist(tar_read(hydrocon_sites_proj_gcm))
 # type_predict='link'
 # predict_years=c(seq(1991, 2020), seq(2041, 2100))
@@ -15276,15 +15346,19 @@ predict_ssn_mod <- function(in_ssn_mod_fit, in_hydrocon_sites_proj,
   names(formatted_proj_dt)
   setnames(formatted_proj_dt,
            c('DurD_yr', 'FreD_yr', 'PDurD_yr', 'PFreD_yr',
-             'STcon_mean_yr', 'Fdist_undmean_yr'), 
+             'STcon_directed_mean_yr', 
+             'STcon_undirected_mean_yr', 'Fdist_undmean_yr'), 
            c('DurD_samp', 'FreD_samp', 'PDurD365past', 'PFreD365past',
-             'STcon_m10_directed_avg_samp', 'Fdist_mean_10past_undirected_avg_samp')
+             'STcon_m10_directed_avg_samp',
+             'STcon_m10_undirected_avg_samp',
+             'Fdist_mean_10past_undirected_avg_samp')
   )
   
   formatted_proj_dt[, `:=`(
     meanQ3650past_sqrt = sqrt(meanQ3650past),
     meanQ3650past_log10 = log10(meanQ3650past),
     STcon_m10_directed_avg_samp_log10 = log10(STcon_m10_directed_avg_samp),
+    STcon_m10_undirected_avg_samp_log10 = log10(STcon_m10_undirected_avg_samp), 
     DurD_CV10yrpast_sqrt = sqrt(DurD_CV10yrpast),
     Fdist_mean_10past_undirected_avg_samp_log10 = log10(Fdist_mean_10past_undirected_avg_samp + 1),
     basin_area_km2_log10 = log10(basin_area_km2)
@@ -15491,17 +15565,28 @@ map_ssn_mod <- function(in_ssn,
                         in_ssn_mods,
                         in_ssn_preds,
                         out_dir) {
+  
+  in_future_stats_dt[response_var=='mean_richness' &
+                       organism=='miv_nopools' &
+                       scenario %in% c('ssp126', 'ssp585'),] %>%
+    ggplot(aes(x=variable, y=mean_change, fill=gcm)) +
+    # geom_jitter(aes(color=gcm), alpha=0.3) +
+    geom_boxplot(outliers=FALSE) +
+    facet_grid(country~scenario) + 
+    scale_x_discrete(labels=c('2041-2070', '2071-2100')) +
+    scale_y_continuous(breaks=seq(-60, 20, 20)) +
+    labs(y='Predicted change in species richness (%)') +
+    theme_bw()
+  
+  
   in_future_stats_dt[response_var=='mean_richness' &
                        scenario %in% c('ssp126', 'ssp585'),] %>%
-  ggplot(aes(x=variable, y=mean_change, fill=gcm)) +
+    ggplot(aes(x=variable, y=mean_change, fill=gcm)) +
     geom_jitter(aes(color=gcm), alpha=0.1) +
     geom_boxplot(outliers=FALSE) +
     facet_grid(organism~scenario, scales='free_y') + 
     theme_bw()
-  
-  
-  
-  
+
   
   #Mean and SNR across gcms
   proj_stats_gcm <- preds_period_mean[, list(
