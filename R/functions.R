@@ -2427,6 +2427,13 @@ read_biodt <- function(path_list, in_metadata_edna,
   #Remove spaces in running id
   in_metadata_edna[, running_id := gsub(' ', '', running_id)]
   
+  #Remove Nematoda and Nematomorpha phyla, and Hydrachnidae family
+  dt_list$miv <- dt_list$miv %>%
+    select(-c(hydrachnidae.gen..sp., nematoda.gen..sp., nematomorpha.gen..sp.))
+  dt_list$miv_nopools <- dt_list$miv_nopools %>%
+    select(-c(hydrachnidae.gen..sp., nematoda.gen..sp., nematomorpha.gen..sp.))
+
+  
   #Separate OCH from EPT--------------------------------------------
   #Prepare reduced data for joining with full/raw data that contains family/taxagroup info
   miv_melt <- melt(dt_list$miv_nopools, 
@@ -2435,6 +2442,7 @@ read_biodt <- function(path_list, in_metadata_edna,
                    variable.name = "taxon_name",
                    value.name = 'density'
   )
+  
   #Check that can safely clean
   gsub('[.]', '', gsub('(gen[.])|(sp[.])', '', names(dt_list$miv_nopools))) %>% 
     duplicated %>% sum
@@ -6803,7 +6811,9 @@ map_ssn_util <- function(in_ssn,
                          linecolor_col=NULL, linecolor_lims=NULL,
                          in_pts=NULL, 
                          shape_col=NULL,
-                         ptcolor_col=NULL, ptcolor_lims=NULL
+                         ptcolor_col=NULL, ptcolor_lims=NULL,
+                         nbreaks=NULL,
+                         cover_zero=FALSE 
 ) {
   
   # Compute limits if not provided
@@ -6853,7 +6863,7 @@ map_ssn_util <- function(in_ssn,
         scale_color_fermenter(
           name = str_to_sentence(gsub('_', ' ', linecolor_col)),
           limits = linecolor_lims,
-          n.breaks = 10,
+          n.breaks = ifelse(is.null(nbreaks), 10, nbreaks),
           palette = "Spectral"
         )
     } else {
@@ -6861,7 +6871,17 @@ map_ssn_util <- function(in_ssn,
         scale_color_viridis_b(
           name = str_to_sentence(gsub('_', ' ', linecolor_col)),
           limits = linecolor_lims,
-          n.breaks=5) 
+          n.breaks=ifelse(is.null(nbreaks), 5, nbreaks),) 
+    }
+    
+    if (cover_zero) {
+      out_map <- out_map +
+        geom_sf(data = in_edges[in_edges[[linecolor_col]]==0,],
+                aes(
+                  linewidth = !!sym(linewidth_col)
+                ),
+                color = 'grey'
+        )
     }
     
   }
@@ -6877,14 +6897,32 @@ map_ssn_util <- function(in_ssn,
         size = 3
       )
     
+    
+    if (length(setdiff(sign(ptcolor_lims), 0)) == 2) {
+      # Data spans both positive and negative values
+      # Center the limits on 0 and make them symmetric
+      max_abs <- max(abs(ptcolor_lims))
+      out_map <- out_map +
+        scale_color_fermenter(
+          name = str_to_sentence(gsub('_', ' ', ptcolor_col)),
+          limits = c(-max_abs, max_abs),
+          n.breaks = ifelse(is.null(nbreaks), 10, nbreaks),
+          palette = "Spectral",
+          direction = -1  # Reverse the palette (blue for positive, red for negative)
+        )
+    } else {
+      out_map <- out_map + 
+        scale_color_viridis_b(
+          name = str_to_sentence(gsub('_', ' ', ptcolor_col)),
+          limits = ptcolor_lims,
+          n.breaks=ifelse(is.null(nbreaks), 5, nbreaks),) 
+    }
+    
+    
     if (!is.null(linecolor_col)) {
       out_map <- out_map +  new_scale_color()
     }
-    out_map <- out_map + 
-      scale_color_viridis_b(
-        name = str_to_sentence(gsub('_', ' ', ptcolor_col)),
-        limits = ptcolor_lims,
-        n.breaks=5) 
+
   }
   
   # handle point shapes
@@ -6986,7 +7024,9 @@ map_ssn_facets <- function(in_ssn,
                            linecolor_col=NULL, 
                            shape_col=NULL,
                            ptcolor_col=NULL,
-                           page_title=NULL) {
+                           nbreaks = NULL,
+                           page_title=NULL,
+                           cover_zero = FALSE) {
   
   assert_that((facet_col %in% names(in_ssn$edges)) &
                 (facet_col %in% names(in_ssn$obs)),
@@ -7035,7 +7075,7 @@ map_ssn_facets <- function(in_ssn,
                             in_pts = pts_i)
     
     #Map individual facet
-    map_ssn_util(
+    facet_map <- map_ssn_util(
       in_ssn = in_ssn, 
       in_edges = edges_i,
       linewidth_col = linewidth_col,                                
@@ -7044,7 +7084,9 @@ map_ssn_facets <- function(in_ssn,
       in_pts = pts_i, 
       shape_col = shape_col,
       ptcolor_col = ptcolor_col, 
-      ptcolor_lims = ptcolor_lims
+      ptcolor_lims = ptcolor_lims,
+      nbreaks = nbreaks,
+      cover_zero = cover_zero
     ) +
       ggtitle(facet_i) +
       coord_sf(xlim = map_lims$xlim, 
@@ -7125,7 +7167,7 @@ map_ssn_summarized <- function(in_ssn_summarized,
                    page_title = in_ptcolor_col
     )
   }) %>% setNames(physvars)
-  
+
   return(c(maps_div, maps_physvars))
 }
 
@@ -8266,6 +8308,80 @@ get_hydrowindow_predictions <- function(best_dt) {
   }) %>% rbindlist(fill=T)
 }
 
+#------ plot_hydrocon_summarized -----------------------------------------------
+# in_allvars_summarized <- tar_read(allvars_summarized)
+# in_drn_dt <- drn_dt
+# in_hydro_vars_dt <- tar_read(hydro_vars_dt)
+# outdir = figdir
+
+plot_hydrocon_summarized <- function(in_allvars_summarized,
+                                     in_drn_dt, in_hydro_vars_dt, 
+                                     outdir, write_plot=T) {
+  
+  metacols_sub <- c(intersect(metacols, names(in_allvars_summarized$dt)), 'stream_type')
+  hydrocon_sub <- in_allvars_summarized$dt %>%
+    .[!duplicated(site) & stream_type=='TR',
+      c(metacols_sub,
+        allvars_summarized$cols$hydro_con_summarized), with=F] %>%
+    .[, Fdist_mean_10past_undirected_avg_samp_log10 := 
+        log10(Fdist_mean_10past_undirected_avg_samp+0.1)] 
+  
+  hydrocon_melt <- hydrocon_sub %>%
+    melt(id.vars=metacols_sub) %>%
+    merge(in_drn_dt, by='country')  %>%
+    .[, country := factor(
+      country,
+      levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain" ),
+      ordered=T)
+    ] %>%
+    .[, variable_name := get_full_hydrolabel(in_hydro_vars_dt, 
+                                             in_hydro_var=variable),
+      by=.I]
+  
+  color_vec <-  hydrocon_melt[!duplicated(country),
+                          setNames(color, country)]
+  
+  vars_sub <- c("DurD_samp", "PDurD365past", "FreD_samp", "meanConD_yr", 
+    "FstDrE", "DurD_CV30yrpast", "FstDrE_SD30yrpast", 
+    "STcon_m10_undirected_avg_samp", 
+    "Fdist_mean_10past_undirected_avg_samp_log10")
+  
+  hydrocon_summarized_plot <- hydrocon_melt[variable %in% vars_sub,] %>%
+    ggplot(aes(x=country, y=value, fill=country)) +
+    geom_boxplot(alpha=0.5) +
+    scale_fill_manual(name='Country', values=color_vec) +
+    facet_wrap(~variable_name,
+               scales='free_x',
+               labeller = label_wrap_gen(width = 22)) +
+    coord_flip() +
+    theme_classic() +
+    theme(legend.position='none')
+  
+  out_plot_path <- file.path(outdir, 'hydrocon_summarized_boxplot.png')
+  if (!file.exists(out_plot_path)) {
+    ggsave(out_plot_path,
+           hydrocon_summarized_plot,
+           width = 6, height = 6, dpi=300)
+  }
+  
+  out_tab_path <- file.path(outdir, 'hydrocon_summarized.csv')
+  if (!file.exists(out_tab_path)) {
+    vtable::st(
+      hydrocon_sub, 
+      group = 'country', 
+      group.long = FALSE,
+      out = "csv",
+      file = out_tab_path)
+  }
+  
+  return(list(
+    plot = hydrocon_summarized_plot,
+    tab_path = out_tab_path
+    )
+  )
+}
+
+
 #------ plot_hydrowindow_obs_preds ----------------------------------------------
 #' Plot observed vs predicted values
 #'
@@ -8527,6 +8643,7 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
                                          in_organism_dt,
                                          in_drn_dt,
                                          write_plot = F,
+                                         subset_variables = T, 
                                          out_dir = NULL) {
   
   emtrends_all <- rbindlist(emtrends_list, idcol='organism') 
@@ -8596,6 +8713,17 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
       legend.box.margin = margin(l = 20, t = 0, r = 0, b = 0)
     ) 
   
+  
+  #Subset variables
+  if (subset_variables) {
+    emtrends_sub <- emtrends_all[hydro_var_root %in% 
+                                   c('DurD', 'FreD', 'Fdist_mean_undirected',
+                                     'STcon_undirected', 'DurD_CV', 'FstDrE', 
+                                     'sd6', 'oQ10'),]
+    emtrends_plot_sub <- emtrends_plot + emtrends_sub
+  }
+
+  
   if (write_plot && !is.null(out_dir)) {
     out_path <- file.path(
       out_dir,
@@ -8611,6 +8739,14 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
            plot = emtrends_plot, 
            width = 14, height = 11, units = "in", 
            dpi = 600)
+    
+    if (subset_variables) {
+      ggsave(gsub(response_var, paste0(response_var, '_subvars'), out_path), 
+             plot = emtrends_plot_sub, 
+             width = 14, height = 11, units = "in", 
+             dpi = 600)
+      
+    }
   }
   
   return(list(
@@ -15476,9 +15612,14 @@ predict_ssn_mod <- function(in_ssn_mod_fit, in_hydrocon_sites_proj,
 
 
 #------ compute_future_change --------------------------------------------------
-# in_preds_proj_dt <- preds_proj_dt
-# reference_years <- seq(1991, 2020)
-# future_years <- list(mid_century=seq(2041, 2070), late_century=seq(2071, 2100))
+# tar_load(ssn_mod_yr_fit_multiorganism)
+# in_mod_fit <- names(ssn_mod_yr_fit_multiorganism)[[1]]
+# in_ssn_mod_fit = ssn_mod_yr_fit_multiorganism[[in_mod_fit]]
+# in_ssn_proj_dt = rbindlist(ssn_proj_dt, fill=T)[mod==in_mod_fit,]
+# reference_years = seq(1991, 2020)
+# future_years = list(mid_century=seq(2041, 2070), 
+#                     late_century=seq(2071, 2100))
+# n_sim = 100
 
 compute_div_change <- function(in_ssn_mod_fit, in_ssn_proj_dt,
                                reference_years, future_years, n_sim) {
@@ -15503,14 +15644,14 @@ compute_div_change <- function(in_ssn_mod_fit, in_ssn_proj_dt,
                       sim = inv_link(
                         rnorm(n = n_sim, mean = .fitted, sd = .se.fit))),
                     by=.(organism, site, country, scenario,
-                         gcm, year, response_var)] %>%
+                         gcm, year, response_var, mod)] %>%
     merge(years_dt, by='year')
   
   #Compute change statistics
   sim_change_dt <- sim_dt[, list(mean_div = mean(sim)),
                           by=.(organism, site, country, scenario, 
-                               gcm, period, n, response_var)] %>%
-    dcast(organism+site+country+scenario+gcm+n+response_var~period, 
+                               gcm, period, n, response_var, mod)] %>%
+    dcast(organism+site+country+scenario+gcm+n+response_var+mod~period, 
           value.var='mean_div') %>%
     .[, `:=`(div_change_mid = 100*(mid_century - reference)/reference,
              div_change_late = 100*(late_century - reference)/reference
@@ -15520,13 +15661,13 @@ compute_div_change <- function(in_ssn_mod_fit, in_ssn_proj_dt,
   stats_change_dt <- melt(
     sim_change_dt,
     id.vars=c('organism', 'site', 'country',
-              'scenario', 'gcm', 'n', 'response_var'),
+              'scenario', 'gcm', 'n', 'response_var', 'mod'),
     measure.vars = c('div_change_mid', 'div_change_late')) %>%
     .[, list(mean_change = mean(value),
              lower_change = quantile(value, probs=0.025),
              upper_change = quantile(value, probs=0.975)
     ),
-    by=.(organism, site, country, scenario, gcm, variable, response_var)]
+    by=.(organism, site, country, scenario, gcm, variable, response_var, mod)]
   
   
   return(list(
@@ -15535,22 +15676,20 @@ compute_div_change <- function(in_ssn_mod_fit, in_ssn_proj_dt,
   )
 }
 
-#------ map_ssn_mod ------------------------------------------------------------
-# in_ssn_proj_dt <- rbindlist(tar_read(ssn_proj_dt), fill=T)
+#------ plot_ssn_proj------------------------------------------------------------
 # in_future_sims_dt <- tar_read(future_change_dt) %>%
 #   lapply(function(x) x[['sims_dt']]) %>%
 #   rbindlist(fill=T)
 # in_future_stats_dt <- tar_read(future_change_dt) %>%
 #   lapply(function(x) x[['stats_dt']]) %>%
 #   rbindlist(fill=T)
-# out_dir = figdir
+# in_drn_dt = drn_dt
+# in_env_summarized <- tar_read(env_summarized)
+# in_mod_fit_list <- tar_read(ssn_mod_yr_fit_multiorganism)
+# in_organism_dt <- tar_read(organism_dt)
+# mod_sub = c('fun_sedi_richness','dia_sedi_richness', 'miv_richness', 'ept_richness') 
 
-#' Map SSN model predictions and diagnostic metrics
-#'
-#' This function takes a fitted SSN model, a spatial stream network (SSN) object,
-#' and model predictions to generate and save a variety of diagnostic plots and maps.
-#' It computes future statistics across different GCMs and time periods, and
-#' creates plots and maps to visualize these results.
+#' Map SSN model projections and changes
 #'
 #' @param in_ssn The input SSN object.
 #' @param in_ssn_mods A list of fitted SSN models, as returned by `model_miv_yr`.
@@ -15561,175 +15700,222 @@ compute_div_change <- function(in_ssn_mod_fit, in_ssn_proj_dt,
 #'
 #' @return The function is primarily used for its side effects (creating plots and
 #'   maps) and does not return a value.
-map_ssn_mod <- function(in_ssn,
-                        in_ssn_mods,
-                        in_ssn_preds,
-                        out_dir) {
+plot_ssn_proj <- function(
+    in_future_sims_dt,
+    in_future_stats_dt,
+    in_drn_dt,
+    in_env_summarized,
+    in_mod_fit_list,
+    in_organism_dt,
+    mod_sub = c('fun_sedi_richness','dia_sedi_richness',
+                'miv_richness', 'ept_richness')) {
+  #Only projects models for which hydro-env variables
+  # explain at least 30% of variance
   
-  in_future_stats_dt[response_var=='mean_richness' &
-                       organism=='miv_nopools' &
-                       scenario %in% c('ssp126', 'ssp585'),] %>%
-    ggplot(aes(x=variable, y=mean_change, fill=gcm)) +
-    # geom_jitter(aes(color=gcm), alpha=0.3) +
-    geom_boxplot(outliers=FALSE) +
+  #------------------ Make plots -----------------------------------------------
+  #For a given organism, make a plot of scenario x country x period + fill=GCM
+  sub_dt <- in_future_stats_dt[response_var=='mean_richness' &
+                                 organism=='miv_nopools' &
+                                 scenario %in% c('ssp126', 'ssp585'),]
+  
+  plot_change_miv_boxplot <- ggplot(sub_dt, 
+                            aes(x=variable, y=mean_change, fill=gcm)) +
+    geom_hline(yintercept=0, color='darkgrey') + 
+    geom_boxplot(outliers=TRUE, alpha=0.8) +
+    # geom_boxplot(aes(y=lower_change), outliers=FALSE, alpha=0.5) +
+    # geom_boxplot(aes(y=upper_change), outliers=FALSE, alpha=0.5) +
     facet_grid(country~scenario) + 
     scale_x_discrete(labels=c('2041-2070', '2071-2100')) +
     scale_y_continuous(breaks=seq(-60, 20, 20)) +
     labs(y='Predicted change in species richness (%)') +
     theme_bw()
   
+  plot_change_miv_ridges <- in_future_stats_dt[response_var=='mean_richness' &
+                                          organism=='miv_nopools' &
+                                          scenario %in% c('ssp126', 'ssp585'),] %>%
+    ggplot(aes(y=gcm, fill=gcm)) +
+    # ggridges::geom_density_ridges(aes(x=lower_change), color=NA,
+    #                               alpha=0.3, stat="binline", bins=10) +
+    # ggridges::geom_density_ridges(aes(x=upper_change), color=NA,
+    #                               alpha=0.3, stat="binline", bins=10) +
+    ggridges::geom_density_ridges(aes(x=mean_change), 
+                                  color=NA, alpha=0.6,
+                                  stat="binline", bins=10, panel_scaling = FALSE) +
+    coord_flip() +
+    facet_nested(country~scenario+variable) +
+    ggridges::theme_ridges() +
+    theme(axis.text.x = element_blank())
   
-  in_future_stats_dt[response_var=='mean_richness' &
-                       scenario %in% c('ssp126', 'ssp585'),] %>%
-    ggplot(aes(x=variable, y=mean_change, fill=gcm)) +
-    geom_jitter(aes(color=gcm), alpha=0.1) +
-    geom_boxplot(outliers=FALSE) +
-    facet_grid(organism~scenario, scales='free_y') + 
+  
+  #Make a cross-organism plot of distribution of mean change across GCMs  -------
+  sub_mean_dt <- in_future_stats_dt[
+    response_var=='mean_richness' & 
+      scenario %in% c('ssp126', 'ssp585') &
+      mod %in% mod_sub, 
+    list(
+      mean_change = mean(mean_change),
+      SNR_change = mean(mean_change)/abs(max(mean_change)-min(mean_change)),
+      gcm = 'Mean'), 
+    by=.(site, variable, scenario, country, organism, mod)] %>%
+    merge(in_env_summarized$dt_nopools[!duplicated(site), 
+                                       .(stream_type, site)],
+          by='site') %>%
+    merge(in_drn_dt, by='country')  %>%
+    .[, country := factor(
+      country,
+      levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain" ),
+      ordered=T)
+    ] %>%
+    merge(in_organism_dt, by='organism')
+  
+  color_vec <- sub_mean_dt[!duplicated(country),
+                          setNames(color, country)]
+  
+  
+  plot_multigcm_avg_crossorganism <- ggplot(
+    sub_mean_dt, aes(x=variable, y=mean_change, fill=country)
+  ) +
+    geom_hline(yintercept=0, color='darkgrey') + 
+    geom_boxplot(alpha=0.5, outliers=TRUE) +
+    scale_x_discrete(labels=c('2041-2070', '2071-2100')) +
+    # scale_y_continuous(breaks=seq(-60, 20, 20)) +
+    scale_fill_manual(values=color_vec) +
+    labs(y='Predicted change in species richness (%)') +
+    facet_grid(organism_label~scenario, scales='free_y') + 
+    theme_bw()
+  
+  plot_multigcm_avg_crossorganism_type <- ggplot(
+    sub_mean_dt,
+    aes(x=variable, y=mean_change, fill=country, linetype=stream_type)
+  ) +
+    geom_hline(yintercept=0, color='darkgrey') + 
+    geom_boxplot(alpha=0.5, outliers=TRUE) +
+    scale_x_discrete(labels=c('2041-2070', '2071-2100')) +
+    # scale_y_continuous(breaks=seq(-60, 20, 20)) +
+    scale_fill_manual(values=color_vec) +
+    labs(y='Predicted change in species richness (%)') +
+    facet_grid(organism_label~scenario, scales='free_y') + 
+    theme_bw()
+  
+  plot_SNR_crossorganism <- ggplot(
+    sub_mean_dt, aes(x=variable, y=SNR_change, fill=country)
+  ) +
+    geom_hline(yintercept=0, color='darkgrey') + 
+    geom_boxplot(alpha=0.5, outliers=FALSE) +
+    scale_x_discrete(labels=c('2041-2070', '2071-2100')) +
+    # scale_y_continuous(breaks=seq(-60, 20, 20)) +
+    scale_fill_manual(values=color_vec) +
+    labs(y='Mean/Range of % change in species richness across GCMs') +
+    facet_grid(organism_label~scenario, scales='free_y') + 
+    theme_bw()
+  
+  plot_SNR_crossorganism_type <- ggplot(
+    sub_mean_dt,
+    aes(x=variable, y=SNR_change, fill=country, linetype=stream_type)
+  ) +
+    geom_hline(yintercept=0, color='darkgrey') + 
+    geom_boxplot(alpha=0.5, outliers=FALSE) +
+    scale_x_discrete(labels=c('2041-2070', '2071-2100')) +
+    # scale_y_continuous(breaks=seq(-60, 20, 20)) +
+    scale_fill_manual(values=color_vec) +
+    labs(y='Mean/Range of % change in species richness across GCMs') +
+    facet_grid(organism_label~scenario, scales='free_y') + 
     theme_bw()
 
+  #------------------ Make maps -----------------------------------------------
+  # Make map of predicted 1991-2020 richness -----------------------------------
+  ref_multigcm_dt <- in_future_sims_dt[
+    , list(ref_richness_pred_mean = mean(reference)),
+    by=.(organism, site, country, scenario, gcm, mod)] %>%
+    .[, list(ref_richness_pred_multigcm_mean = mean(ref_richness_pred_mean),
+             ref_richness_pred_multigcm_range = (max(ref_richness_pred_mean)
+                                                 -min(ref_richness_pred_mean))),
+      by=.(organism, site, country, scenario, mod)]
   
-  #Mean and SNR across gcms
-  proj_stats_gcm <- preds_period_mean[, list(
-    fitted_mean_period=weighted.mean(fitted_mean_decade, nyears, na.rm=T)
-  ), by=c('country', 'rid', 'period', 'gcm', 'scenario')] %>%
-    dcast(rid+country+gcm+scenario~period, value.var = 'fitted_mean_period') %>%
-    .[, preds_diff_2040_2069 := `2040-2069` - `2015-2020`] %>%
-    .[, preds_diff_2070_2099 := `2070-2099` - `2015-2020`] %>%
-    .[, preds_per_2040_2069 := (`2040-2069` - `2015-2020`)/`2015-2020`] %>%
-    .[, preds_per_2070_2099 := (`2070-2099` - `2015-2020`)/`2015-2020`] %>%
-    melt(id.vars=c('rid','country','gcm','scenario'))
   
-  proj_stats_multigcm <- proj_stats_gcm[, list(
-    multigcm_avg = mean(value, na.rm=T),
-    snr = mean(value, na.rm=T)/diff(range(value, na.rm=T))
-  ), by = c('country', 'rid', 'variable', 'scenario')] %>%
-    merge(st_drop_geometry(in_ssn_mods$ssn_mod_fit$ssn.object$obs)[
-      , c('rid', 'stream_type')]
-      , by='rid')
+  # mod_name <-  mod_sub[[3]]
+  maps_list <- lapply(mod_sub, function(mod_name) {
+    ssn_preds_hist <-in_mod_fit_list[[mod_name]]$ssn.object 
+    
+    ssn_preds_hist$obs <- ssn_preds_hist$obs %>%
+      merge(ref_multigcm_dt[mod==mod_name,], 
+            by=c('site', 'country', 'organism')) %>%
+      mutate(perc_diff = 100*(ref_richness_pred_multigcm_mean-mean_richness)/mean_richness) %>%
+      merge(in_organism_dt, by='organism')
+    
+    map_ref_pred <- map_ssn_facets(in_ssn=ssn_preds_hist, 
+                                   in_pts='obs',
+                                   facet_col='country',
+                                   ptcolor_col = 'ref_richness_pred_multigcm_mean',
+                                   shape_col = 'stream_type',
+                                   linewidth_col='qsim_avg',       
+                                   nbreaks=8,
+                                   page_title=str_wrap(
+                                     paste0('Predicted species richness - ',
+                                                     unique(ssn_preds_hist$obs$organism_label)[1],
+                                                     ' (1991-2020)'),
+                                     60)
+    )
+    
+    map_ref_diff <- map_ssn_facets(in_ssn=ssn_preds_hist, 
+                                   in_pts='obs',
+                                   facet_col='country',
+                                   ptcolor_col = 'perc_diff',
+                                   shape_col = 'stream_type',
+                                   linewidth_col='qsim_avg', 
+                                   nbreaks=10,
+                                   page_title=str_wrap(
+                                   paste0('Species richness (% difference 
+                                                   predicted mean 1991-2020 vs observed 2021) - ',
+                                                     unique(ssn_preds_hist$obs$organism_label)[1]),
+                                   60)
+    ) 
+    
+    ggplot(ssn_preds_hist$obs, aes(x=country, y=perc_diff)) +
+      geom_boxplot(outliers=F)
+    
+    
+    # Make map of future changes --------------------------------------------------
+    ssn_preds_hist <-in_mod_fit_list[[mod_name]]$ssn.object 
+    
+    #For a specific projection scenario (2070-2099, ssp585)
+    change_topmap <- sub_mean_dt[mod==mod_name &
+                                   variable=='div_change_late' &
+                                   scenario=='ssp585',]
+    
+    ssn_preds_hist$obs <- ssn_preds_hist$obs %>%
+      merge(change_topmap, 
+            by=c('site', 'country', 'organism', 'stream_type')) %>%
+      merge(in_organism_dt, by='organism')
+    
+    map_change_pred <- map_ssn_facets(in_ssn=ssn_preds_hist, 
+                                      in_pts='obs',
+                                      facet_col='country',
+                                      ptcolor_col = 'mean_change',
+                                      shape_col = 'stream_type',
+                                      linewidth_col='qsim_avg',       
+                                      nbreaks=8,
+                                      page_title=str_wrap(
+                                        paste0('Predicted % change in species richness - ',
+                                               unique(ssn_preds_hist$obs$organism_label)[1],
+                                               ' (2071-2100 vs 1991-2020) - SSP5-8.5'),
+                                        60)
+                                      )
   
-  #------  Make a plot of projections across time periods and countries -----
-  ggplot(proj_stats_multigcm[variable %in% c('preds_diff_2040_2099',
-                                             'preds_diff_2070_2099'),],
-         aes(x=variable, y=multigcm_avg, color=scenario)) +
-    geom_boxplot() +
-    facet_wrap(~country)
-  
-  # Another plot to show average percent change in richness
-  ggplot(proj_stats_multigcm[variable %in% c('preds_per_2040_2069',
-                                             'preds_per_2070_2099'),],
-         aes(x=factor(variable), y=multigcm_avg, fill=scenario)) +
-    geom_hline(yintercept=0) +
-    scale_y_continuous(name='Average % change in richness across GCMs compared to 2015-2020',
-                       labels=scales::label_percent()) +
-    scale_x_discrete(name='Time Period',
-                     labels=c('2040-2060', '2070-2099')) +
-    geom_boxplot() +
-    scale_fill_brewer(palette='YlOrRd') +
-    facet_grid(country~stream_type) +
-    theme_classic()
-  
-  #------------- Makes maps ----------------------------------------------------
-  # Make map of 2021 (historical) richness -------------
-  ssn_preds_hist <- in_ssn_mods$ssn_mod_fit$ssn.object
-  response_var <- all.vars(in_ssn_mods$ssn_mod_fit$formula)[[1]]
-  ssn_preds_hist$edges <- merge(
-    in_ssn_mods$ssn_mod_fit$ssn.object$edges,
-    in_ssn_preds$hist,
-    by = c('country', 'rid'), all.x=T)
-  
-  map_hist <- map_ssn_facets(in_ssn=ssn_preds_hist, 
-                             facet_col='country',
-                             linewidth_col='qsim_avg',                                
-                             linecolor_col='.fitted', 
-                             page_title='Macroinvertebrate richness - Historical'
-  )
-  
-  ggsave(
-    filename = file.path(figdir, 'ssn_pred_hist_map_miv.png'),
-    plot =  map_hist,
-    width = 9,
-    height = 9,
-    units='in',
-    dpi=600
-  )
-  
-  #SHOULD REPLACE THIS WITH LOOCV - BUT DOESN't EXIST YET
-  ssn_preds_hist$obs <- ssn_preds_hist$obs %>%
-    merge(in_ssn_preds$hist[, c('rid', '.fitted', 'country'), with=F], 
-          by=c('rid', 'country')) %>%
-    mutate(pred_error = `.fitted`-get(response_var))
-  
-  map_error <- map_ssn_facets(in_ssn=ssn_preds_hist, 
-                              in_pts='obs',
-                              facet_col='country',
-                              ptcolor_col = 'pred_error',
-                              shape_col = 'stream_type',
-                              linewidth_col='qsim_avg',                                
-                              page_title='Macroinvertebrate richness - Error (predicted - observed)'
-  )
-  
-  # Makes maps of projections  ----------------------------
-  ssn_preds_proj <- in_ssn_mods$ssn_mod_fit$ssn.object
-  
-  # ggplot(proj_stats_gcm, aes(x=period, y=preds_diff_multigcm_avg, fill=scenario)) +
-  #   geom_boxplot() + 
-  #   facet_wrap(~country)
-  # 
-  
-  # Creates a map of a specific projection scenario (2070-2099, ssp585)
-  ssn_preds_proj$obs <- ssn_preds_proj$obs %>%
-    merge(proj_stats_multigcm[variable=='preds_per_2070_2099' & scenario=='ssp585',], 
-          by=c('rid', 'country'))
-  map_ssn_facets(in_ssn=ssn_preds_proj, 
-                 in_pts='obs',
-                 facet_col='country',
-                 ptcolor_col = 'multigcm_avg',
-                 shape_col = 'stream_type.x',
-                 linewidth_col='qsim_avg',                                
-                 page_title='Macroinvertebrate mean richness - 2070-2099 - SSP5-8.5'
-  )
-  
-  # Creates a map of the average multimodel richness
-  #Plot each period and scenario
-  ssn_preds_proj$edges <- merge(
-    ssn_preds_proj$edges,
-    proj_stats_multigcm[variable=='2070-2099' & scenario=='ssp585',],
-    by = c('country', 'rid'), all.x=T)
-  
-  map_diff_avg <- map_ssn_facets(in_ssn=ssn_preds_proj, 
-                                 facet_col='country',
-                                 linewidth_col='qsim_avg',                                
-                                 linecolor_col='multigcm_avg', 
-                                 page_title=NULL) 
-  
-  # Makes maps of specific projection scenario/year ----------------------------
-  # ssn_preds_proj <- in_ssn_mods$ssn_mod_fit$ssn.object
-  # in_colname <- 'gfdl-esm4_ssp585_2026'
-  # ssn_preds_proj$edges <- merge(
-  #   in_ssn_mods$ssn_mod_fit$ssn.object$edges,
-  #   in_ssn_preds$proj[colname==in_colname,],
-  #   by = c('country', 'rid'), all.x=T)
-  # 
-  # map_proj <- map_ssn_facets(in_ssn=ssn_preds_proj, 
-  #                            facet_col='country',
-  #                            linewidth_col='qsim_avg',                                
-  #                            linecolor_col='.fitted', 
-  #                            page_title=in_colname
-  # )
-  
-  # Map the difference for a specific GCM/scenario/year
-  # ssn_preds_proj$edges <- merge(
-  #   in_ssn_mods$ssn_mod_fit$ssn.object$edges,
-  #   in_ssn_preds$proj_stats[decade==2040 & colname=='gfdl-esm4_ssp585_2040',],
-  #   by = c('country', 'rid'), all.x=T)
-  # 
-  # map_diff_indiv <- map_ssn_facets(in_ssn=ssn_preds_proj,
-  #                                  facet_col='country',
-  #                                  linewidth_col='qsim_avg',
-  #                                  linecolor_col='preds_diff',
-  #                                  page_title=unique( ssn_preds_proj$edges$colname)
-  # )
-  
+    return(list(
+      map_ref_pred = map_ref_pred,
+      map_ref_diff = map_ref_diff,
+      map_change_pred = map_change_pred
+    ))
+  }) %>% setNames(mod_sub)
+
+  return(list(
+    plot_multigcm_avg_crossorganism,
+    plot_multigcm_avg_crossorganism_type,
+    plot_SNR_crossorganism,
+    plot_SNR_crossorganism_type,
+    maps = maps_list
+  ))
 }
 
 #------ plot_ssn_proj ----------------------------------------------------------

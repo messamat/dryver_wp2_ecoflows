@@ -41,7 +41,7 @@ hydro_combi <- expand.grid(
 if (!interactive()) {
   perf_ratio <- 0.7 #Set how much you want to push your computer (% of cores and RAM)
   nthreads <- round(parallel::detectCores(logical=F)*perf_ratio)
-  # future::plan("future::multisession", workers=nthreads)
+  future::plan("future::multisession", workers=nthreads)
   total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
   options(future.globals.maxSize = perf_ratio*total_ram)
   # tar_option_set(controller = crew_controller_local(workers = nthreads)) #Set up parallel computing in targets
@@ -892,6 +892,15 @@ formatting_targets <- list(
   ,
   
   tar_target(
+    hydrocon_summarized_plot,
+    plot_hydrocon_summarized(in_allvars_summarized = allvars_summarized,
+                             in_drn_dt = drn_dt, 
+                             in_hydro_vars_dt = hydro_vars_dt, 
+                             outdir = figdir)
+  )
+  ,
+    
+  tar_target(
     hydrowindow_lm_scatter,
     plot_scatter_lm(in_allvars_sites=allvars_sites, 
                     temporal_var_substr='DurD', 
@@ -1357,6 +1366,7 @@ temporal_analysis_targets <- list(
     in_organism_dt = organism_dt,
     in_drn_dt = drn_dt,
     write_plot = T,
+    subset_variables = T,
     out_dir = figdir)
   )
   ,
@@ -1620,14 +1630,24 @@ annual_analysis_targets <- list(
                          n_sim = 100)
     })
   )
-    
-  # tar_target(
-  #   ssn_proj_maps,
-  #   map_ssn_mod(in_ssn = ssn_eu_summarized,
-  #               in_ssn_mods = ssn_mods_miv_yr,
-  #               in_ssn_preds = ssn_preds,
-  #               out_dir = figdir)
-  # )
+  ,
+  
+  tar_target(
+    ssn_proj_plots,
+    plot_ssn_proj(in_future_sims_dt =future_change_dt %>%
+                   lapply(function(x) x[['sims_dt']]) %>%
+                   rbindlist(fill=T),
+                 in_future_stats_dt =future_change_dt %>%
+                   lapply(function(x) x[['stats_dt']]) %>%
+                   rbindlist(fill=T),
+                 in_drn_dt = drn_dt,
+                 in_env_summarized = env_summarized,
+                 in_mod_fit_list = ssn_mod_yr_fit_multiorganism,
+                 in_organism_dt = organism_dt,
+                 mod_sub = c('fun_sedi_richness','dia_sedi_richness', 
+                             'miv_richness', 'ept_richness')
+    )
+  )
 )
 
 

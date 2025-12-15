@@ -11,9 +11,11 @@ pkg_vec <- list(
   'future.apply',
   'ggcorrplot',
   'ggforce',
+  'ggh4x',
   'ggnewscale',
   'ggnetwork',
   'ggplot2',
+  'ggridges',
   'ggspatial',
   'gridExtra',
   'gt',
@@ -53,6 +55,7 @@ pkg_vec <- list(
   'tidyterra',
   'tidytext',
   'vegan',
+  'vtable',
   'data.table')
 lapply(pkg_vec, function(p) {
   suppressWarnings(
