@@ -8322,7 +8322,7 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
   hydrocon_sub <- in_allvars_summarized$dt %>%
     .[!duplicated(site) & stream_type=='TR',
       c(metacols_sub,
-        allvars_summarized$cols$hydro_con_summarized), with=F] %>%
+        in_allvars_summarized$cols$hydro_con_summarized), with=F] %>%
     .[, Fdist_mean_10past_undirected_avg_samp_log10 := 
         log10(Fdist_mean_10past_undirected_avg_samp+0.1)] 
   
@@ -8743,7 +8743,7 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
     if (subset_variables) {
       ggsave(gsub(response_var, paste0(response_var, '_subvars'), out_path), 
              plot = emtrends_plot_sub, 
-             width = 14, height = 11, units = "in", 
+             width = 11, height = 7, units = "in", 
              dpi = 600)
       
     }
@@ -8832,8 +8832,8 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
   
   #Scale predictor data (mean of 0 and SD of 1) -----
   ssn_miv <- scale_ssn_predictors(in_ssn = ssn_miv,
-                                       in_vars = hydro_candidates,
-                                       scale_ssn_preds = FALSE) 
+                                  in_vars = hydro_candidates,
+                                  scale_ssn_preds = FALSE) 
   
   alpha_var <- 'mean_richness'
   
@@ -9333,7 +9333,8 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
   ssn_miv$obs$meanQ3650past_sqrt <- sqrt(ssn_miv$obs$meanQ3650past)
   
   # Define candidate hydrological variables
-  hydro_candidates <- in_allvars_summarized$cols$hydro_con_summarized
+  hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
+                        'meanQ3650past_sqrt')
 
   #Scale predictor data (mean of 0 and SD of 1) -----
   ssn_miv <- scale_ssn_predictors(in_ssn = ssn_miv,
@@ -9595,6 +9596,7 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
                      interaction_var = 'country', 
                      in_drn_dt = drn_dt,
                      plot=T)
+  }
     
     #RF does not do so well
     # check_rf <- ranger::ranger(mean_invsimpson ~ .,
@@ -9657,7 +9659,7 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
     }
     
     #Re-fit final model with REML
-    ssn_ept_pred_final <- ssn_lm(
+    ssn_miv_pred_final <- ssn_lm(
       formula = mean_invsimpson_log10 ~ PDurD365past_z + country:PDurD365past_z + 
         meanQ3650past_sqrt_z + country:meanQ3650past_sqrt_z,
       family = 'Gaussian',
@@ -9671,38 +9673,43 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
       estmethod = 'reml'
     )
     
-    ssn_ept_mod_preds <- augment(ssn_ept_pred_final, drop=F, 
+    ssn_miv_mod_preds <- augment(ssn_miv_pred_final, drop=F, 
                                  type.predict = 'response')
     
     if (interactive) {
-      tidy(ssn_ept_pred_final)
-      summary(ssn_ept_pred_final)
-      plot(ssn_ept_pred_final)
-      SSN2::varcomp(ssn_ept_pred_final)
+      tidy(ssn_miv_pred_final)
+      summary(ssn_miv_pred_final)
+      plot(ssn_miv_pred_final)
+      SSN2::varcomp(ssn_miv_pred_final)
       
-      get_ssn_emmeans(in_mod=ssn_ept_pred_final, 
+      get_ssn_emmeans(in_mod=ssn_miv_pred_final, 
                       in_pred_var = 'PDurD365past',
                       interaction_var = 'country', 
                       in_drn_dt = drn_dt,
                       plot=T, label_pred_var=T)$plot
       
       
-      get_ssn_emtrends(in_mod=ssn_ept_pred_final, 
+      get_ssn_emtrends(in_mod=ssn_miv_pred_final, 
                        in_pred_var = 'PDurD365past',
                        interaction_var = 'country', 
                        in_drn_dt = drn_dt,
                        plot=T)$plot
       
       #Check predictions
-      ggplot(data=ssn_ept_mod_preds, aes(x=.fitted, y=get(alpha_var))) +
+      ggplot(data=ssn_miv_mod_preds, aes(x=.fitted, y=get(alpha_var))) +
         geom_point(aes(color=stream_type)) +
         geom_smooth(method='lm') +
         geom_abline() +
         facet_wrap(~country)
     }
-  }
+
   #------ Write out results ----------------------------------------------------
-  return(mod_perf_tab)
+  return(list(
+    model_selection_table = mod_perf_tab,
+    ssn_mod_fit = ssn_miv_pred_final, #Prediction model fit with REML
+    ssn_pred_final = ssn_miv_mod_preds, #AUgmented data with prediction model
+    torgegram_mod_pred = tg_plot #Torgegram for prediction model
+  ))
 }
 
 #------ model_ept_richness_yr --------------------------------------------------
@@ -10128,6 +10135,416 @@ model_ept_richness_yr <- function(in_ssn_eu_summarized,
   ))
 }
 
+#------ model_och_richness_yr --------------------------------------------------
+# in_allvars_summarized <- tar_read(allvars_summarized)
+# in_ssn_eu_summarized <- tar_read(ssn_eu_summarized)
+# in_cor_matrices <- tar_read(cor_matrices_list_summarized)
+# tar_load(ssn_covtypes)
+# tar_load(cor_heatmaps_summarized)
+# interactive = F
+# scale_predictors = T
+
+model_och_richness_yr <- function(in_ssn_eu_summarized,
+                                  in_allvars_summarized,
+                                  in_cor_matrices, 
+                                  ssn_covtypes,
+                                  scale_predictors = T,
+                                  interactive = F) {
+  
+  in_organism <- 'miv_nopools_och'
+  alpha_var <- 'mean_richness'
+  
+  #Subset SSN and create distance matrices-----
+  ssn_miv <- in_ssn_eu_summarized$miv_nopools_och$ssn
+  SSN2::ssn_create_distmat(
+    ssn_miv,
+    predpts = c("preds_hist", "preds_proj"),
+    among_predpts = TRUE,
+    overwrite = TRUE
+  )
+  
+  ssn_miv$obs$basin_area_km2_log10 <- log10(ssn_miv$obs$basin_area_km2)
+  ssn_miv$obs$meanQ3650past_log10 <- log10(ssn_miv$obs$meanQ3650past)
+  
+  # ssn_miv$preds$preds_hist$basin_area_km2_log10 <- log10(ssn_miv$preds$preds_hist$basin_area_km2)
+  # ssn_miv$preds$preds_proj$basin_area_km2_log10 <- log10(ssn_miv$preds$preds_proj$basin_area_km2)
+  
+  # Define candidate hydrological variables
+  hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
+                        'basin_area_km2_log10',
+                        'meanQ3650past_log10')
+  
+  #Scale predictor data (mean of 0 and SD of 1) -----
+  ssn_miv <- scale_ssn_predictors(in_ssn = ssn_miv,
+                                  in_vars = hydro_candidates,
+                                  scale_ssn_preds = FALSE) 
+  
+  #Exploratory plots-------
+  if (interactive) {
+    ggplot(ssn_miv$obs, aes(x=country, y=get(alpha_var))) +
+      geom_boxplot()
+    
+    ggplot(ssn_miv$obs, aes(x=country, y=get(alpha_var), fill=stream_type)) +
+      geom_boxplot()
+    
+    ggplot(ssn_miv$obs, aes(x=basin_area_km2, y=get(alpha_var), color=stream_type)) +
+      geom_point() +
+      geom_smooth(method='lm') +
+      scale_x_log10() +
+      facet_wrap(~country)
+    
+    ggplot(ssn_miv$obs, aes(x=meanQ3650past, y=get(alpha_var), color=stream_type)) +
+      geom_point() +
+      geom_smooth(method='lm') +
+      scale_x_log10() +
+      facet_wrap(~country)
+    
+    ggplot(ssn_miv$obs, aes(x=meanQ3650past, y=get(alpha_var), color=country)) +
+      geom_point() +
+      geom_smooth(method='lm', se=F) +
+      scale_x_log10() 
+    
+    ggplot(ssn_miv$obs, aes(x=DurD_samp, y=get(alpha_var))) +
+      geom_point(aes(color=country)) +
+      geom_smooth(aes(color=country), method='lm', se=F) +
+      geom_smooth(method='lm') +
+      facet_wrap(~country)
+    
+    ggplot(ssn_miv$obs, aes(x=FstDrE, y=get(alpha_var))) +
+      geom_point(aes(color=country)) +
+      geom_smooth(aes(color=country), method='lm', se=F) +
+      geom_smooth(method='lm')+
+      facet_wrap(~country)
+    
+    ggplot(ssn_miv$obs, aes(x=DurD3650past, y=get(alpha_var))) +
+      geom_point(aes(color=country)) +
+      geom_smooth(aes(color=country), method='lm', se=F) +
+      geom_smooth(method='lm') 
+    
+    data.table::melt(ssn_miv$obs, 
+                     id.vars=c('site', 'country', alpha_var), 
+                     measure.vars=hydro_candidates
+    ) %>%
+      ggplot(aes(x=value, y=get(alpha_var))) +
+      geom_point(aes(color=country)) +
+      geom_smooth(aes(color=country), method='lm', se=F) +
+      geom_smooth(method='lm', se=F, color='black') +
+      facet_wrap(~variable, scales='free_x') +
+      theme_bw()
+    
+    #Settle on a basic covariance structure to start  with -----
+    #Check correlation
+    topcors_overall <- in_cor_matrices$div[
+      variable1 == alpha_var & organism == in_organism 
+      # & variable2 %in% hydro_candidates 
+      & !is.na(correlation),] %>%
+      .[, abs_cor := abs(correlation)] %>%
+      setorder(-abs_cor)
+    
+    topcors_bydrn <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == in_organism &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+               var_label = paste(variable2, round(correlation, 2))
+      ), by=country] %>%
+      dcast(cor_order~country, value.var = 'var_label', fill=NA)
+    
+    topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == in_organism &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, mean(correlation), by=variable2] %>%
+      .[order(V1),]
+    
+    #Test all possible covariance structures
+    #Use negative binomial, like for all miv
+    
+    #CHoose negative binomial based on the AIC scores
+    ssn_nbin_cov <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = "nbinomial",
+      organism = c(in_organism),
+      formula_root = ' log10(basin_area_km2)',
+      hydro_var = 'DurD_samp',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = ~ country,
+      estmethod='reml'
+    )
+    View(ssn_nbin_cov$ssn_glance)
+    
+    SSN2::loocv(ssn_nbin_cov$ssn_list$spherical_none_none)
+    SSN2::loocv(ssn_nbin_cov$ssn_list$none_none_none)
+    lapply(list(
+      ssn_nbin_cov$ssn_list$spherical_none_none,
+      ssn_nbin_cov$ssn_list$none_none_none
+    ), glance) %>% rbindlist
+  }
+  
+  #Set a quick helper function to train an SSN GLM model with a basic model structure
+  quick_och_ssn <- function(in_formula, in_random=NULL, estmethod='ml') {
+    ssn_glm(
+      formula = in_formula,
+      family = 'nbinomial',
+      ssn.object = ssn_miv,
+      taildown_type = 'none',
+      tailup_type = 'none',
+      euclid_type = 'none',
+      additive = "afv_qsqrt",
+      partition_factor = ~ country,
+      random = in_random,
+      estmethod = estmethod
+    )
+  }
+  
+  #Then test multiple models -----
+  # This is the main model selection loop, testing various combinations of
+  # predictors.
+  och_rich_modlist <- list()
+  
+  #Null model
+  och_rich_modlist[['null']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ 1')))
+  
+  #Null model with country random effect
+  och_rich_modlist[['mod1']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ 1')), in_random=~country)
+  
+  #Initial model
+  och_rich_modlist[['mod2']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
+  
+  och_rich_modlist[['mod3']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ basin_area_km2 + country:log10(basin_area_km2)')))
+  
+  och_rich_modlist[['mod4']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ sqrt(meanQ3650past)'))) #Replace by qsim_3650past
+  
+  och_rich_modlist[['mod5']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ log10(meanQ3650past)')))
+  
+  och_rich_modlist[['mod6']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ log10(meanQ3650past) + country:log10(meanQ3650past)')))
+  
+  och_rich_modlist[['mod7']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + log10(meanQ3650past) + country:log10(meanQ3650past)')))
+  
+  och_rich_modlist[['mod8']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ FreD3650past + country:FreD3650past + log10(meanQ3650past) + country:log10(meanQ3650past)')))
+  
+  och_rich_modlist[['mod9']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + log10(meanQ3650past) + country:log10(meanQ3650past)')))
+  
+  och_rich_modlist[['mod10']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ Fdist_mean_10past_undirected_avg_samp + country:Fdist_mean_10past_undirected_avg_samp + log10(meanQ3650past) + country:log10(meanQ3650past)')))
+  
+  och_rich_modlist[['mod11']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ STcon_m10_undirected_avg_samp + country:STcon_m10_undirected_avg_samp + log10(meanQ3650past) + country:log10(meanQ3650past)')))
+  
+  och_rich_modlist[['mod12']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ FstDrE + country:FstDrE + log10(meanQ3650past) + country:log10(meanQ3650past)')))
+  
+  och_rich_modlist[['mod13']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + log10(basin_area_km2) + country:log10(basin_area_km2)')))
+  
+  och_rich_modlist[['mod14']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ FreD3650past + country:FreD3650past + log10(basin_area_km2) + country:log10(basin_area_km2)')))
+  
+  och_rich_modlist[['mod15']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + log10(basin_area_km2) + country:log10(basin_area_km2)')))
+  
+  och_rich_modlist[['mod16']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ FstDrE + country:FstDrE + log10(basin_area_km2) + country:log10(basin_area_km2)')))
+  
+  och_rich_modlist[['mod17']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ FreD3650past + country:FreD3650past +  sd6_30yrpast + log10(basin_area_km2) + country:log10(basin_area_km2)')))
+  #sd6_30yrpast; se too large
+  
+  och_rich_modlist[['mod18']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ FreD3650past + country:FreD3650past + PmeanQ10past_max_samp + country:PmeanQ10past_max_samp + log10(basin_area_km2) + country:log10(basin_area_km2)')))
+  
+  och_rich_modlist[['mod19']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ FstDrE + country:FstDrE + DurD3650past + log10(meanQ3650past) + country:log10(meanQ3650past)')))
+  
+  och_rich_modlist[['mod20']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past +  FstDrE + log10(meanQ3650past) + country:log10(meanQ3650past)')))
+  
+  och_rich_modlist[['mod21']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ FstDrE + country:FstDrE + FreD3650past + log10(meanQ3650past) + country:log10(meanQ3650past)')))
+  
+  och_rich_modlist[['mod22']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ FstDrE + country:FstDrE + FreD3650past + log10(basin_area_km2) + country:log10(basin_area_km2)')))
+  #PmeanQ10past_max: standard errors too large
+  
+  och_rich_modlist[['mod23']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + FreD_CV10yrpast + log10(basin_area_km2) + country:log10(basin_area_km2)')))
+  
+  #Add environmental variables and "stream_type"
+  och_rich_modlist[['mod24']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + log10(basin_area_km2) + env_PC1')))
+  
+  och_rich_modlist[['mod25']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + log10(basin_area_km2) + env_PC1 + env_PC2')))
+  
+  och_rich_modlist[['mod26']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + log10(basin_area_km2) + env_PC2')))
+  
+  och_rich_modlist[['mod27']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + log10(basin_area_km2) + env_PC1*env_PC2')))
+  
+  och_rich_modlist[['mod28']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ stream_type + country:stream_type + DurD_samp + log10(basin_area_km2) + country:log10(basin_area_km2)')))
+  
+  och_rich_modlist[['mod29']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ stream_type + DurD_samp + country:DurD_samp + log10(basin_area_km2) + country:log10(basin_area_km2)')))
+  
+  och_rich_modlist[['mod30']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + stream_type + country:stream_type + log10(basin_area_km2) + country:log10(basin_area_km2)'))) 
+  
+  och_rich_modlist[['mod31']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + stream_type + country:stream_type + log10(meanQ3650past) + country:log10(meanQ3650past)'))) 
+  
+  och_rich_modlist[['mod32']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + stream_type + log10(basin_area_km2) + country:log10(basin_area_km2) + env_PC2'))) 
+  
+  och_rich_modlist[['mod33']] <- quick_och_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + country:DurD3650past + stream_type + log10(basin_area_km2) + country:log10(basin_area_km2)'))) 
+  
+  
+  allvars_dt <- as.data.table(ssn_miv$obs)
+  check_rf <- ranger::ranger(mean_richness ~ .,
+                             data= allvars_dt[, c(hydro_candidates, 'mean_richness', 'country'), with=F])
+  allvars_dt[, mean_rich_preds := ranger::predictions(check_rf)]
+  ggplot(allvars_dt, aes(x=mean_rich_preds, y=mean_richness, color=stream_type)) +
+    geom_point() +
+    geom_abline() +
+    facet_wrap(~country)
+  # 
+  #Summary table
+  mod_perf_tab <- lapply(och_rich_modlist, function(x) {
+    cbind(Reduce(paste, deparse(x$formula)), 
+          glance(x), 
+          ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
+          SSN2::loocv(x))
+  }) %>% 
+    rbindlist %>%
+    .[, mod := names(och_rich_modlist)]
+  
+  if (interactive) {
+    #Check model in additional dochh (applied to most models before continuing)
+    chosen_mod <- och_rich_modlist[['mod15']]
+    
+    #Check residual correlations to choose variable additions
+    check_resid_corr(in_ssn_mod = chosen_mod,
+                     in_idcol = 'site',
+                     in_response_var = alpha_var,
+                     in_candidates = hydro_candidates)
+    
+    #Check residuals, variance decomposition, summary, and predictions
+    plot(chosen_mod)
+    varcomp(chosen_mod)
+    summary(chosen_mod)
+    
+    get_ssn_emmeans(in_mod=chosen_mod , 
+                    in_pred_var = 'DurD_samp',
+                    interaction_var = 'country', 
+                    in_drn_dt = drn_dt,
+                    plot=T, label_pred_var=T)$plot
+    
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'DurD_samp',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)$plot
+    
+    get_ssn_emtrends(chosen_mod, 
+                     in_pred_var = 'meanQ3650past', 
+                     interaction_var='country',
+                     in_drn_dt = drn_dt)$plot
+    
+    
+    ggplot(data=  augment(chosen_mod, drop=F, type.predict = 'response'), 
+           aes(x=.fitted, y=get(alpha_var))) +
+      geom_point(aes(color=stream_type)) +
+      geom_smooth(method='lm') +
+      geom_abline() +
+      facet_wrap(~country)
+  }
+  
+  
+  #####CHOOSE MOD 15 for continuous predictions###########
+  
+  
+  #------ For prediction model -------------------------------------------------
+  # This section focuses on creating a model suitable for prediction to new reaches,
+  # using only variables available for all reaches.
+  
+  #Check Torgegram
+  tg_selected <- SSN2::Torgegram(
+    formula = 'mean_richness ~ DurD_samp + country:DurD_samp + log10(basin_area_km2) + country:log10(basin_area_km2)',
+    ssn.object = ssn_miv,
+    type = c("flowcon", "flowuncon", "euclid"),
+    partition_factor = as.formula('~ country'),
+    bins = 15
+  ) %>%
+    rbindlist(idcol='dist_type')
+  
+  tg_plot <- ggplot(tg_selected, 
+                    aes(x=dist, y=gamma, color = dist_type)) +
+    geom_point(aes(size=np)) +
+    geom_smooth(method='lm', linewidth=2, se=F) +
+    scale_size_continuous(range=c(0.5, 7)) +
+    scale_x_sqrt(breaks=c(1000, 5000, 10000, 20000)) +
+    theme_classic() +
+    facet_wrap(~dist_type)
+  
+  if (interactive) {
+    #Test covariance structures again, this time with REML 
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'nbinomial',
+      organism = c(in_organism),
+      formula_root = 'log10(meanQ3650past)',
+      hydro_var = 'DurD_samp',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
+    )
+    
+    selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
+  }
+  
+  #Re-fit final model with REML
+  ssn_och_pred_final <- ssn_glm(
+    formula = mean_richness ~ DurD_samp_z + country:DurD_samp_z + 
+      basin_area_km2_log10_z + country:basin_area_km2_log10_z,
+    family = 'nbinomial',
+    ssn.object = ssn_miv,
+    taildown_type = 'none',
+    tailup_type = 'none',
+    euclid_type = 'none',
+    additive = "afv_qsqrt",
+    partition_factor = ~ country,
+    random = NULL,
+    estmethod = 'reml'
+  )
+  
+  ssn_och_mod_preds <- augment(ssn_och_pred_final, drop=F, 
+                               type.predict = 'response')
+  
+  if (interactive) {
+    tidy(ssn_och_pred_final)
+    summary(ssn_och_pred_final)
+    plot(ssn_och_pred_final)
+    SSN2::varcomp(ssn_och_pred_final)
+    
+    get_ssn_emmeans(in_mod=ssn_och_pred_final, 
+                    in_pred_var = 'DurD_samp_z',
+                    interaction_var = 'country', 
+                    in_drn_dt = drn_dt,
+                    plot=T, label_pred_var=T)$plot
+    
+    
+    get_ssn_emtrends(in_mod=ssn_och_pred_final, 
+                     in_pred_var = 'DurD_samp_z',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)$plot
+    
+    #Check predictions
+    ggplot(data=ssn_och_mod_preds, aes(x=.fitted, y=get(alpha_var))) +
+      geom_point(aes(color=stream_type)) +
+      geom_smooth(method='lm') +
+      geom_abline() +
+      facet_wrap(~country)
+  }
+  
+  #------ Write out results ----------------------------------------------------
+  return(list(
+    model_selection_table = mod_perf_tab,
+    ssn_mod_fit = ssn_och_pred_final, #Prediction model fit with REML
+    ssn_pred_final = ssn_och_mod_preds, #AUgmented data with prediction model
+    torgegram_mod_pred = tg_plot #Torgegram for prediction model 
+  ))
+}
 #------ model_dia_sedi_invsimpson_yr --------------------------------------------------
 # in_allvars_summarized <- tar_read(allvars_summarized)
 # in_ssn_eu_summarized <- tar_read(ssn_eu_summarized)
@@ -11537,6 +11954,425 @@ model_dia_biof_richness_yr <- function(in_ssn_eu_summarized,
     # ssn_pred_best = ssn_dia_biof_best_preds #Augmented data for "best" model
   ))
 }
+
+#------ model_dia_biof_invsimpson_yr --------------------------------------------------
+# in_allvars_summarized <- tar_read(allvars_summarized)
+# in_ssn_eu_summarized <- tar_read(ssn_eu_summarized)
+# in_cor_matrices <- tar_read(cor_matrices_list_summarized)
+# tar_load(ssn_covtypes)
+# tar_load(cor_heatmaps_summarized)
+# interactive = T
+# scale_predictors = T
+
+model_dia_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
+                                         in_allvars_summarized,
+                                         in_cor_matrices, 
+                                         ssn_covtypes,
+                                         scale_predictors = T,
+                                         interactive = F) {
+  
+  #Subset SSN and create distance matrices-----
+  ssn_dia_biof <- in_ssn_eu_summarized$dia_biof_nopools$ssn
+  SSN2::ssn_create_distmat(
+    ssn_dia_biof,
+    predpts = c("preds_hist", "preds_proj"),
+    among_predpts = TRUE,
+    overwrite = TRUE
+  )
+  
+  ssn_dia_biof$obs$meanQ3650past_log10 <- log10(ssn_dia_biof$obs$meanQ3650past)
+  
+  # Define candidate hydrological variables
+  hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
+                        'meanQ3650past_log10', 'particle_size')
+  
+  ssn_dia_biof <- scale_ssn_predictors(in_ssn = ssn_dia_biof,
+                                       in_vars = c(hydro_candidates,
+                                                   'meanQ3650past_log10'),
+                                       scale_ssn_preds = FALSE)
+  
+  alpha_var <- 'mean_invsimpson'
+  
+  #Exploratory plots-------
+  if (interactive) {
+    ggplot(ssn_dia_biof$obs, aes(x=country, y=get(alpha_var))) +
+      geom_boxplot()
+    
+    ggplot(ssn_dia_biof$obs, aes(x=country, y=get(alpha_var), fill=stream_type)) +
+      geom_boxplot()
+    
+    ggplot(ssn_dia_biof$obs, aes(x=basin_area_km2, y=get(alpha_var), color=stream_type)) +
+      geom_point() +
+      geom_smooth(method='lm') +
+      scale_x_log10() +
+      facet_wrap(~country)
+    
+    ggplot(ssn_dia_biof$obs, aes(x=basin_area_km2, y=get(alpha_var))) +
+      geom_point() +
+      geom_smooth(method='lm') +
+      scale_x_log10() +
+      facet_wrap(~country)
+    
+    ggplot(ssn_dia_biof$obs, aes(x=meanQ3650past, y=get(alpha_var))) +
+      geom_point() +
+      geom_smooth(method='lm') +
+      scale_x_log10() +
+      facet_wrap(~country)
+    
+    ggplot(ssn_dia_biof$obs, aes(x=meanQ3650past, y=get(alpha_var), color=country)) +
+      geom_point() +
+      geom_smooth(method='lm', se=F) +
+      scale_x_log10() 
+    
+    ggplot(ssn_dia_biof$obs, aes(x=DurD_samp, y=get(alpha_var))) +
+      geom_point(aes(color=country)) +
+      geom_smooth(aes(color=country), method='lm', se=F) +
+      geom_smooth(method='lm') 
+    
+    ggplot(ssn_dia_biof$obs, aes(x=DurD3650past, y=get(alpha_var))) +
+      geom_point(aes(color=country)) +
+      geom_smooth(aes(color=country), method='lm', se=F) +
+      geom_smooth(method='lm') 
+    
+    data.table::melt(ssn_dia_biof$obs, 
+                     id.vars=c('site', 'country', alpha_var), 
+                     measure.vars=hydro_candidates
+    ) %>%
+      ggplot(aes(x=value, y=get(alpha_var))) +
+      geom_point(aes(color=country)) +
+      geom_smooth(aes(color=country), method='lm', se=F) +
+      geom_smooth(method='lm', se=F, color='black') +
+      facet_wrap(~variable, scales='free_x') +
+      theme_bw()
+    
+    #Settle on a basic covariance structure to start  with -----
+    #Check correlation
+    topcors_overall <- in_cor_matrices$div[
+      variable1 == alpha_var & organism == 'dia_biof_nopools' 
+      # & variable2 %in% hydro_candidates 
+      & !is.na(correlation),] %>%
+      .[, abs_cor := abs(correlation)] %>%
+      setorder(-abs_cor)
+    
+    topcors_bydrn <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'dia_biof_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, `:=`(cor_order = frank(-abs(correlation),ties.method="first"),
+               var_label = paste(variable2, round(correlation, 2))
+      ), by=country] %>%
+      dcast(cor_order~country, value.var = 'var_label', fill=NA)
+    
+    topcors_bydrn_avg <- in_cor_matrices$div_bydrn[
+      variable1 == alpha_var & organism == 'dia_biof_nopools' &
+        variable2 %in% hydro_candidates & !is.na(correlation),] %>%
+      .[, mean(correlation), by=variable2] %>%
+      .[order(V1),]
+    
+    #Test all possible covariance structures
+    ssn_norm_ini <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'Gaussian',
+      organism = c('dia_biof_nopools'),
+      formula_root = 'log10(basin_area_km2)',
+      hydro_var = 'DurD3650past',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='ml'
+    )
+    
+    ssn_gamma_ini <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'Gamma',
+      organism = c('dia_biof_nopools'),
+      formula_root = 'log10(basin_area_km2)',
+      hydro_var = 'DurD3650past',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='ml'
+    )
+    
+    ssn_lognorm_ini <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'Gaussian',
+      organism = c('dia_biof_nopools'),
+      formula_root = 'log10(basin_area_km2)',
+      hydro_var = 'DurD3650past',
+      response_var = paste0('log10(', alpha_var, ')'),
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='ml'
+    )
+    
+    ssn_cov_glance <- rbindlist(list(
+      ssn_norm_ini$ssn_glance,
+      ssn_gamma_ini$ssn_glance,
+      ssn_lognorm_ini$ssn_glance
+    ))
+    
+    norm_best <- ssn_cov_glance[family=='Gaussian' & response_var=='mean_invsimpson',][which.min(AICc),]
+    lognorm_best <- ssn_cov_glance[family=='Gaussian' & response_var=='log10(mean_invsimpson)',][which.min(AICc),]
+    
+    plot(ssn_lognorm_ini[[1]][[1]])
+    plot(ssn_norm_ini[[1]][[1]])
+    
+    # plot(ssn_nbin_ini[[1]][[1]])
+    # varcomp(ssn_norm_ini[[1]][[10]])
+    
+    #CHoose lognormal
+    ssn_lognorm_cov <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = "Gaussian",
+      organism = c('dia_biof_nopools'),
+      formula_root = ' sqrt(meanQ3650past)',
+      hydro_var = 'DurD3650past',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
+    )
+    
+    View(ssn_lognorm_cov$ssn_glance)
+  }
+  
+  #Set a quick helper function to train an SSN GLM model with a basic model structure
+  quick_dia_biof_ssn <- function(in_formula, in_random=NULL, estmethod='ml') {
+    ssn_glm(
+      formula = in_formula,
+      family = 'Gaussian',
+      ssn.object = ssn_dia_biof,
+      taildown_type = 'none',
+      tailup_type = 'none',
+      euclid_type = 'spherical',
+      additive = "afv_qsqrt",
+      partition_factor = ~ country,
+      random = in_random,
+      estmethod = estmethod
+    )
+  }
+  
+  #Then test multiple models -----
+  # This is the main model selection loop, testing various combinations of
+  # predictors.
+  dia_biof_simps_modlist <- list()
+  
+  #Initial model
+  #Null model
+  dia_biof_simps_modlist[['null']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ 1')))
+  
+  #Initial model
+  dia_biof_simps_modlist[['mod1']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2)')))
+  
+  dia_biof_simps_modlist[['mod3']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ country*log10(basin_area_km2)')))
+  
+  dia_biof_simps_modlist[['mod4']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
+  
+  dia_biof_simps_modlist[['mod5']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ log10(basin_area_km2) + country:log10(basin_area_km2)')))
+  
+  dia_biof_simps_modlist[['mod6']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ sqrt(meanQ3650past)'))) #Replace by qsim_3650past
+  
+  dia_biof_simps_modlist[['mod7']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ log10(meanQ3650past)')))
+  
+  dia_biof_simps_modlist[['mod8']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ country*log10(meanQ3650past)')))
+  
+  dia_biof_simps_modlist[['mod9']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ sqrt(meanQ3650past) + country:sqrt(meanQ3650past)')))
+  
+  dia_biof_simps_modlist[['mod10']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ log10(meanQ3650past) + country:log10(meanQ3650past)')))
+  
+  dia_biof_simps_modlist[['mod11']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ country*log10(meanQ3650past) + particle_size')))
+  
+  dia_biof_simps_modlist[['mod12']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ country*log10(meanQ3650past) + particle_size + particle_size:country')))
+  
+  dia_biof_simps_modlist[['mod13']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + DurD_samp:country + country*log10(meanQ3650past)')))
+  
+  dia_biof_simps_modlist[['mod14']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ FreD_samp + FreD_samp:country + country*log10(meanQ3650past)')))
+  
+  dia_biof_simps_modlist[['mod15']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ DurD3650past + DurD3650past:country + country*log10(meanQ3650past)')))
+  
+  dia_biof_simps_modlist[['mod16']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ DurD_CV30yrpast + DurD_CV30yrpast:country + country*log10(meanQ3650past)')))
+  
+  dia_biof_simps_modlist[['mod17']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ meanConD_CV30yrpast + meanConD_CV30yrpast:country + country*log10(meanQ3650past)')))
+  
+  dia_biof_simps_modlist[['mod18']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ STcon_m10_undirected_avg_samp + STcon_m10_undirected_avg_samp:country + country*log10(meanQ3650past)')))
+  
+  dia_biof_simps_modlist[['mod19']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + DurD_samp:country + country*log10(meanQ3650past) + particle_size')))
+  
+  dia_biof_simps_modlist[['mod20']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + DurD_samp:country + country*log10(meanQ3650past) + env_PC1')))
+  
+  dia_biof_simps_modlist[['mod21']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + DurD_samp:country + country*log10(meanQ3650past) + env_PC2')))
+  
+  dia_biof_simps_modlist[['mod22']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + DurD_samp:country + country*log10(meanQ3650past) + env_PC1 + env_PC2')))
+  
+  dia_biof_simps_modlist[['mod23']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ stream_type + country*log10(meanQ3650past) + env_PC1 + env_PC2')))
+  
+  dia_biof_simps_modlist[['mod24']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ stream_type + DurD_samp + DurD_samp:country + country*log10(meanQ3650past) + env_PC1 + env_PC2')))
+  
+  dia_biof_simps_modlist[['mod25']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ stream_type + stream_type:country + DurD3650past + country*log10(meanQ3650past) + env_PC1 + env_PC2')))
+  
+  dia_biof_simps_modlist[['mod26']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ stream_type + stream_type:country + DurD3650past + country*log10(meanQ3650past)')))
+  
+  dia_biof_simps_modlist[['mod27']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + DurD_samp:country + particle_size')))
+  
+  dia_biof_simps_modlist[['mod28']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + DurD_samp:country + particle_size + particle_size:country')))
+  
+  dia_biof_simps_modlist[['mod29']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + DurD_samp:country + country*log10(basin_area_km2) + particle_size')))
+  
+  dia_biof_simps_modlist[['mod30']] <- quick_dia_biof_ssn(as.formula(paste(alpha_var,  '~ DurD_samp*country + particle_size + particle_size:country')))
+  
+  
+  mod_perf_tab <- lapply(dia_biof_simps_modlist, function(x) {
+    cbind(Reduce(paste, deparse(x$formula)), 
+          glance(x), 
+          ifelse(length(attr(x$terms, "term.labels"))>=2, max(as.data.frame(vif(x))[['GVIF^(1/(2*Df))']]), NA),
+          SSN2::loocv(x))
+  }) %>% 
+    rbindlist %>%
+    .[, mod := names(dia_biof_simps_modlist)]
+  
+  if (interactive) {
+    #Check model in additional depth (applied to most models before continuing)
+    chosen_mod <- dia_biof_simps_modlist[['mod28']]
+    
+    #Check residual correlations to choose variable additions
+    check_resid_corr(in_ssn_mod = chosen_mod,
+                     in_idcol = 'site',
+                     in_response_var = alpha_var,
+                     in_candidates = hydro_candidates)
+    
+    #Check residuals, variance decomposition, summary, and predictions
+    plot(chosen_mod)
+    varcomp(chosen_mod)
+    summary(chosen_mod)
+    
+    ggplot(data=augment(chosen_mod, drop=F, type.predict = 'response'), 
+           aes(x=.fitted, y=get(alpha_var))) +
+      geom_point(aes(color=stream_type)) +
+      geom_smooth(method='lm') +
+      geom_abline() +
+      facet_wrap(~country)
+    
+    get_ssn_emmeans(in_mod=chosen_mod , 
+                    in_pred_var = 'DurD_samp',
+                    interaction_var = 'country', 
+                    in_drn_dt = drn_dt,
+                    plot=T, label_pred_var=T)
+    
+    get_ssn_emtrends(in_mod=chosen_mod , 
+                     in_pred_var = 'particle_size',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)
+    
+    #Model with RF to see
+    # allvars_dt <- as.data.table(in_ssn$obs) %>%
+    #   setorderv(c('country', 'site')) 
+    # 
+    # allvars_dt[
+    #   , (in_vars) := lapply(.SD, function(x) base::scale(x, center=T, scale=T)),
+    #   .SDcols = in_vars]
+    #
+    # check_rf <- ranger::ranger(mean_invsimpson ~ .,
+    #                            data= allvars_dt[, c(hydro_candidates, 'mean_invsimpson', 'country'), with=F])
+    # allvars_dt[, mean_simps_preds := ranger::predictions(check_rf)]
+    # ggplot(allvars_dt, aes(x=mean_simps_preds, y=mean_invsimpson, color=stream_type)) + 
+    #   geom_point() +
+    #   facet_wrap(~country)
+  }
+  
+  #####CHOOSE MOD  for continuous predictions###########
+  
+  #------ For prediction model -------------------------------------------------
+  # This section focuses on creating a model suitable for prediction to new reaches,
+  # using only variables available for all reaches.
+  #Check Torgegram
+  tg_selected <- SSN2::Torgegram(
+    formula = 'mean_invsimpson ~ DurD_samp + DurD_samp:country + particle_size + particle_size:country',
+    ssn.object = ssn_dia_biof,
+    type = c("flowcon", "flowuncon", "euclid"),
+    partition_factor = as.formula('~ country'),
+    bins = 15
+  ) %>%
+    rbindlist(idcol='dist_type')
+  
+  tg_plot <- ggplot(tg_selected, 
+                    aes(x=dist, y=gamma, color = dist_type)) +
+    geom_point(aes(size=np)) +
+    geom_smooth(method='lm', linewidth=2, se=F) +
+    scale_size_continuous(range=c(0.5, 7)) +
+    scale_x_sqrt(breaks=c(1000, 5000, 10000, 20000)) +
+    theme_classic() +
+    facet_wrap(~dist_type)
+  
+  if (interactive)  {
+    #Test covariance structures again, this time with REML 
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
+      family = 'Gaussian',
+      organism = c('dia_biof_nopools'),
+      formula_root = 'particle_size',
+      hydro_var = 'DurD_samp',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
+    )
+    
+    selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
+
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+  }
+  
+  #Re-fit final model with REML
+  ssn_dia_biof_pred_final <- ssn_glm(
+    formula = mean_invsimpson ~ DurD_samp_z + DurD_samp_z:country + 
+      particle_size_z + particle_size_z:country,
+    family = 'Gaussian',
+    ssn.object = ssn_dia_biof,
+    taildown_type = 'none',
+    tailup_type = 'none',
+    euclid_type = 'spherical',
+    additive = "afv_qsqrt",
+    partition_factor = ~ country,
+    random = NULL,
+    estmethod = 'reml'
+  )
+  
+  ssn_dia_biof_mod_preds <- augment(ssn_dia_biof_pred_final, drop=F)
+  
+  if (interactive) {
+    tidy(dia_biof_simps_modlist[['mod28']])
+    tidy(ssn_dia_biof_pred_final)
+    summary(ssn_dia_biof_pred_final)
+    plot(ssn_dia_biof_pred_final)
+    SSN2::varcomp(ssn_dia_biof_pred_final)
+    
+    #Check predictions
+    ggplot(data=ssn_dia_biof_mod_preds, aes(x=.fitted, y=get(alpha_var))) +
+      geom_point(aes(color=stream_type)) +
+      geom_smooth(method='lm') +
+      geom_abline() +
+      facet_wrap(~country)
+  }
+  
+  #------ Write out results ----------------------------------------------------
+  return(list(
+    model_selection_table = mod_perf_tab,
+    ssn_mod_fit = ssn_dia_biof_pred_final, #Prediction model fit with REML
+    ssn_pred_final = ssn_dia_biof_mod_preds, #AUgmented data with prediction model
+    torgegram_mod_pred = tg_plot #Torgegram for prediction model 
+  ))
+}
+
 
 #------ model_fun_sedi_invsimpson_yr -------------------------------------------
 # in_allvars_summarized <- tar_read(allvars_summarized)
@@ -15335,6 +16171,12 @@ get_perf_table_multiorganism <- function(in_mod_list) {
     
     varcomp_cols[,`varcomp_Covariates (PR-sq)`:=NULL]
     
+    augmented_dat <- as.data.table(augment(in_mod_fit, type.predict = 'response')) 
+    augmented_dat[, cv_predict := loocv(in_mod_fit,
+                                        cv_predict = TRUE,
+                                        type = 'response')$cv_predict
+                  ]
+    
     # print(in_mod_fit)
     perf_table <- cbind(
       formula = format_ssn_glm_equation(in_mod_fit, greek = TRUE), 
@@ -15344,6 +16186,9 @@ get_perf_table_multiorganism <- function(in_mod_list) {
                     NA),
       varcomp_country_only = country_r2,
       varcomp_cols,
+      mape_loocv = augmented_dat[get(names(augmented_dat)[[1]])>0,
+                                 Metrics::mape(get(names(augmented_dat)[[1]]), cv_predict)],
+      pseudo_r2_loocv = pseudoR2(in_mod_fit, adjust=T),
       SSN2::loocv(in_mod_fit))
     return(perf_table)
   }) %>% 
@@ -15353,7 +16198,7 @@ get_perf_table_multiorganism <- function(in_mod_list) {
 }
 
 #------ diagnose_ssn_mod -----------------------------------------------------
-# in_mod_fit <- tar_read(ssn_mods_miv_richness_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_och_richness_yr)$ssn_mod_fit
 # write_plots=T
 # out_dir = figdir
 # response_var_label = 'Mean richness'
@@ -15687,7 +16532,9 @@ compute_div_change <- function(in_ssn_mod_fit, in_ssn_proj_dt,
 # in_env_summarized <- tar_read(env_summarized)
 # in_mod_fit_list <- tar_read(ssn_mod_yr_fit_multiorganism)
 # in_organism_dt <- tar_read(organism_dt)
-# mod_sub = c('fun_sedi_richness','dia_sedi_richness', 'miv_richness', 'ept_richness') 
+# mod_sub = c('fun_sedi_richness','dia_sedi_richness', 'miv_richness', 'ept_richness', 'och_richness')
+# write_plots=T,
+# out_dir = figdir
 
 #' Map SSN model projections and changes
 #'
@@ -15707,10 +16554,19 @@ plot_ssn_proj <- function(
     in_env_summarized,
     in_mod_fit_list,
     in_organism_dt,
-    mod_sub = c('fun_sedi_richness','dia_sedi_richness',
-                'miv_richness', 'ept_richness')) {
+    mod_sub = c('miv_richness', 'ept_richness', 'och_richness', 
+                'dia_sedi_richness', 'fun_sedi_richness'),
+    write_plots=T,
+    out_dir=NULL
+    ) {
   #Only projects models for which hydro-env variables
-  # explain at least 30% of variance
+  # explain at least 30% of variance*
+  
+  build_path <- function(prefix, ext='.pdf') {
+    file.path(out_dir,
+              paste0(prefix, '_', format(Sys.Date(), '%Y%m%d'), ext)
+    )
+  }
   
   #------------------ Make plots -----------------------------------------------
   #For a given organism, make a plot of scenario x country x period + fill=GCM
@@ -15766,61 +16622,80 @@ plot_ssn_proj <- function(
       levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain" ),
       ordered=T)
     ] %>%
-    merge(in_organism_dt, by='organism')
-  
+    merge(in_organism_dt, by='organism') %>%
+    .[, mod := factor(mod, levels=mod_sub)] %>%
+    .[order(mod),] %>%
+    .[, organism_label := factor(organism_label, levels=unique(organism_label))]
+
   color_vec <- sub_mean_dt[!duplicated(country),
                           setNames(color, country)]
   
+  plot_list <- list() 
   
-  plot_multigcm_avg_crossorganism <- ggplot(
-    sub_mean_dt, aes(x=variable, y=mean_change, fill=country)
+  plot_list[['plot_multigcm_avg_crossorganism']] <- ggplot(
+    sub_mean_dt, aes(x=variable, y=mean_change, color=country, fill=country)
   ) +
     geom_hline(yintercept=0, color='darkgrey') + 
     geom_boxplot(alpha=0.5, outliers=TRUE) +
     scale_x_discrete(labels=c('2041-2070', '2071-2100')) +
     # scale_y_continuous(breaks=seq(-60, 20, 20)) +
     scale_fill_manual(values=color_vec) +
+    scale_color_manual(values=color_vec) +
     labs(y='Predicted change in species richness (%)') +
     facet_grid(organism_label~scenario, scales='free_y') + 
     theme_bw()
   
-  plot_multigcm_avg_crossorganism_type <- ggplot(
+  plot_list[['plot_multigcm_avg_crossorganism_type']] <- ggplot(
     sub_mean_dt,
-    aes(x=variable, y=mean_change, fill=country, linetype=stream_type)
+    aes(x=variable, y=mean_change, fill=country, color=country, linetype=stream_type)
   ) +
     geom_hline(yintercept=0, color='darkgrey') + 
     geom_boxplot(alpha=0.5, outliers=TRUE) +
     scale_x_discrete(labels=c('2041-2070', '2071-2100')) +
+    scale_linetype_discrete(name='Stream type',
+                            labels = c('Perennial', 'Non-perennial')) +
     # scale_y_continuous(breaks=seq(-60, 20, 20)) +
     scale_fill_manual(values=color_vec) +
+    scale_color_manual(values=color_vec) +
     labs(y='Predicted change in species richness (%)') +
     facet_grid(organism_label~scenario, scales='free_y') + 
     theme_bw()
   
-  plot_SNR_crossorganism <- ggplot(
-    sub_mean_dt, aes(x=variable, y=SNR_change, fill=country)
+  plot_list[['plot_SNR_crossorganism']] <- ggplot(
+    sub_mean_dt, aes(x=variable, y=SNR_change, color=country, fill=country)
   ) +
     geom_hline(yintercept=0, color='darkgrey') + 
     geom_boxplot(alpha=0.5, outliers=FALSE) +
     scale_x_discrete(labels=c('2041-2070', '2071-2100')) +
     # scale_y_continuous(breaks=seq(-60, 20, 20)) +
     scale_fill_manual(values=color_vec) +
+    scale_color_manual(values=color_vec) +
     labs(y='Mean/Range of % change in species richness across GCMs') +
     facet_grid(organism_label~scenario, scales='free_y') + 
     theme_bw()
   
-  plot_SNR_crossorganism_type <- ggplot(
+  plot_list[['plot_SNR_crossorganism_type']] <- ggplot(
     sub_mean_dt,
-    aes(x=variable, y=SNR_change, fill=country, linetype=stream_type)
+    aes(x=variable, y=SNR_change, fill=country, color=country, linetype=stream_type)
   ) +
     geom_hline(yintercept=0, color='darkgrey') + 
     geom_boxplot(alpha=0.5, outliers=FALSE) +
     scale_x_discrete(labels=c('2041-2070', '2071-2100')) +
     # scale_y_continuous(breaks=seq(-60, 20, 20)) +
     scale_fill_manual(values=color_vec) +
+    scale_color_manual(values=color_vec) +
     labs(y='Mean/Range of % change in species richness across GCMs') +
     facet_grid(organism_label~scenario, scales='free_y') + 
     theme_bw()
+  
+  #write to PDF
+  if (write_plots) {
+    lapply(names(plot_list), function(p_name) {
+      ggsave(filename = build_path(p_name, ext='.png'),
+             plot = plot_list[[p_name]],
+             width = 8, height = 9, units='in', dpi=600)
+    })
+  }
 
   #------------------ Make maps -----------------------------------------------
   # Make map of predicted 1991-2020 richness -----------------------------------
@@ -15902,26 +16777,32 @@ plot_ssn_proj <- function(
                                         60)
                                       )
   
-    return(list(
+    out_map_list <- list(
       map_ref_pred = map_ref_pred,
       map_ref_diff = map_ref_diff,
       map_change_pred = map_change_pred
-    ))
+    )
+    
+    #write to PDF
+    if (write_plots) {
+      lapply(names(out_map_list), function(p_name) {
+        ggsave(filename = build_path(paste0(mod_name, '_', p_name)),
+               plot = out_map_list[[p_name]],
+               width = 8, height = 8, units='in', dpi=600)
+      })
+    }
+    
+    return(out_map_list)
+    
   }) %>% setNames(mod_sub)
 
+  
   return(list(
-    plot_multigcm_avg_crossorganism,
-    plot_multigcm_avg_crossorganism_type,
-    plot_SNR_crossorganism,
-    plot_SNR_crossorganism_type,
+    plots = plot_list,
     maps = maps_list
   ))
 }
 
-#------ plot_ssn_proj ----------------------------------------------------------
-# ggplot(preds_decade_mean, aes(x=scenario, y=preds_diff, fill=as.factor(decade))) +
-#   geom_boxplot() +
-#   facet_wrap(~country)
 
 
 ################################################################################

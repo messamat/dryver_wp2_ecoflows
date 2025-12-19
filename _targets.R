@@ -1461,6 +1461,14 @@ annual_analysis_targets <- list(
   ),
   
   tar_target(
+    ssn_mods_och_richness_yr,
+    model_och_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                          in_allvars_summarized = allvars_summarized,
+                          in_cor_matrices = cor_matrices_list_summarized,
+                          ssn_covtypes = ssn_covtypes)
+  ),
+  
+  tar_target(
     ssn_mods_dia_sedi_richness_yr,
     model_dia_sedi_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
                                in_allvars_summarized = allvars_summarized,
@@ -1479,6 +1487,14 @@ annual_analysis_targets <- list(
   tar_target(
     ssn_mods_dia_biof_richness_yr,
     model_dia_biof_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
+                               in_allvars_summarized = allvars_summarized,
+                               in_cor_matrices = cor_matrices_list_summarized,
+                               ssn_covtypes = ssn_covtypes)
+  ),
+  
+  tar_target(
+    ssn_mods_dia_biof_invsimpson_yr,
+    model_dia_biof_invsimpson_yr(in_ssn_eu_summarized = ssn_eu_summarized,
                                in_allvars_summarized = allvars_summarized,
                                in_cor_matrices = cor_matrices_list_summarized,
                                ssn_covtypes = ssn_covtypes)
@@ -1555,9 +1571,11 @@ annual_analysis_targets <- list(
       miv_richness = ssn_mods_miv_richness_yr$ssn_mod_fit,
       miv_invsimpson = ssn_mods_miv_invsimpson_yr$ssn_mod_fit,
       ept_richness = ssn_mods_ept_richness_yr$ssn_mod_fit,
+      och_richness = ssn_mods_och_richness_yr$ssn_mod_fit,
       dia_sedi_richness = ssn_mods_dia_sedi_richness_yr$ssn_mod_fit,
       dia_sedi_invsimpson = ssn_mods_dia_sedi_invsimpson_yr$ssn_mod_fit,
       dia_biof_richness = ssn_mods_dia_biof_richness_yr$ssn_mod_fit,
+      dia_biof_invsimpson = ssn_mods_dia_biof_invsimpson_yr$ssn_mod_fit,
       fun_sedi_richness = ssn_mods_fun_sedi_richness_yr$ssn_mod_fit,
       fun_sedi_invsimpson = ssn_mods_fun_sedi_invsimpson_yr$ssn_mod_fit,
       fun_biof_richness = ssn_mods_fun_biof_richness_yr$ssn_mod_fit,
@@ -1645,7 +1663,9 @@ annual_analysis_targets <- list(
                  in_mod_fit_list = ssn_mod_yr_fit_multiorganism,
                  in_organism_dt = organism_dt,
                  mod_sub = c('fun_sedi_richness','dia_sedi_richness', 
-                             'miv_richness', 'ept_richness')
+                             'miv_richness', 'ept_richness'),
+                 write_plots=T,
+                 out_dir = figdir
     )
   )
 )
