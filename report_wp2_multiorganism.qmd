@@ -75,8 +75,7 @@ allvars_summarized$dt[!duplicated(site), .N,
                          by=.(stream_type, country)]
 ```
 
-
-```{r maps} 
+```{r maps}
 in_ssn_summarized <- tar_read(ssn_eu_summarized)
 
 map_durdsamp <- map_ssn_facets(in_ssn = in_ssn_summarized[[1]]$ssn, 
@@ -92,4 +91,69 @@ map_durdsamp <- map_ssn_facets(in_ssn = in_ssn_summarized[[1]]$ssn,
 )
 ggsave(file.path(figdir, 'map_DurD_samp.pdf'),
        map_durdsamp, height = 12, width=8)
+```
+
+```{r summarized model table and plots}
+tar_load(ssn_mod_yr_perf_multiorganism)
+
+fwrite(ssn_mod_yr_perf_multiorganism,
+       file.path(figdir, 'ssn_mod_yr_perf_multiorganism_richness.csv'))
+
+tar_load(ssn_proj_plots)
+fwrite(ssn_proj_plots$summarized_reldiff_stats_dt,
+       file.path(figdir, 'ssn_proj_mean_reldiff_stats.csv'))
+fwrite(ssn_proj_plots$all_reldiff_stats_dt,
+       file.path(figdir, 'ssn_proj_all_reldiff_stats.csv'))
+
+fwrite(ssn_proj_plots$summarized_absdiff_stats_dt,
+       file.path(figdir, 'ssn_proj_mean_absdiff_stats.csv'))
+fwrite(ssn_proj_plots$all_absdiff_stats_dt,
+       file.path(figdir, 'ssn_proj_all_absdiff_stats.csv'))
+
+check_organism <- ssn_proj_plots$all_reldiff_stats_dt[
+  variable=='div_change_late', 
+  mean(mean_change), by=.(scenario, country, organism)] %>%
+  .[, mean_mean_change := mean(V1), by=.(scenario, organism)]
+
+
+names(ssn_proj_plots$summarized_reldiff_stats_dt)
+
+pr_tr_cast <- data.table::melt(ssn_proj_plots$summarized_reldiff_stats_dt, 
+                   id.vars=c('organism', 'scenario', 'stream_type')) %>%
+  .[variable != 'country_mean_change',] %>%
+  data.table::dcast(organism+scenario+variable~stream_type) %>%
+  .[, abs_diff := abs(TR)>=abs(PR)]
+
+
+pr_tr_ratio <- pr_tr_cast[, type_ratio := TR/PR] %>%
+  .[, list(mean_ratio = mean(type_ratio)), by=.(organism, scenario)]
+
+#Cross-DRN average difference in absolute richness loss between NPR and PR
+pr_tr_abs_cast <- ssn_proj_plots$all_absdiff_stats_dt[
+  variable=='div_change_abs_late'
+  , mean(mean_change),
+  by=.(organism, scenario, stream_type, country)] %>%
+  data.table::dcast(organism+scenario+country~stream_type) 
+
+pr_tr_abs_diff <- pr_tr_abs_cast[, type_diff := TR-PR] %>%
+  .[, list(mean_diff = mean(type_diff)), by=.(organism, scenario)]
+
+#Average and maximum loss across all sites
+ssn_proj_plots$all_absdiff_stats_dt[
+  variable=='div_change_abs_late', 
+  list(mean_absdiff=mean(mean_change),
+       max_absdiff=max(mean_change),
+       min_absdiff=min(mean_change)
+  ),
+  by=.(organism, scenario)]
+
+ssn_proj_plots$all_absdiff_stats_dt[
+  variable=='div_change_abs_late' & organism=='miv_nopools' & scenario=='ssp585',
+  .SD[mean_change < -5,.N]/.N] 
+
+
+ssn_proj_plots$all_absdiff_stats_dt[variable==div_change_abs_late, 
+                 mean(mean_change),
+                 ]
+
 ```

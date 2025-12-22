@@ -16456,13 +16456,13 @@ predict_ssn_mod <- function(in_ssn_mod_fit, in_hydrocon_sites_proj,
 }
 
 
-#------ compute_future_change --------------------------------------------------
+#------ compute_div_change --------------------------------------------------
 # tar_load(ssn_mod_yr_fit_multiorganism)
 # in_mod_fit <- names(ssn_mod_yr_fit_multiorganism)[[1]]
 # in_ssn_mod_fit = ssn_mod_yr_fit_multiorganism[[in_mod_fit]]
-# in_ssn_proj_dt = rbindlist(ssn_proj_dt, fill=T)[mod==in_mod_fit,]
+# in_ssn_proj_dt = rbindlist(tar_read(ssn_proj_dt), fill=T)[mod==in_mod_fit,]
 # reference_years = seq(1991, 2020)
-# future_years = list(mid_century=seq(2041, 2070), 
+# future_years = list(mid_century=seq(2041, 2070),
 #                     late_century=seq(2071, 2100))
 # n_sim = 100
 
@@ -16496,18 +16496,21 @@ compute_div_change <- function(in_ssn_mod_fit, in_ssn_proj_dt,
   sim_change_dt <- sim_dt[, list(mean_div = mean(sim)),
                           by=.(organism, site, country, scenario, 
                                gcm, period, n, response_var, mod)] %>%
-    dcast(organism+site+country+scenario+gcm+n+response_var+mod~period, 
+    data.table::dcast(organism+site+country+scenario+gcm+n+response_var+mod~period, 
           value.var='mean_div') %>%
     .[, `:=`(div_change_mid = 100*(mid_century - reference)/reference,
-             div_change_late = 100*(late_century - reference)/reference
+             div_change_late = 100*(late_century - reference)/reference,
+             div_change_abs_mid = mid_century - reference,
+             div_change_abs_late = late_century - reference
     )]
   
   
-  stats_change_dt <- melt(
+  stats_change_dt <- data.table::melt(
     sim_change_dt,
     id.vars=c('organism', 'site', 'country',
               'scenario', 'gcm', 'n', 'response_var', 'mod'),
-    measure.vars = c('div_change_mid', 'div_change_late')) %>%
+    measure.vars = c('div_change_mid', 'div_change_late',
+                     'div_change_abs_mid', 'div_change_abs_late')) %>%
     .[, list(mean_change = mean(value),
              lower_change = quantile(value, probs=0.025),
              upper_change = quantile(value, probs=0.975)
@@ -16521,6 +16524,61 @@ compute_div_change <- function(in_ssn_mod_fit, in_ssn_proj_dt,
   )
 }
 
+
+#------ compute_hydro_change -------------------------------------------------- 
+#############"TO BE CONTINUED FOR PLOTTING
+# in_hydrocon_sites_proj_gcm <- tar_read(hydrocon_sites_proj_gcm)
+# in_hydro_vars_dt <- tar_read(hydro_vars_dt)
+# reference_years = seq(1991, 2020),
+# future_years = list(mid_century=seq(2041, 2070), 
+#                     late_century=seq(2071, 2100))
+
+
+compute_hydro_change <- function(in_hydrocon_sites_proj_gcm,
+                                 in_hydro_vars_dt,
+                                 reference_years = seq(1991, 2020), 
+                                 future_years = list(mid_century=seq(2041, 2070), 
+                                                     late_century=seq(2071, 2100))) {
+  
+  future_years[['reference_years']] = reference_years
+ 
+  
+  hydrocon_proj_formatted <- rbindlist(in_hydrocon_sites_proj_gcm) %>%
+    merge(melt(as.data.table(future_years)), by.x='year', by.y='value') %>%
+    setnames('variable', 'period')
+  
+  
+  hydrocon_proj_formatted[, 
+    lapply(.SD, mean), 
+    .SDcols = is.numeric,
+    by=.(reach_id, UID, site, country, scenario, period)]
+  
+  # 
+  # sim_change_dt <- sim_dt[, list(mean_div = mean(sim)),
+  #                         by=.(organism, site, country, scenario, 
+  #                              gcm, period, n, response_var, mod)] %>%
+  #   dcast(organism+site+country+scenario+gcm+n+response_var+mod~period, 
+  #         value.var='mean_div') %>%
+  #   .[, `:=`(div_change_mid = 100*(mid_century - reference)/reference,
+  #            div_change_late = 100*(late_century - reference)/reference
+  #   )]
+  # 
+  # 
+  # stats_change_dt <- melt(
+  #   sim_change_dt,
+  #   id.vars=c('organism', 'site', 'country',
+  #             'scenario', 'gcm', 'n', 'response_var', 'mod'),
+  #   measure.vars = c('div_change_mid', 'div_change_late')) %>%
+  #   .[, list(mean_change = mean(value),
+  #            lower_change = quantile(value, probs=0.025),
+  #            upper_change = quantile(value, probs=0.975)
+  #   ),
+  #   by=.(organism, site, country, scenario, gcm, variable, response_var, mod)]
+
+}
+
+
+
 #------ plot_ssn_proj------------------------------------------------------------
 # in_future_sims_dt <- tar_read(future_change_dt) %>%
 #   lapply(function(x) x[['sims_dt']]) %>%
@@ -16533,7 +16591,7 @@ compute_div_change <- function(in_ssn_mod_fit, in_ssn_proj_dt,
 # in_mod_fit_list <- tar_read(ssn_mod_yr_fit_multiorganism)
 # in_organism_dt <- tar_read(organism_dt)
 # mod_sub = c('fun_sedi_richness','dia_sedi_richness', 'miv_richness', 'ept_richness', 'och_richness')
-# write_plots=T,
+# write_plots=T
 # out_dir = figdir
 
 #' Map SSN model projections and changes
@@ -16626,6 +16684,9 @@ plot_ssn_proj <- function(
     .[, mod := factor(mod, levels=mod_sub)] %>%
     .[order(mod),] %>%
     .[, organism_label := factor(organism_label, levels=unique(organism_label))]
+  
+  sub_mean_dt_abs <- sub_mean_dt[grep('abs', variable),]
+  sub_mean_dt <- sub_mean_dt[grep('abs', variable, invert=T),]
 
   color_vec <- sub_mean_dt[!duplicated(country),
                           setNames(color, country)]
@@ -16710,7 +16771,7 @@ plot_ssn_proj <- function(
   
   # mod_name <-  mod_sub[[3]]
   maps_list <- lapply(mod_sub, function(mod_name) {
-    ssn_preds_hist <-in_mod_fit_list[[mod_name]]$ssn.object 
+    ssn_preds_hist <- in_mod_fit_list[[mod_name]]$ssn.object 
     
     ssn_preds_hist$obs <- ssn_preds_hist$obs %>%
       merge(ref_multigcm_dt[mod==mod_name,], 
@@ -16726,7 +16787,7 @@ plot_ssn_proj <- function(
                                    linewidth_col='qsim_avg',       
                                    nbreaks=8,
                                    page_title=str_wrap(
-                                     paste0('Predicted species richness - ',
+                                     paste0('Predicted richness - ',
                                                      unique(ssn_preds_hist$obs$organism_label)[1],
                                                      ' (1991-2020)'),
                                      60)
@@ -16740,7 +16801,7 @@ plot_ssn_proj <- function(
                                    linewidth_col='qsim_avg', 
                                    nbreaks=10,
                                    page_title=str_wrap(
-                                   paste0('Species richness (% difference 
+                                   paste0('Richness (% difference 
                                                    predicted mean 1991-2020 vs observed 2021) - ',
                                                      unique(ssn_preds_hist$obs$organism_label)[1]),
                                    60)
@@ -16751,19 +16812,19 @@ plot_ssn_proj <- function(
     
     
     # Make map of future changes --------------------------------------------------
-    ssn_preds_hist <-in_mod_fit_list[[mod_name]]$ssn.object 
+    ssn_preds_hist <- in_mod_fit_list[[mod_name]]$ssn.object 
     
     #For a specific projection scenario (2070-2099, ssp585)
-    change_topmap <- sub_mean_dt[mod==mod_name &
+    reldiff_topmap <- sub_mean_dt[mod==mod_name &
                                    variable=='div_change_late' &
                                    scenario=='ssp585',]
     
-    ssn_preds_hist$obs <- ssn_preds_hist$obs %>%
-      merge(change_topmap, 
-            by=c('site', 'country', 'organism', 'stream_type')) %>%
-      merge(in_organism_dt, by='organism')
+    preds_hist_copy <- copy(ssn_preds_hist)
+    preds_hist_copy$obs <- preds_hist_copy$obs %>%
+      merge(reldiff_topmap, 
+            by=c('site', 'country', 'organism', 'stream_type')) 
     
-    map_change_pred <- map_ssn_facets(in_ssn=ssn_preds_hist, 
+    map_reldiff_pred <- map_ssn_facets(in_ssn=preds_hist_copy, 
                                       in_pts='obs',
                                       facet_col='country',
                                       ptcolor_col = 'mean_change',
@@ -16771,16 +16832,41 @@ plot_ssn_proj <- function(
                                       linewidth_col='qsim_avg',       
                                       nbreaks=8,
                                       page_title=str_wrap(
-                                        paste0('Predicted % change in species richness - ',
-                                               unique(ssn_preds_hist$obs$organism_label)[1],
+                                        paste0('Predicted % change in mean richness - ',
+                                               unique(preds_hist_copy$obs$organism_label)[1],
                                                ' (2071-2100 vs 1991-2020) - SSP5-8.5'),
                                         60)
                                       )
+    
+    #Map absolute diff
+    absdiff_topmap <- sub_mean_dt_abs[mod==mod_name &
+                                    variable=='div_change_abs_late' &
+                                    scenario=='ssp585',]
+    
+    ssn_preds_hist$obs <- ssn_preds_hist$obs %>%
+      merge(absdiff_topmap, 
+            by=c('site', 'country', 'organism', 'stream_type')) 
+    
+    map_absdiff_pred <- map_ssn_facets(in_ssn=ssn_preds_hist, 
+                                       in_pts='obs',
+                                       facet_col='country',
+                                       ptcolor_col = 'mean_change',
+                                       shape_col = 'stream_type',
+                                       linewidth_col='qsim_avg',       
+                                       nbreaks=8,
+                                       page_title=str_wrap(
+                                         paste0('Predicted change in mean richness - ',
+                                                unique(ssn_preds_hist$obs$organism_label)[1],
+                                                ' (2071-2100 vs 1991-2020) - SSP5-8.5'),
+                                         60)
+    )
+    
   
     out_map_list <- list(
       map_ref_pred = map_ref_pred,
       map_ref_diff = map_ref_diff,
-      map_change_pred = map_change_pred
+      map_reldiff_pred = map_reldiff_pred,
+      map_absdiff_pred = map_absdiff_pred 
     )
     
     #write to PDF
@@ -16795,11 +16881,42 @@ plot_ssn_proj <- function(
     return(out_map_list)
     
   }) %>% setNames(mod_sub)
+  
+  
+  #------------------ PRepare stats tables -------------------------------------
+  summarized_reldiff_stats_dt <- sub_mean_dt[variable=='div_change_late', 
+                              list(mean_change=round(mean(mean_change))),
+                              by=.(organism, country, scenario, stream_type, catchment)] %>%
+    merge(sub_mean_dt[variable=='div_change_late', 
+                      list(country_mean_change=round(mean(mean_change))),
+                      by=.(organism, scenario, stream_type)],
+          by=c('organism', 'scenario', 'stream_type')) %>%
+    dcast(organism+scenario+stream_type+country_mean_change~catchment + country, 
+          value.var='mean_change') 
+    
+  
+  summarized_absdiff_stats_dt <- sub_mean_dt_abs[variable=='div_change_abs_late', 
+                                      list(mean_change=round(mean(mean_change)),
+                                           min_change=round(min(mean_change)),
+                                           max_change=round(max(mean_change))),
+                                      by=.(organism, country, scenario, stream_type, catchment)] %>%
+    merge(sub_mean_dt_abs[variable=='div_change_abs_late', 
+                      list(country_mean_change=round(mean(mean_change))),
+                      by=.(organism, scenario, stream_type)],
+          by=c('organism', 'scenario', 'stream_type')) %>%
+    .[, formatted_mean_minmax := paste0(mean_change, ' [', min_change, ':', max_change, ']')] %>%
+    data.table::dcast(organism+scenario+stream_type~catchment + country,
+          value.var='mean_change') 
 
   
+  # Return results -----------------------------------
   return(list(
     plots = plot_list,
-    maps = maps_list
+    maps = maps_list,
+    summarized_reldiff_stats_dt  = summarized_reldiff_stats_dt,
+    all_reldiff_stats_dt = sub_mean_dt, 
+    summarized_absdiff_stats_dt = summarized_absdiff_stats_dt,
+    all_absdiff_stats_dt =  sub_mean_dt_abs
   ))
 }
 

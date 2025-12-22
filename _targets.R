@@ -1663,7 +1663,7 @@ annual_analysis_targets <- list(
                  in_mod_fit_list = ssn_mod_yr_fit_multiorganism,
                  in_organism_dt = organism_dt,
                  mod_sub = c('fun_sedi_richness','dia_sedi_richness', 
-                             'miv_richness', 'ept_richness'),
+                             'miv_richness', 'ept_richness', 'och_richness'),
                  write_plots=T,
                  out_dir = figdir
     )
