@@ -464,10 +464,12 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
   # FreD: Drying frequency - absolute or relative number of drying events per time interval
   # PFreD: FreD_relative_to_longterm
   if (scale %in% c('all', 'site')) {
-    hydromod_dt_sites <- in_hydromod_dt[reach_id %in% unique(in_sites_dt$reach_id),] %>%
+    hydromod_dt_sites <- in_hydromod_dt[
+      reach_id %in% unique(in_sites_dt$reach_id),] %>%
       setorderv(c('reach_id', 'date'))
     
-    #Compute duration of no-flow periods and time since last no-flow period #PrdD: prior days to last dry/pool/flowing event
+    #Compute duration of no-flow periods and time since last no-flow period 
+    #PrdD: prior days to last dry/pool/flowing event
     preformat_intermittence_stats(hydromod_dt_sites)
     
     
@@ -475,7 +477,7 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
     #   geom_line() +
     #   facet_wrap(~id)
     
-    #Compute moving-window DurD and FreD statistics --------------------------------------------
+    #Compute moving-window DurD, ConD and FreD statistics --------------------------------------------
     rollingstep_short <- c(10, 30, 60, 90, 120, 180)
     rollingstep_long <- c(365, 365*5, 365*10)
     rollingstep <- c(rollingstep_short, rollingstep_long)
@@ -484,20 +486,18 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
                                    FUN=function(x) sum(x==0)/length(x[!is.na(x)]), 
                                    align='right'), by = .(reach_id)
     ]
-
+    
+    
     hydromod_dt_sites[
       , paste0("FreD", rollingstep, "past") :=
         frollapply(
           seq_len(.N), n = rollingstep,
           FUN = function(idx) {
             # get the slice of the rolling window
-            i <- idx
-            x_noflow <- noflow_period[i]
-            x_valid  <- isflowing[i]  # use isflowing to know which days are valid
-            
+            x_noflow <- noflow_period[idx]
+            x_valid  <- isflowing[idx]  # use isflowing to know which days are valid
             valid_idx <- !is.na(x_valid)
             if (!any(valid_idx)) return(NA_real_)
-            
             # number of unique no-flow events in this window
             length(unique(x_noflow[!is.na(x_noflow)]))/length(valid_idx)
           },
@@ -506,8 +506,53 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
       by = reach_id
     ]
     
+    #Compute mean and max duration of no-flow periods in window
+    #(cannot re-use the previously computed noflow_period_dur because the event may extend after)
+    hydromod_dt_sites[
+      ,
+      paste0("meanConD", rollingstep, "past") := frollapply(
+          seq_len(.N), 
+          n = rollingstep,
+          FUN = function(idx) {
+            x_noflow <- noflow_period[idx]
+            x_valid  <- isflowing[idx]
+            valid_idx <- !is.na(x_valid)  # Only consider valid days (where isflowing is not NA)
+            if (!any(valid_idx)) return(NA_real_)
+            noflow_periods <- x_noflow[valid_idx] # Extract noflow_period for valid days
+            if (all(is.na(noflow_periods))) return(0.0) # Identify unique no-flow periods and their durations
+            noflow_durations <- rle(noflow_periods)$lengths[rle(noflow_periods)$values != "NA"] # Calculate durations of no-flow periods
+            return(mean(noflow_durations, na.rm = TRUE))
+          },
+          align = "right"
+        ),
+      by = .(reach_id)
+    ]
+    
+    
+    hydromod_dt_sites[
+      ,
+      paste0("maxConD", rollingstep, "past") := frollapply(
+        seq_len(.N), 
+        n = rollingstep,
+        FUN = function(idx) {
+          x_noflow <- noflow_period[idx]
+          x_valid  <- isflowing[idx]
+          valid_idx <- !is.na(x_valid)  # Only consider valid days (where isflowing is not NA)
+          if (!any(valid_idx)) return(NA_real_)
+          noflow_periods <- x_noflow[valid_idx] # Extract noflow_period for valid days
+          if (all(is.na(noflow_periods))) return(0.0) # Identify unique no-flow periods and their durations
+          noflow_durations <- rle(noflow_periods)$lengths[rle(noflow_periods)$values != "NA"] %>% # Calculate durations of no-flow periods
+            as.numeric
+          return(max(noflow_durations, na.rm = TRUE))
+        },
+        align = "right"
+      ),
+      by = .(reach_id)
+    ]
+    
     #Compute ecdf value by day of year for moving windows
-    rolling_column_names_short <- expand.grid(c('DurD', 'FreD'), 
+    rolling_column_names_short <- expand.grid(c('DurD', 'FreD', 
+                                                'meanConD', 'maxConD'), 
                                               rollingstep_short) %>%
       setDT %>% 
       .[, paste0(Var1, Var2, 'past')]
@@ -520,7 +565,8 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
       na.rm=TRUE)
     
     #Compute ecdf value across entire records for moving windows > 365 days
-    rolling_column_names_long <- expand.grid(c('DurD', 'FreD'), 
+    rolling_column_names_long <- expand.grid(c('DurD', 'FreD', 
+                                               'meanConD', 'maxConD'), 
                                              rollingstep_long) %>% 
       setDT %>% 
       .[, paste0(Var1, Var2, 'past')]
@@ -533,15 +579,23 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
       na.rm=TRUE)
     
     #Compute annual timing and interannual variability--------------------------
-    hydromod_dt_yr <- hydromod_dt_sites[, list(
-      DurD_yr = sum(isflowing==0)/.SD[!is.na(isflowing), .N],
-      FreD_yr = length(unique(noflow_period[!is.na(noflow_period)]))/.SD[!is.na(isflowing), .N],
-      FstDrE = .SD[isflowing==0, min(doy, na.rm=T)],
-      meanConD_yr = .SD[!duplicated(noflow_period), mean(noflow_period_dur, na.rm=T)]             
-    ), by=.(reach_id, year = as.integer(format(date, '%Y')))] %>%
-      .[is.infinite(FstDrE), FstDrE := 365] %>% #For sites that don't dry, set it to 365
-      .[is.na(meanConD_yr), meanConD_yr := 0]
-    
+    hydromod_dt_yr <- hydromod_dt_sites[
+      ,
+      {
+        # count dry days per period within the year
+        consecutive_dry_days <- .SD[
+          isflowing == 0 & !is.na(noflow_period),
+          .N,
+          by = noflow_period]$N
+        
+        list(
+          DurD_yr = sum(isflowing==0)/.SD[!is.na(isflowing), .N],
+          FreD_yr =  length(consecutive_dry_days)/.SD[!is.na(isflowing), .N],
+          FstDrE = fifelse(any(isflowing == 0), min(doy[isflowing == 0]), 365),
+          meanConD_yr = fifelse(length(consecutive_dry_days) > 0, mean(consecutive_dry_days), 0),  
+          maxConD_yr = fifelse(length(consecutive_dry_days) > 0, max(consecutive_dry_days), 0)
+        )
+      }, by=.(reach_id, year = as.integer(format(date, '%Y')))] 
     
     #CV of annual number of no-flow days----------------------------------------
     hydromod_dt_yr[
@@ -584,6 +638,15 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
       , paste0("FstDrE_SD", rollingstep_yr, "yrpast") :=  
         frollapply(FstDrE, n=rollingstep_yr, 
                    FUN=function(x) sd(x, na.rm=T)
+                   , 
+                   align='right')
+      , by=.(reach_id)
+    ] 
+    
+    hydromod_dt_yr[
+      , paste0("FstDrE_mean", rollingstep_yr, "yrpast") :=  
+        frollapply(FstDrE, n=rollingstep_yr, 
+                   FUN=function(x) mean(x, na.rm=T)
                    , 
                    align='right')
       , by=.(reach_id)
@@ -649,7 +712,7 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
     relF_dt <- merge(relF_dt, relF_dt_yr, by='hy')
   }
   
-
+  
   # Output -----------------------------
   out_list <- list()
   if (scale %in% c('all', 'site')) {
@@ -1620,8 +1683,8 @@ get_inverse_link_function <- function(fam) {
     # Fallback
     stop(sprintf("Family '%s' not recognized or no inverse link defined.", fam))
   )
-    
- return(inv_link) 
+  
+  return(inv_link) 
 }
 
 #------ format_ssn_glm_equation ------------------------------------------------
@@ -1661,7 +1724,7 @@ format_ssn_glm_equation <- function(in_mod_fit, greek = TRUE) {
   
   # Detect family (for SSN2)
   fam <- in_mod_fit$family
-
+  
   if (!is.null(fam)) {
     link <- switch(
       fam,
@@ -2432,7 +2495,7 @@ read_biodt <- function(path_list, in_metadata_edna,
     select(-c(hydrachnidae.gen..sp., nematoda.gen..sp., nematomorpha.gen..sp.))
   dt_list$miv_nopools <- dt_list$miv_nopools %>%
     select(-c(hydrachnidae.gen..sp., nematoda.gen..sp., nematomorpha.gen..sp.))
-
+  
   
   #Separate OCH from EPT--------------------------------------------
   #Prepare reduced data for joining with full/raw data that contains family/taxagroup info
@@ -2574,8 +2637,8 @@ read_biodt <- function(path_list, in_metadata_edna,
 }
 
 #------ calc_spdiv -------------------------------------------------------------
-# in_country <- 'Czech'
-# in_biodt <- tar_read(bio_dt)[['dia_biof']][country == in_country,]
+# in_country <- 'Croatia'
+# in_biodt <- tar_read(bio_dt)[['miv']][country == in_country,]
 # in_metacols <- metacols
 # level='local'
 
@@ -4075,8 +4138,8 @@ impute_hydromod <- function(in_network_path,
   #   scale_y_log10()
 }
 #------ compute_hydrostats_drn -------------------------------------------------
-# in_country <- 'Hungary'
-# varname <- 'qsim' #'isflowing'
+# in_country <- 'Czechia'
+# varname <- 'isflowing' #'qsim'
 # in_sites_dt <- tar_read(sites_dt)[country == in_country,]
 # in_network_path <- tar_read(network_ssnready_gpkg_list)[[in_country]]
 # in_hydromod_filled <- tar_read_raw((paste0('hydromod_hist_filled_dt_', in_country, '_', varname)))
@@ -5122,10 +5185,10 @@ compute_Fdist_rolling <- function(in_Fdist_dt, in_sites_dt) {
 # STcon_window=10
 
 compute_connectivity_proj <- function(hydroproj_path, hydroref_path, in_drn_dt,
-                                  network_ssnready_shp_list,
-                                  subset_sites, in_sites_dt, 
-                                  STcon_window=365,
-                                  min_date = as.Date('1990-01-01')) {
+                                      network_ssnready_shp_list,
+                                      subset_sites, in_sites_dt, 
+                                      STcon_window=365,
+                                      min_date = as.Date('1990-01-01')) {
   
   #Format data
   hydromod_formatted <- import_hydromod_gcm(hydroproj_path, 
@@ -5210,14 +5273,14 @@ compute_connectivity_proj <- function(hydroproj_path, hydroref_path, in_drn_dt,
   
   if (subset_sites) {
     STcon_undirected_formatted$STcon_dt <- merge(STcon_undirected_formatted$STcon_dt,
-                                               st_drop_geometry(net_sf[,c('UID', 'cat')]),
-                                               by='UID') %>%
+                                                 st_drop_geometry(net_sf[,c('UID', 'cat')]),
+                                                 by='UID') %>%
       merge(in_sites_dt[, .(reach_id, site)], by.x='cat', by.y='reach_id', all.x=F)
   }
   
   setnames(STcon_undirected_formatted$STcon_dt, 'stcon_value', 'STcon_undirected_mean_yr')
   STcon_undirected_formatted$STcon_dt[, `:=`(year = format(date, '%Y'),
-                                           variable = NULL)]
+                                             variable = NULL)]
   
   #Compute Fdist undirected
   Fdist_undirected_proj <- compute_Fdist(
@@ -5360,6 +5423,10 @@ summarize_sites_hydrocon <- function(in_hydrocon_compiled
       DurD_yr = .SD[1, DurD_yr],
       FreD_yr = .SD[1, FreD_yr],
       FstDrE = .SD[1, FstDrE],
+      FstDrE_mean10yrpast = .SD[.N, FstDrE_mean10yrpast],
+      FstDrE_mean30yrpast = .SD[.N, FstDrE_mean30yrpast],
+      FstDrE_diff10yrpast = .SD[1, FstDrE]-.SD[.N, FstDrE_mean10yrpast],
+      FstDrE_diff30yrpast = .SD[1, FstDrE]-.SD[.N, FstDrE_mean30yrpast],
       meanConD_yr = .SD[1, meanConD_yr],
       DurD_CV10yrpast = .SD[.N, DurD_CV10yrpast],
       DurD_CV30yrpast = .SD[.N, DurD_CV30yrpast],
@@ -5595,7 +5662,7 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path,
                                           min_date = as.Date('1990-01-01'),
                                           include_metadata = TRUE) {
   
-
+  
   
   hydromod_preformatted <- import_hydromod_gcm(hydroproj_path, 
                                                hydroref_path, in_drn_dt) 
@@ -5613,13 +5680,13 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path,
   #Add 30 years of NAs at the beginning to avoid NAs at the beginning ----------
   hydro_dt <- rbind(
     hydro_dt[, list(date=seq(min(date)-lubridate::years(30), 
-                                      min(date)-lubridate::days(1), 
-                                      by="day")),
-                      by=reach_id],
+                             min(date)-lubridate::days(1), 
+                             by="day")),
+             by=reach_id],
     hydro_dt,
     fill=T) %>%
     setorderv(c('reach_id', 'date'))
-
+  
   #Compute yearly discharge statistics -----------------------------------------
   if (metadata_dt$varname == 'discharge') {
     metadata_dt[varname=='discharge', varname:='qsim']
@@ -5640,10 +5707,10 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path,
     metadata_dt[varname=='flowstate', varname:='isflowing']
     
     stats_dt <- hydro_dt[(date >= min_date-lubridate::years(30)) &
-                                    (date < as.Date('2100-01-01')),]
+                           (date < as.Date('2100-01-01')),]
     stats_dt[, `:=`(doy  = as.numeric(format(date,"%j")),
                     year =  as.integer(format(date, '%Y'))
-                    )]
+    )]
     
     #Compute duration of no-flow periods and time since last no-flow period #PrdD: prior days to last dry/pool/flowing event
     preformat_intermittence_stats(stats_dt)
@@ -5683,7 +5750,7 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path,
       keep_column = "year",
       na.rm = TRUE
     )
-
+    
     #CV of annual number of no-flow days----------------------------------------
     rollingstep_yr <- c(10, 30)
     stats_dt_yr[
@@ -5766,7 +5833,7 @@ merge_allvars_sites <- function(in_spdiv_local,
   #Assume that the state of flow prior to first time step is the same as during the first time step
   in_env_dt[is.na(state_of_flow_tm1), state_of_flow_tm1 := state_of_flow]
   
-  #Remove sites x organism combinations that were always dry
+  #Remove sites x organism combinations that were always dry or standing pool
   dry_only_sites <- in_env_dt[, any(state_of_flow=='F'), by=site][V1==F, site]
   
   #Merge diversity data
@@ -5913,17 +5980,18 @@ create_hydro_vars_dt <- function(in_hydro_vars_forssn) {
   dt <- data.table(hydro_var=in_hydro_vars_forssn)
   
   labels_dt <- data.table(
-    hydro_var_root = c('DurD', 'PDurD', "PrdD",
+    hydro_var_root = c('DurD', 'PDurD', "meanConD", "maxConD",
                        'FreD', "PFreD",
                        'DurD_CV', "FreD_CV", "meanConD_CV", "FstDrE_SD", 
-                       "sd6", "FstDrE",
+                       "sd6", "FstDrE", "FstDrE_mean", "FstDrE_diff",
                        "uQ90", "oQ10", "maxPQ", "PmeanQ",
                        "STcon_directed", "STcon_undirected",
                        "Fdist_mean_directed", "Fdist_mean_undirected"),
     hydro_label = c(
       "Proportion of no-flow days",
       "Proportion of no-flow days (percentile)",
-      "Time to last no flow date",
+      "Average duration of no-flow periods",
+      "Maximum duration of no-flow periods",
       "Number of no-flow periods",
       "Number of no-flow periods (percentile)",
       "CV of the annual proportion of no-flow days",
@@ -5932,6 +6000,8 @@ create_hydro_vars_dt <- function(in_hydro_vars_forssn) {
       "SD of the date of first drying",
       "Seasonality of drying (SD6)",
       "Date of first drying",
+      "Mean date of first drying",
+      "Difference in date of first drying compared to long-term average",
       "Number of low-flow days (< Q90)",
       "Number of high-flow days (>Q10)",
       "Maximum flow percentile",
@@ -5941,10 +6011,10 @@ create_hydro_vars_dt <- function(in_hydro_vars_forssn) {
       "Mean distance to the nearest flowing site - upstream",
       "Mean distance to the nearest flowing site - undirected"),
     hydro_class = c(
-      rep('Drying duration', 3),
+      rep('Drying duration', 4),
       rep('Drying frequency', 2),
       rep('Drying predictability', 4),
-      rep('Drying timing', 2),
+      rep('Drying timing', 4),
       rep('Flow magnitude', 4),
       rep('Connectivity', 4)
     )
@@ -6922,7 +6992,7 @@ map_ssn_util <- function(in_ssn,
     if (!is.null(linecolor_col)) {
       out_map <- out_map +  new_scale_color()
     }
-
+    
   }
   
   # handle point shapes
@@ -7167,7 +7237,7 @@ map_ssn_summarized <- function(in_ssn_summarized,
                    page_title = in_ptcolor_col
     )
   }) %>% setNames(physvars)
-
+  
   return(c(maps_div, maps_physvars))
 }
 
@@ -8339,17 +8409,21 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
       by=.I]
   
   color_vec <-  hydrocon_melt[!duplicated(country),
-                          setNames(color, country)]
+                              setNames(color, country)]
   
+  #Create boxplot --------------------------------------------------------------
   vars_sub <- c("DurD_samp", "PDurD365past", "FreD_samp", "meanConD_yr", 
-    "FstDrE", "DurD_CV30yrpast", "FstDrE_SD30yrpast", 
-    "STcon_m10_undirected_avg_samp", 
-    "Fdist_mean_10past_undirected_avg_samp_log10")
+                "FstDrE", "FstDrE_diff10yrpast",
+                "DurD_CV30yrpast", "FstDrE_SD30yrpast", 
+                "STcon_m10_undirected_avg_samp", 
+                "Fdist_mean_10past_undirected_avg_samp_log10")
   
   hydrocon_summarized_plot <- hydrocon_melt[variable %in% vars_sub,] %>%
-    ggplot(aes(x=country, y=value, fill=country)) +
-    geom_boxplot(alpha=0.5) +
+    ggplot(aes(x=country, y=value, fill=country, color=country)) +
+    geom_point(alpha=0.5) +
+    geom_boxplot(alpha=0.2) +
     scale_fill_manual(name='Country', values=color_vec) +
+    scale_color_manual(name='Country', values=color_vec) +
     facet_wrap(~variable_name,
                scales='free_x',
                labeller = label_wrap_gen(width = 22)) +
@@ -8357,6 +8431,7 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
     theme_classic() +
     theme(legend.position='none')
   
+  #Export boxplots  -------------------------------------------------------------
   out_plot_path <- file.path(outdir, 'hydrocon_summarized_boxplot.png')
   if (!file.exists(out_plot_path)) {
     ggsave(out_plot_path,
@@ -8364,6 +8439,40 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
            width = 6, height = 6, dpi=300)
   }
   
+  #Ordinate  -------------------------------------------------------------------
+  pca_subcols <-  c("DurD3650past", "FreD3650past", "DurD_CV30yrpast", 
+                    "FreD_CV30yrpast", "meanConD_CV30yrpast",
+                    "sd6_30yrpast",  
+                    "Fdist_mean_10past_undirected_avg_samp")
+  
+  "relF3650past"
+  
+  hydro_pca <- trans_pca_wrapper(
+    in_dt = in_allvars_summarized$dt[
+      (DurD3650past>0) & !duplicated(site) & site != 'BUT08',], 
+    in_cols_to_ordinate =  pca_subcols, 
+    id_cols = intersect(names(in_allvars_summarized$dt), metacols), 
+    group_cols = NULL, 
+    num_pca_axes = 4)
+  
+  loadings <- hydro_pca$pca$rotation
+  
+  ggplot(hydro_pca$dt, aes(x=env_PC1, y=env_PC2)) +
+    geom_point(aes(color=country), size=4) +
+    stat_ellipse(aes(fill=country), geom = "polygon", alpha=0.3, type='t') +
+    geom_segment(data = loadings, 
+                 aes(x = 0, y = 0, xend = PC1*5, yend = PC2*5),
+                 arrow = arrow(length = unit(0.2, "cm")), color = "red") +
+    geom_text(data = loadings, 
+              aes(x = PC1*5, y = PC2*5, label = rownames(loadings)),
+              color = "red", vjust = -0.5) +
+    scale_color_manual(name='Country', values=color_vec) +
+    scale_fill_manual(name='Country', values=color_vec) +
+    theme_classic()
+  
+
+
+  #Export statistics for subset of variables  ----------------------------------
   out_tab_path <- file.path(outdir, 'hydrocon_summarized.csv')
   if (!file.exists(out_tab_path)) {
     vtable::st(
@@ -8377,7 +8486,7 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
   return(list(
     plot = hydrocon_summarized_plot,
     tab_path = out_tab_path
-    )
+  )
   )
 }
 
@@ -8722,7 +8831,7 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
                                      'sd6', 'oQ10'),]
     emtrends_plot_sub <- emtrends_plot + emtrends_sub
   }
-
+  
   
   if (write_plot && !is.null(out_dir)) {
     out_path <- file.path(
@@ -8825,7 +8934,7 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
   #   mutate(meanQ3650past_sqrt = sqrt(meanQ3650past))
   # ssn_miv$preds$preds_proj %>%
   #   mutate(meanQ3650past_sqrt = sqrt(meanQ3650past))
-    
+  
   # Define candidate hydrological variables
   hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
                         'meanQ3650past_sqrt')
@@ -9099,7 +9208,7 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
   
   miv_rich_modlist[['mod44']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(STcon_m10_directed_avg_samp) + country:sqrt(STcon_m10_directed_avg_samp)'))) 
   #Overspecified
- 
+  
   miv_rich_modlist[['mod45']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + sqrt(STcon_m10_directed_avg_samp) + log10(basin_area_km2)'))) 
   
   if (interactive) {
@@ -9157,7 +9266,7 @@ model_miv_richness_yr <- function(in_ssn_eu_summarized,
   miv_rich_modlist[['mod48']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + log10(basin_area_km2) + env_PC2')))
   
   miv_rich_modlist[['mod49']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ DurD_samp + country:DurD_samp + log10(basin_area_km2) + env_PC1*env_PC2')))
-
+  
   miv_rich_modlist[['mod50']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ stream_type + country:stream_type + DurD_samp + log10(basin_area_km2) + country:log10(basin_area_km2)')))
   
   miv_rich_modlist[['mod51']] <- quick_miv_ssn(as.formula(paste(alpha_var,  '~ stream_type + DurD_samp + country:DurD_samp + log10(basin_area_km2) + country:log10(basin_area_km2)')))
@@ -9335,7 +9444,7 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
   # Define candidate hydrological variables
   hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
                         'meanQ3650past_sqrt')
-
+  
   #Scale predictor data (mean of 0 and SD of 1) -----
   ssn_miv <- scale_ssn_predictors(in_ssn = ssn_miv,
                                   in_vars = hydro_candidates,
@@ -9597,112 +9706,112 @@ model_miv_invsimpson_yr <- function(in_ssn_eu_summarized,
                      in_drn_dt = drn_dt,
                      plot=T)
   }
+  
+  #RF does not do so well
+  # check_rf <- ranger::ranger(mean_invsimpson ~ .,
+  #                            data= allvars_dt[, c(hydro_candidates, 'mean_invsimpson', 'country'), with=F])
+  # allvars_dt[, mean_rich_preds := ranger::predictions(check_rf)]
+  # ggplot(allvars_dt, aes(x=mean_rich_preds, y=mean_richness)) +
+  #   geom_point(aes(color=stream_type)) + 
+  #   geom_smooth(method='gam') +
+  #   facet_wrap(~country)
+  
+  #------ For prediction model -------------------------------------------------
+  # This section focuses on creating a model suitable for prediction to new reaches,
+  # using only variables available for all reaches.
+  
+  #Check Torgegram
+  tg_selected <- SSN2::Torgegram(
+    formula = 'mean_invsimpson_log10 ~ PDurD365past + country:PDurD365past + sqrt(meanQ3650past) + country:sqrt(meanQ3650past)',
+    ssn.object = ssn_miv,
+    type = c("flowcon", "flowuncon", "euclid"),
+    partition_factor = as.formula('~ country'),
+    bins = 15
+  ) %>%
+    rbindlist(idcol='dist_type')
+  
+  tg_plot <- ggplot(tg_selected, 
+                    aes(x=dist, y=gamma, color = dist_type)) +
+    geom_point(aes(size=np)) +
+    geom_smooth(method='lm', linewidth=2, se=F) +
+    scale_size_continuous(range=c(0.5, 7)) +
+    scale_x_sqrt(breaks=c(1000, 5000, 10000, 20000)) +
+    theme_classic() +
+    facet_wrap(~dist_type)
+  
+  if (interactive) {
+    #Test covariance structures again, this time with REML 
+    in_ssn_eu_summarized$miv_nopools$ssn$obs %<>%
+      mutate(meanQ3650past_sqrt = sqrt(meanQ3650past),
+             mean_invsimpson_log10 = log10(mean_invsimpson))
     
-    #RF does not do so well
-    # check_rf <- ranger::ranger(mean_invsimpson ~ .,
-    #                            data= allvars_dt[, c(hydro_candidates, 'mean_invsimpson', 'country'), with=F])
-    # allvars_dt[, mean_rich_preds := ranger::predictions(check_rf)]
-    # ggplot(allvars_dt, aes(x=mean_rich_preds, y=mean_richness)) +
-    #   geom_point(aes(color=stream_type)) + 
-    #   geom_smooth(method='gam') +
-    #   facet_wrap(~country)
-    
-    #------ For prediction model -------------------------------------------------
-    # This section focuses on creating a model suitable for prediction to new reaches,
-    # using only variables available for all reaches.
-    
-    #Check Torgegram
-    tg_selected <- SSN2::Torgegram(
-      formula = 'mean_invsimpson_log10 ~ PDurD365past + country:PDurD365past + sqrt(meanQ3650past) + country:sqrt(meanQ3650past)',
-      ssn.object = ssn_miv,
-      type = c("flowcon", "flowuncon", "euclid"),
-      partition_factor = as.formula('~ country'),
-      bins = 15
-    ) %>%
-      rbindlist(idcol='dist_type')
-    
-    tg_plot <- ggplot(tg_selected, 
-                      aes(x=dist, y=gamma, color = dist_type)) +
-      geom_point(aes(size=np)) +
-      geom_smooth(method='lm', linewidth=2, se=F) +
-      scale_size_continuous(range=c(0.5, 7)) +
-      scale_x_sqrt(breaks=c(1000, 5000, 10000, 20000)) +
-      theme_classic() +
-      facet_wrap(~dist_type)
-    
-    if (interactive) {
-      #Test covariance structures again, this time with REML 
-      in_ssn_eu_summarized$miv_nopools$ssn$obs %<>%
-        mutate(meanQ3650past_sqrt = sqrt(meanQ3650past),
-               mean_invsimpson_log10 = log10(mean_invsimpson))
-      
-      ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
-        in_ssn = in_ssn_eu_summarized,
-        family = 'Gaussian',
-        organism = c('miv_nopools'),
-        formula_root = 'sqrt(meanQ3650past)',
-        hydro_var = 'PDurD365past',
-        response_var = alpha_var,
-        ssn_covtypes = ssn_covtypes,
-        partition_formula = as.formula('~ country'),
-        random_formula = NULL,
-        estmethod='reml'
-      )
-      
-      selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
-      
-      summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
-      varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
-      
-      summary(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
-      varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
-    }
-    
-    #Re-fit final model with REML
-    ssn_miv_pred_final <- ssn_lm(
-      formula = mean_invsimpson_log10 ~ PDurD365past_z + country:PDurD365past_z + 
-        meanQ3650past_sqrt_z + country:meanQ3650past_sqrt_z,
+    ssn_mod_predictions_covtypes <- model_ssn_hydrowindow(
+      in_ssn = in_ssn_eu_summarized,
       family = 'Gaussian',
-      ssn.object = ssn_miv,
-      taildown_type = 'none',
-      tailup_type = 'none',
-      euclid_type = 'none',
-      additive = "afv_qsqrt",
-      partition_factor = ~ country,
-      random = NULL,
-      estmethod = 'reml'
+      organism = c('miv_nopools'),
+      formula_root = 'sqrt(meanQ3650past)',
+      hydro_var = 'PDurD365past',
+      response_var = alpha_var,
+      ssn_covtypes = ssn_covtypes,
+      partition_formula = as.formula('~ country'),
+      random_formula = NULL,
+      estmethod='reml'
     )
     
-    ssn_miv_mod_preds <- augment(ssn_miv_pred_final, drop=F, 
-                                 type.predict = 'response')
+    selected_glance <- ssn_mod_predictions_covtypes$ssn_glance
     
-    if (interactive) {
-      tidy(ssn_miv_pred_final)
-      summary(ssn_miv_pred_final)
-      plot(ssn_miv_pred_final)
-      SSN2::varcomp(ssn_miv_pred_final)
-      
-      get_ssn_emmeans(in_mod=ssn_miv_pred_final, 
-                      in_pred_var = 'PDurD365past',
-                      interaction_var = 'country', 
-                      in_drn_dt = drn_dt,
-                      plot=T, label_pred_var=T)$plot
-      
-      
-      get_ssn_emtrends(in_mod=ssn_miv_pred_final, 
-                       in_pred_var = 'PDurD365past',
-                       interaction_var = 'country', 
-                       in_drn_dt = drn_dt,
-                       plot=T)$plot
-      
-      #Check predictions
-      ggplot(data=ssn_miv_mod_preds, aes(x=.fitted, y=get(alpha_var))) +
-        geom_point(aes(color=stream_type)) +
-        geom_smooth(method='lm') +
-        geom_abline() +
-        facet_wrap(~country)
-    }
-
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
+    
+    summary(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
+    varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_gaussian)
+  }
+  
+  #Re-fit final model with REML
+  ssn_miv_pred_final <- ssn_lm(
+    formula = mean_invsimpson_log10 ~ PDurD365past_z + country:PDurD365past_z + 
+      meanQ3650past_sqrt_z + country:meanQ3650past_sqrt_z,
+    family = 'Gaussian',
+    ssn.object = ssn_miv,
+    taildown_type = 'none',
+    tailup_type = 'none',
+    euclid_type = 'none',
+    additive = "afv_qsqrt",
+    partition_factor = ~ country,
+    random = NULL,
+    estmethod = 'reml'
+  )
+  
+  ssn_miv_mod_preds <- augment(ssn_miv_pred_final, drop=F, 
+                               type.predict = 'response')
+  
+  if (interactive) {
+    tidy(ssn_miv_pred_final)
+    summary(ssn_miv_pred_final)
+    plot(ssn_miv_pred_final)
+    SSN2::varcomp(ssn_miv_pred_final)
+    
+    get_ssn_emmeans(in_mod=ssn_miv_pred_final, 
+                    in_pred_var = 'PDurD365past',
+                    interaction_var = 'country', 
+                    in_drn_dt = drn_dt,
+                    plot=T, label_pred_var=T)$plot
+    
+    
+    get_ssn_emtrends(in_mod=ssn_miv_pred_final, 
+                     in_pred_var = 'PDurD365past',
+                     interaction_var = 'country', 
+                     in_drn_dt = drn_dt,
+                     plot=T)$plot
+    
+    #Check predictions
+    ggplot(data=ssn_miv_mod_preds, aes(x=.fitted, y=get(alpha_var))) +
+      geom_point(aes(color=stream_type)) +
+      geom_smooth(method='lm') +
+      geom_abline() +
+      facet_wrap(~country)
+  }
+  
   #------ Write out results ----------------------------------------------------
   return(list(
     model_selection_table = mod_perf_tab,
@@ -12327,7 +12436,7 @@ model_dia_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
     
     summary(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
     varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_spherical)
-
+    
     summary(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
     varcomp(ssn_mod_predictions_covtypes$ssn_list$none_none_none)
   }
@@ -14775,7 +14884,7 @@ model_bac_sedi_richness_yr <- function(in_ssn_eu_summarized,
     among_predpts = TRUE,
     overwrite = TRUE
   )
-
+  
   # Define candidate hydrological variables
   hydro_candidates <- in_allvars_summarized$cols$hydro_con_summarized
   
@@ -15222,7 +15331,7 @@ model_bac_biof_invsimpson_yr <- function(in_ssn_eu_summarized,
   ssn_bac_biof$obs$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_biof$obs$STcon_m10_directed_avg_samp)
   # ssn_bac_biof$preds$preds_hist$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_biof$preds$preds_hist$STcon_m10_directed_avg_samp)
   # ssn_bac_biof$preds$preds_proj$STcon_m10_directed_avg_samp_log10 <- log10(ssn_bac_biof$preds$preds_proj$STcon_m10_directed_avg_samp)
-
+  
   # Define candidate hydrological variables
   hydro_candidates <- c(in_allvars_summarized$cols$hydro_con_summarized,
                         "STcon_m10_directed_avg_samp_log10")
@@ -16146,7 +16255,7 @@ get_perf_table_multiorganism <- function(in_mod_list) {
     #If there is a country fixed effect, 
     # re-fit with only that and get fixed-effect R2
     if (any((grepl('country\\s*([*]|[+])', 
-              as.character(formula(in_mod_fit)))))) {
+                   as.character(formula(in_mod_fit)))))) {
       
       country_formula <- as.formula(
         paste(as.character(in_mod_fit$call$formula)[2], '~ country'))
@@ -16175,7 +16284,7 @@ get_perf_table_multiorganism <- function(in_mod_list) {
     augmented_dat[, cv_predict := loocv(in_mod_fit,
                                         cv_predict = TRUE,
                                         type = 'response')$cv_predict
-                  ]
+    ]
     
     # print(in_mod_fit)
     perf_table <- cbind(
@@ -16362,11 +16471,11 @@ predict_ssn_mod <- function(in_ssn_mod_fit, in_hydrocon_sites_proj,
   
   # Re-assemble an SSN object
   proj_ssn_path <- gsub(formatted_proj_dt$organism[[1]],
-                  paste0(formatted_proj_dt$organism[[1]], '_', 
-                         
-                         '_proj_', 
-                         format(Sys.Date(), '%Y%m%d')),
-                  in_ssn_mod_fit$ssn.object$path)
+                        paste0(formatted_proj_dt$organism[[1]], '_', 
+                               
+                               '_proj_', 
+                               format(Sys.Date(), '%Y%m%d')),
+                        in_ssn_mod_fit$ssn.object$path)
   
   in_ssn_mod_fit$ssn.object <- SSNbler::ssn_assemble(
     edges = in_ssn_mod_fit$ssn.object$edges,
@@ -16381,7 +16490,7 @@ predict_ssn_mod <- function(in_ssn_mod_fit, in_hydrocon_sites_proj,
     afv_col = "afv_qsqrt",
     overwrite = TRUE
   )
-
+  
   #Re-compute distance matrices
   if (verbose) {
     print('Creating distance matrix')
@@ -16484,12 +16593,12 @@ compute_div_change <- function(in_ssn_mod_fit, in_ssn_proj_dt,
     rbind(data.table(year=reference_years, period='reference'))
   
   sim_dt <- in_ssn_proj_dt[,  
-                    list(
-                      n = seq(n_sim),
-                      sim = inv_link(
-                        rnorm(n = n_sim, mean = .fitted, sd = .se.fit))),
-                    by=.(organism, site, country, scenario,
-                         gcm, year, response_var, mod)] %>%
+                           list(
+                             n = seq(n_sim),
+                             sim = inv_link(
+                               rnorm(n = n_sim, mean = .fitted, sd = .se.fit))),
+                           by=.(organism, site, country, scenario,
+                                gcm, year, response_var, mod)] %>%
     merge(years_dt, by='year')
   
   #Compute change statistics
@@ -16497,7 +16606,7 @@ compute_div_change <- function(in_ssn_mod_fit, in_ssn_proj_dt,
                           by=.(organism, site, country, scenario, 
                                gcm, period, n, response_var, mod)] %>%
     data.table::dcast(organism+site+country+scenario+gcm+n+response_var+mod~period, 
-          value.var='mean_div') %>%
+                      value.var='mean_div') %>%
     .[, `:=`(div_change_mid = 100*(mid_century - reference)/reference,
              div_change_late = 100*(late_century - reference)/reference,
              div_change_abs_mid = mid_century - reference,
@@ -16541,7 +16650,7 @@ compute_hydro_change <- function(in_hydrocon_sites_proj_gcm,
                                                      late_century=seq(2071, 2100))) {
   
   future_years[['reference_years']] = reference_years
- 
+  
   
   hydrocon_proj_formatted <- rbindlist(in_hydrocon_sites_proj_gcm) %>%
     merge(melt(as.data.table(future_years)), by.x='year', by.y='value') %>%
@@ -16549,9 +16658,9 @@ compute_hydro_change <- function(in_hydrocon_sites_proj_gcm,
   
   
   hydrocon_proj_formatted[, 
-    lapply(.SD, mean), 
-    .SDcols = is.numeric,
-    by=.(reach_id, UID, site, country, scenario, period)]
+                          lapply(.SD, mean), 
+                          .SDcols = is.numeric,
+                          by=.(reach_id, UID, site, country, scenario, period)]
   
   # 
   # sim_change_dt <- sim_dt[, list(mean_div = mean(sim)),
@@ -16574,7 +16683,7 @@ compute_hydro_change <- function(in_hydrocon_sites_proj_gcm,
   #            upper_change = quantile(value, probs=0.975)
   #   ),
   #   by=.(organism, site, country, scenario, gcm, variable, response_var, mod)]
-
+  
 }
 
 
@@ -16616,7 +16725,7 @@ plot_ssn_proj <- function(
                 'dia_sedi_richness', 'fun_sedi_richness'),
     write_plots=T,
     out_dir=NULL
-    ) {
+) {
   #Only projects models for which hydro-env variables
   # explain at least 30% of variance*
   
@@ -16633,7 +16742,7 @@ plot_ssn_proj <- function(
                                  scenario %in% c('ssp126', 'ssp585'),]
   
   plot_change_miv_boxplot <- ggplot(sub_dt, 
-                            aes(x=variable, y=mean_change, fill=gcm)) +
+                                    aes(x=variable, y=mean_change, fill=gcm)) +
     geom_hline(yintercept=0, color='darkgrey') + 
     geom_boxplot(outliers=TRUE, alpha=0.8) +
     # geom_boxplot(aes(y=lower_change), outliers=FALSE, alpha=0.5) +
@@ -16645,8 +16754,8 @@ plot_ssn_proj <- function(
     theme_bw()
   
   plot_change_miv_ridges <- in_future_stats_dt[response_var=='mean_richness' &
-                                          organism=='miv_nopools' &
-                                          scenario %in% c('ssp126', 'ssp585'),] %>%
+                                                 organism=='miv_nopools' &
+                                                 scenario %in% c('ssp126', 'ssp585'),] %>%
     ggplot(aes(y=gcm, fill=gcm)) +
     # ggridges::geom_density_ridges(aes(x=lower_change), color=NA,
     #                               alpha=0.3, stat="binline", bins=10) +
@@ -16687,9 +16796,9 @@ plot_ssn_proj <- function(
   
   sub_mean_dt_abs <- sub_mean_dt[grep('abs', variable),]
   sub_mean_dt <- sub_mean_dt[grep('abs', variable, invert=T),]
-
+  
   color_vec <- sub_mean_dt[!duplicated(country),
-                          setNames(color, country)]
+                           setNames(color, country)]
   
   plot_list <- list() 
   
@@ -16757,7 +16866,7 @@ plot_ssn_proj <- function(
              width = 8, height = 9, units='in', dpi=600)
     })
   }
-
+  
   #------------------ Make maps -----------------------------------------------
   # Make map of predicted 1991-2020 richness -----------------------------------
   ref_multigcm_dt <- in_future_sims_dt[
@@ -16788,8 +16897,8 @@ plot_ssn_proj <- function(
                                    nbreaks=8,
                                    page_title=str_wrap(
                                      paste0('Predicted richness - ',
-                                                     unique(ssn_preds_hist$obs$organism_label)[1],
-                                                     ' (1991-2020)'),
+                                            unique(ssn_preds_hist$obs$organism_label)[1],
+                                            ' (1991-2020)'),
                                      60)
     )
     
@@ -16801,10 +16910,10 @@ plot_ssn_proj <- function(
                                    linewidth_col='qsim_avg', 
                                    nbreaks=10,
                                    page_title=str_wrap(
-                                   paste0('Richness (% difference 
+                                     paste0('Richness (% difference 
                                                    predicted mean 1991-2020 vs observed 2021) - ',
-                                                     unique(ssn_preds_hist$obs$organism_label)[1]),
-                                   60)
+                                            unique(ssn_preds_hist$obs$organism_label)[1]),
+                                     60)
     ) 
     
     ggplot(ssn_preds_hist$obs, aes(x=country, y=perc_diff)) +
@@ -16816,8 +16925,8 @@ plot_ssn_proj <- function(
     
     #For a specific projection scenario (2070-2099, ssp585)
     reldiff_topmap <- sub_mean_dt[mod==mod_name &
-                                   variable=='div_change_late' &
-                                   scenario=='ssp585',]
+                                    variable=='div_change_late' &
+                                    scenario=='ssp585',]
     
     preds_hist_copy <- copy(ssn_preds_hist)
     preds_hist_copy$obs <- preds_hist_copy$obs %>%
@@ -16825,23 +16934,23 @@ plot_ssn_proj <- function(
             by=c('site', 'country', 'organism', 'stream_type')) 
     
     map_reldiff_pred <- map_ssn_facets(in_ssn=preds_hist_copy, 
-                                      in_pts='obs',
-                                      facet_col='country',
-                                      ptcolor_col = 'mean_change',
-                                      shape_col = 'stream_type',
-                                      linewidth_col='qsim_avg',       
-                                      nbreaks=8,
-                                      page_title=str_wrap(
-                                        paste0('Predicted % change in mean richness - ',
-                                               unique(preds_hist_copy$obs$organism_label)[1],
-                                               ' (2071-2100 vs 1991-2020) - SSP5-8.5'),
-                                        60)
-                                      )
+                                       in_pts='obs',
+                                       facet_col='country',
+                                       ptcolor_col = 'mean_change',
+                                       shape_col = 'stream_type',
+                                       linewidth_col='qsim_avg',       
+                                       nbreaks=8,
+                                       page_title=str_wrap(
+                                         paste0('Predicted % change in mean richness - ',
+                                                unique(preds_hist_copy$obs$organism_label)[1],
+                                                ' (2071-2100 vs 1991-2020) - SSP5-8.5'),
+                                         60)
+    )
     
     #Map absolute diff
     absdiff_topmap <- sub_mean_dt_abs[mod==mod_name &
-                                    variable=='div_change_abs_late' &
-                                    scenario=='ssp585',]
+                                        variable=='div_change_abs_late' &
+                                        scenario=='ssp585',]
     
     ssn_preds_hist$obs <- ssn_preds_hist$obs %>%
       merge(absdiff_topmap, 
@@ -16861,7 +16970,7 @@ plot_ssn_proj <- function(
                                          60)
     )
     
-  
+    
     out_map_list <- list(
       map_ref_pred = map_ref_pred,
       map_ref_diff = map_ref_diff,
@@ -16885,29 +16994,29 @@ plot_ssn_proj <- function(
   
   #------------------ PRepare stats tables -------------------------------------
   summarized_reldiff_stats_dt <- sub_mean_dt[variable=='div_change_late', 
-                              list(mean_change=round(mean(mean_change))),
-                              by=.(organism, country, scenario, stream_type, catchment)] %>%
+                                             list(mean_change=round(mean(mean_change))),
+                                             by=.(organism, country, scenario, stream_type, catchment)] %>%
     merge(sub_mean_dt[variable=='div_change_late', 
                       list(country_mean_change=round(mean(mean_change))),
                       by=.(organism, scenario, stream_type)],
           by=c('organism', 'scenario', 'stream_type')) %>%
     dcast(organism+scenario+stream_type+country_mean_change~catchment + country, 
           value.var='mean_change') 
-    
+  
   
   summarized_absdiff_stats_dt <- sub_mean_dt_abs[variable=='div_change_abs_late', 
-                                      list(mean_change=round(mean(mean_change)),
-                                           min_change=round(min(mean_change)),
-                                           max_change=round(max(mean_change))),
-                                      by=.(organism, country, scenario, stream_type, catchment)] %>%
+                                                 list(mean_change=round(mean(mean_change)),
+                                                      min_change=round(min(mean_change)),
+                                                      max_change=round(max(mean_change))),
+                                                 by=.(organism, country, scenario, stream_type, catchment)] %>%
     merge(sub_mean_dt_abs[variable=='div_change_abs_late', 
-                      list(country_mean_change=round(mean(mean_change))),
-                      by=.(organism, scenario, stream_type)],
+                          list(country_mean_change=round(mean(mean_change))),
+                          by=.(organism, scenario, stream_type)],
           by=c('organism', 'scenario', 'stream_type')) %>%
     .[, formatted_mean_minmax := paste0(mean_change, ' [', min_change, ':', max_change, ']')] %>%
     data.table::dcast(organism+scenario+stream_type~catchment + country,
-          value.var='mean_change') 
-
+                      value.var='mean_change') 
+  
   
   # Return results -----------------------------------
   return(list(

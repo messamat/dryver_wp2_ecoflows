@@ -39,7 +39,7 @@ hydro_combi <- expand.grid(
   stringsAsFactors = FALSE)
 
 if (!interactive()) {
-  perf_ratio <- 0.7 #Set how much you want to push your computer (% of cores and RAM)
+  perf_ratio <- 0.4 #Set how much you want to push your computer (% of cores and RAM)
   nthreads <- round(parallel::detectCores(logical=F)*perf_ratio)
   future::plan("future::multisession", workers=nthreads)
   total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
@@ -1018,12 +1018,14 @@ formatting_targets <- list(
     hydro_vars_forssn,
     {
       hydrovar_grid <- expand.grid(
-        c('DurD', 'FreD', 'PDurD', 'PFreD', 'uQ90', 'oQ10', 'maxPQ', 'PmeanQ', 'MaxConD'),
+        c('DurD', 'FreD', 'PDurD', 'PFreD', 'meanConD', 'maxConD',
+          'uQ90', 'oQ10', 'maxPQ', 'PmeanQ'),
         paste0(c(30, 60, 90, 180, 365, 3650), 'past')
       )
       
       hydroyr_grid <- expand.grid(
-        c('DurD_CV', "FreD_CV", "meanConD_CV", "FstDrE_SD", "sd6"),
+        c('DurD_CV', "FreD_CV", "meanConD_CV", "FstDrE_SD", "sd6", 
+          "FstDrE_mean", "FstDrE_diff"),
         paste0(c(10, 30), 'yrpast')
       )
       
@@ -1037,7 +1039,7 @@ formatting_targets <- list(
         paste0(hydroyr_grid$Var1,'.*', hydroyr_grid$Var2),
         paste0(stcon_grid$Var1, stcon_grid$Var2),
         paste0(fdist_grid$Var1, fdist_grid$Var2),
-        'PrdD', 'FstDrE'
+        'FstDrE'
       )
       
       lapply(hydro_regex_list, function(var_str) {
@@ -1421,20 +1423,20 @@ annual_analysis_targets <- list(
   )
   ,
   
-  tar_target(
-    ssn_summarized_maps,
-    map_ssn_summarized(in_ssn_summarized = ssn_eu_summarized,
-                       in_allvars_summarized = allvars_summarized,
-                       in_organism_dt = organism_dt)
-  )
-  ,
-  
-  tar_target(
-    ssn_summarized_maps_paths,
-    save_ssn_summarized_maps(in_ssn_summarized_maps = ssn_summarized_maps,
-                             out_dir = figdir) 
-  )
-  ,
+  # tar_target(
+  #   ssn_summarized_maps,
+  #   map_ssn_summarized(in_ssn_summarized = ssn_eu_summarized,
+  #                      in_allvars_summarized = allvars_summarized,
+  #                      in_organism_dt = organism_dt)
+  # )
+  # ,
+  # 
+  # tar_target(
+  #   ssn_summarized_maps_paths,
+  #   save_ssn_summarized_maps(in_ssn_summarized_maps = ssn_summarized_maps,
+  #                            out_dir = figdir) 
+  # )
+  # ,
   
   tar_target(
     ssn_mods_miv_richness_yr,
@@ -1590,6 +1592,7 @@ annual_analysis_targets <- list(
   
   tar_target(
     ssn_mod_yr_perf_multiorganism,
+    -
     get_perf_table_multiorganism(in_mod_list=ssn_mod_yr_fit_multiorganism)
   )
   
