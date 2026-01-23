@@ -5662,8 +5662,6 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path,
                                           min_date = as.Date('1990-01-01'),
                                           include_metadata = TRUE) {
   
-  
-  
   hydromod_preformatted <- import_hydromod_gcm(hydroproj_path, 
                                                hydroref_path, in_drn_dt) 
   
@@ -8378,6 +8376,209 @@ get_hydrowindow_predictions <- function(best_dt) {
   }) %>% rbindlist(fill=T)
 }
 
+#------ plot_hydrocon_histproj -----------------------------------------------------
+# in_hydromod_comb_hist <- tar_read(hydromod_comb_hist)
+# in_hydrocon_proj <- tar_read(hydrocon_sites_proj_gcm)
+# in_ssn_eu_summarized <- tar_read(ssn_eu_summarized)
+# in_drn_dt <- drn_dt
+# year_smooth = 10
+
+plot_hydrocon_histproj <- function(in_hydrocon_proj,
+                                   in_hydromod_comb_hist,
+                                   in_ssn_eu_summarized,
+                                   in_drn_dt,
+                                   year_smooth = 3,
+                                   outdir) {
+  
+  #Compute the length-weighted mean dry duration and percentage non-perennial length
+  #for the sampling period according to the ERA5-core model 
+  #(i.e., not based on GCM outputs)
+  hydrocon_wmean_samp <- in_ssn_eu_summarized[[1]]$ssn$edges %>%
+    as.data.table %>%
+    .[, list(DurD_samp_wmean = weighted.mean(DurD_samp, length_m),
+             per_npr_samp = weighted.mean(DurD_samp>0, length_m)),
+      by=country]
+  
+  #Plot intermittence statistics from historical model forced with ERA5-Land reanalysis 
+  comb_sub <- sapply(in_hydromod_comb_hist, 
+                     FUN=function(x) "isflowing" %in% names(x), 
+                     simplify=T)
+  
+  hydrohist_dt <- lapply(in_hydromod_comb_hist[comb_sub], function(in_dt) {
+    in_dt[, year := as.numeric(substr(date, 1, 4))]
+    in_dt[year>1959, list(DurD_yr = sum(isflowing==0)/.N), by=.(reach_id, year)]
+  }) %>% 
+    rbindlist %>%
+    merge(in_ssn_eu_summarized[[1]]$ssn$edges[, c('country', 'cat', 'length_m')],
+          by.x=c('reach_id'), by.y=c('cat')) 
+  
+  hydrohist_dt_filled <- rbindlist(list(
+    hydrohist_dt[, list(year=seq(min(year)-(year_smooth/2), min(year)-1)), by=.(reach_id, country)],
+    hydrohist_dt,
+    hydrohist_dt[, list(year=seq(max(year)+1, max(year)+(year_smooth/2))), by=.(reach_id, country)]
+  ), fill=T) %>%
+    setorderv(c('country', 'reach_id', 'year'))
+  
+  hydrohist_wmean_yr <- hydrohist_dt_filled[
+    , list(DurD_wmean = weighted.mean(DurD_yr, length_m),
+           per_npr = weighted.mean(DurD_yr>0, length_m)),
+    by=.(country, year)] %>%
+    setorderv(c('country', 'year')) %>%
+    .[, `:=`(
+      DurD_wmean_smooth = frollmean(DurD_wmean, n=year_smooth, 
+                                    align="center", na.rm=T),
+      per_npr_smooth = frollmean(per_npr, n=year_smooth,
+                                 align="center", na.rm=T)
+    ),
+    by=.(country)] %>%
+    merge(in_drn_dt, by='country')  %>%
+    .[, country := factor(
+      country,
+      levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain" ),
+      ordered=T)
+    ]
+  
+  color_vec <-  hydrohist_wmean_yr[!duplicated(country), 
+                                  setNames(color, country)]
+
+  DurD_wmean_hist_plot <- ggplot(hydrohist_wmean_yr[year %in% seq(1960, 2022),], 
+                            aes(x=year, color=country)) +
+    geom_line(aes(y=DurD_wmean_smooth, group=country),
+              linewidth=1.2, alpha=1) +
+    scale_y_continuous(name="Length-weighted intermittence (10-yr smooth)",
+                       labels = scales::label_percent()) +
+    scale_color_manual(name='Country', values=color_vec) +
+    coord_cartesian(expand=F) +
+    theme_classic() +
+    theme(legend.position = 'none',
+          text=element_text(size=14)) 
+  
+  per_npr_hist_plot <- ggplot(hydrohist_wmean_yr[year %in% seq(1960, 2021),], 
+                               aes(x=year, color=country))+
+    geom_line(aes(y=per_npr, group=country),
+              linewidth=1.2, alpha=0.8) +
+        scale_y_continuous(name="Percent non-perennial network length",
+                       labels = scales::label_percent()) +
+        geom_point(data=hydrocon_wmean_samp,
+               aes(x=2021, y=per_npr_samp), size=5) +
+    scale_color_manual(name='Country', values=color_vec) +
+    theme_classic() +
+    theme(legend.position = 'none',
+          text=element_text(size=14)) 
+  
+  ##############################################################################
+  #Plot intermittence statistics from CC model forced with GCMs from 1990 to 2100
+  hydroproj_dt <- rbindlist(in_hydrocon_proj)[scenario=='ssp585',] %>%
+    merge(in_ssn_eu_summarized[[1]]$ssn$edges,
+          by.x=c('reach_id', 'country'), by.y=c('cat', 'country'))
+  
+  npr_reaches <- hydroproj_dt[, !all(DurD_yr==0, na.rm=T), by=reach_id] %>%
+    .[(V1), reach_id]
+  
+  #Compute the length-weighted mean dry duration and percentage non-perennial length
+  #by year for 1990-2100 (i.e., not based on GCM outputs)
+  hydroproj_wmean_yr <- hydroproj_dt[
+    , list(DurD_wmean = weighted.mean(DurD_yr, length_m),
+           per_npr = weighted.mean(DurD_yr>0, length_m)),
+    by=.(country, year, gcm)] %>%
+    setorderv(c('country', 'gcm', 'year')) %>%
+    .[, list(
+      DurD_wmean_smooth = frollmean(DurD_wmean, n=year_smooth, 
+                                    align="center", na.rm=T),
+      per_npr_smooth = frollmean(per_npr, n=year_smooth,
+                                 align="center", na.rm=T),
+      year = year
+    ),
+    by=.(country, gcm)] %>%
+    merge(in_drn_dt, by='country')  %>%
+    .[, country := factor(
+      country,
+      levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain" ),
+      ordered=T)
+    ]
+  
+  #Compute the yearly median and min-max across GCMs of the
+  #length-weighted mean dry duration and percentage non-perennial length
+  #for 1990-2100 (i.e., not based on GCM outputs)
+  hydroproj_wmean_yr_stats <-  hydroproj_wmean_yr[
+    , list(DurD_wmean_smooth_median = median(DurD_wmean_smooth),
+           per_npr_smooth_median = median(per_npr_smooth),
+           DurD_wmean_smooth_min = min(DurD_wmean_smooth),
+           per_npr_smooth_min = min(per_npr_smooth),
+           DurD_wmean_smooth_max = max(DurD_wmean_smooth),
+           per_npr_smooth_max = max(per_npr_smooth)
+    ),
+    by=.(country, year)] %>%
+    .[, future := year>=2021]
+  
+  DurD_wmean_proj_plot <- ggplot(hydroproj_durd_yr, 
+         aes(x=year, color=country)) +
+    geom_ribbon(data=hydroproj_wmean_yr_stats, 
+                aes(ymin=DurD_wmean_smooth_min, ymax=DurD_wmean_smooth_max,
+                    fill=country), 
+                linewidth=NA, alpha=0.2) +
+    # geom_line(aes(y=DurD_wmean_smooth, group=interaction(country, gcm)),
+    #           linewidth=1.2, alpha=0.25) +
+    geom_line(data=hydroproj_wmean_yr_stats, 
+              aes(y=DurD_wmean_smooth_median, alpha=future, group=country), 
+              linewidth=1.5) + #alpha=1
+    # geom_point(data=hydrocon_wmean_samp,
+    #            aes(x=2021, y=DurD_samp_wmean), size=5) +
+    geom_vline(xintercept=2021, color='darkgrey') +
+    scale_y_continuous(name="Length-weighted intermittence (10-yr smooth)",
+                       labels = scales::label_percent()) +
+    scale_color_manual(name='Country', values=color_vec) +
+    scale_fill_manual(name='Country', values=color_vec) +
+    scale_alpha_manual(values=c(1, 0.5)) +
+    theme_classic() +
+    theme(legend.position = 'none',
+          text=element_text(size=14)) 
+
+  per_npr_proj_plot <- ggplot(hydroproj_durd_yr, 
+         aes(x=year, color=country)) +
+    geom_ribbon(data=hydroproj_wmean_yr_stats, 
+                aes(ymin=per_npr_smooth_min, ymax=per_npr_smooth_max,
+                    fill=country), 
+                linewidth=NA, alpha=0.2) +
+    # geom_line(aes(y=per_npr_smooth, group=interaction(country, gcm)),
+    #           linewidth=1.2, alpha=0.25) +
+    geom_line(data=hydroproj_wmean_yr_stats, 
+              aes(y=per_npr_smooth_median, alpha=future, group=country), 
+              linewidth=1.5) + #alpha=1
+    geom_vline(xintercept=2021, color='darkgrey') +
+    # geom_point(data=hydrocon_wmean_samp,
+    #            aes(x=2021, y=per_npr_samp), size=5) +
+    scale_y_continuous(name="Percent non-perennial network length (10-yr smooth)",
+                       labels = scales::label_percent()) +
+    scale_color_manual(name='Country', values=color_vec) +
+    scale_fill_manual(name='Country', values=color_vec) +
+    scale_alpha_manual(values=c(0.8, 0.4)) +
+    theme_classic() +
+    theme(legend.position = 'none',
+          text=element_text(size=14)) 
+  
+  #Export plots
+  ggsave(file.path(outdir, 'timeseries_DurD_wmean_hist.png'),
+         DurD_wmean_hist_plot,
+         width = 6, height = 6, dpi=300)
+  ggsave(file.path(outdir, 'timeseries_per_npr_hist.png'),
+         per_npr_hist_plot,
+         width = 6, height = 6, dpi=300)
+  ggsave(file.path(outdir, 'timeseries_DurD_wmean_smooth_proj.png'),
+         DurD_wmean_proj_plot,
+         width = 6, height = 6, dpi=300)
+  ggsave(file.path(outdir, 'timeseries_DurD_wmean_smooth_proj.png'),
+         per_npr_proj_plot,
+         width = 6, height = 6, dpi=300)
+  
+  return(list(
+    DurD_wmean_hist = DurD_wmean_hist_plot,
+    per_npr_hist = per_npr_hist_plot,
+    DurD_wmean_smooth_proj = DurD_wmean_proj_plot,
+    per_npr_smooth_proj = per_npr_proj_plot
+  ))
+}
+
 #------ plot_hydrocon_summarized -----------------------------------------------
 # in_allvars_summarized <- tar_read(allvars_summarized)
 # in_drn_dt <- drn_dt
@@ -8439,9 +8640,9 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
            width = 6, height = 6, dpi=300)
   }
   
-  #Ordinate  -------------------------------------------------------------------
-  pca_subcols <-  c("DurD3650past", "FreD3650past", "DurD_CV30yrpast", 
-                    "FreD_CV30yrpast", "meanConD_CV30yrpast",
+  #Ordinate annual stats  ------------------------------------------------------
+  pca_subcols <-  c("DurD_samp", "FreD_samp","meanConD_yr", "FstDrE",
+                    "DurD_CV30yrpast", "FreD_CV30yrpast", 
                     "sd6_30yrpast",  
                     "Fdist_mean_10past_undirected_avg_samp")
   
@@ -8449,29 +8650,36 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
   
   hydro_pca <- trans_pca_wrapper(
     in_dt = in_allvars_summarized$dt[
-      (DurD3650past>0) & !duplicated(site) & site != 'BUT08',], 
+      (DurD_samp>0) & !duplicated(site) & site != 'BUT08',], 
     in_cols_to_ordinate =  pca_subcols, 
     id_cols = intersect(names(in_allvars_summarized$dt), metacols), 
     group_cols = NULL, 
     num_pca_axes = 4)
   
+  summary(hydro_pca$pca) #Include % variance
+  
   loadings <- hydro_pca$pca$rotation
   
-  ggplot(hydro_pca$dt, aes(x=env_PC1, y=env_PC2)) +
-    geom_point(aes(color=country), size=4) +
-    stat_ellipse(aes(fill=country), geom = "polygon", alpha=0.3, type='t') +
-    geom_segment(data = loadings, 
-                 aes(x = 0, y = 0, xend = PC1*5, yend = PC2*5),
-                 arrow = arrow(length = unit(0.2, "cm")), color = "red") +
-    geom_text(data = loadings, 
-              aes(x = PC1*5, y = PC2*5, label = rownames(loadings)),
-              color = "red", vjust = -0.5) +
+  hydrocon_pca_plot <- ggplot(hydro_pca$dt, aes(x=env_PC1, y=env_PC2)) +
+    geom_mark_hull(aes(fill = country, color=country, 
+                       label = country), 
+                   alpha=0.2, concavity=7, linetype=0,
+                   label.fill = "inherit", label.colour = "inherit", label.buffer = unit(0, 'mm'),
+                   con.type = 'none', expand=unit(2, 'mm')) +
+    geom_point(aes(color=country), size=4, alpha=0.7) +
+    # stat_ellipse(aes(fill=country), geom = "polygon", alpha=0.2, type='t') +
+    # geom_segment(data = loadings,
+    #              aes(x = 0, y = 0, xend = PC1*5, yend = PC2*5),
+    #              arrow = arrow(length = unit(0.2, "cm")), color = "black") +
+    # geom_text(data = loadings,
+    #           aes(x = PC1*5, y = PC2*5, label = rownames(loadings)),
+    #           color = "black", vjust = -0.5) +
+    labs(x='PC1', y='PC2') +
     scale_color_manual(name='Country', values=color_vec) +
     scale_fill_manual(name='Country', values=color_vec) +
-    theme_classic()
+    theme_classic() +
+    theme(legend.position = 'none')
   
-
-
   #Export statistics for subset of variables  ----------------------------------
   out_tab_path <- file.path(outdir, 'hydrocon_summarized.csv')
   if (!file.exists(out_tab_path)) {
