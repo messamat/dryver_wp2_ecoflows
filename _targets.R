@@ -27,12 +27,24 @@ targets::tar_option_set(format = "qs",
 metacols <- c('campaign', 'site', 'running_id', 'country', 'date',
               'summa_sample', 'sample.id', 'sample_id', 'organism')
 
+################################################################################################## TO REPLACE WITH THE ONE BELOW (keep original name)
 drn_dt <- data.table(
   country = c("Croatia", "Czechia", "Finland", "France",  "Hungary", "Spain"),
   catchment = c("Butiznica", "Velicka", "Lepsamaanjoki", "Albarine", "Bukkosdi", "Genal"),
   color = c("#8c510a", "#bf812d", "#01665e", "#80cdc1", "#8073ac", "#543005")
 )
 
+drn_names <- river_names <- c("Lepsämänjoki (FI)", "Albarine (FR)", "Bükkösdi-víz (HU)",
+                              "Velička (CZ)", "Butižnica (HR)", "Genal (SP)")
+
+drn_dt_format <- data.table(
+  country = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain"),
+  catchment = c("Lepsamaanjoki", "Albarine", "Bukkosdi", "Velicka","Butiznica", "Genal"),
+  drn_format = factor(drn_names, levels=drn_names, ordered = TRUE),
+  color = c( "#01665e", "#80cdc1", "#8073ac", "#bf812d", "#8c510a", "#543005")
+)
+
+  
 hydro_combi <- expand.grid(
   in_country = drn_dt$country,
   in_varname =  c('isflowing', 'qsim'),
@@ -830,7 +842,7 @@ formatting_targets <- list(
   ,
   
   ##############################################################################
-  # EXPLORE DATA
+  ### EXPLORE DATA #############################################################
   ##############################################################################
   #All organisms: max 12
   tar_target(
@@ -892,9 +904,20 @@ formatting_targets <- list(
   ,
   
   tar_target(
+    hydrocon_histproj_plots,
+    plot_hydrocon_histproj(in_hydrocon_proj = hydrocon_sites_proj_gcm,
+                           in_hydromod_comb_hist = hydromod_comb_hist,
+                           in_ssn_eu_summarized = ssn_eu_summarized,
+                           in_drn_dt = drn_dt_format,
+                           year_smooth = 3,
+                           outdir = figdir)
+  )
+  ,
+  
+  tar_target(
     hydrocon_summarized_plot,
     plot_hydrocon_summarized(in_allvars_summarized = allvars_summarized,
-                             in_drn_dt = drn_dt, 
+                             in_drn_dt = drn_dt_format, 
                              in_hydro_vars_dt = hydro_vars_dt, 
                              outdir = figdir)
   )
@@ -989,7 +1012,7 @@ formatting_targets <- list(
   ),
   
   ##############################################################################
-  # MODEL SITES x DATE
+  ### MODEL SITES x DATE ######################################################
   ##############################################################################
   #Ordinate local environmental variables to use axes in regression models
   tar_target(
@@ -1396,7 +1419,7 @@ temporal_analysis_targets <- list(
 )
 
 ##############################################################################
-# MODEL SITES SUMMARIZED
+### MODEL SITES SUMMARIZED ###################################################
 ##############################################################################
 
 annual_analysis_targets <- list(   
@@ -1592,7 +1615,6 @@ annual_analysis_targets <- list(
   
   tar_target(
     ssn_mod_yr_perf_multiorganism,
-    -
     get_perf_table_multiorganism(in_mod_list=ssn_mod_yr_fit_multiorganism)
   )
   
@@ -1606,19 +1628,28 @@ annual_analysis_targets <- list(
         return(NULL)
       }
       
-      var_label  <- ifelse(str_split_1(mod_name, '_')[2] == 'richness',
+      var_label  <- ifelse(tail(str_split_1(mod_name, '_'), 1) == 'richness',
                            'Mean richness', 
                            'Inverse simpson index'
       )
       
       plot_ssn_mod_diagplot(in_mod_fit = ssn_mod_yr_fit_multiorganism[[mod_name]],
                             in_drn_dt = drn_dt,
+                            in_organism_dt = organism_dt,
                             in_hydro_vars_dt = hydro_vars_dt,
                             write_plots=T,
                             response_var_label = var_label,
                             plot_path_prefix = mod_name,
                             out_dir = figdir) 
-    })
+    }) %>% setNames(names(ssn_mod_yr_fit_multiorganism))
+  )
+  ,
+  
+  tar_target(
+    diagplots_mosaic,
+    mosaic_mod_yr_diaplots(
+      in_ssn_mod_yr_diagplot_multiorganism = ssn_mod_yr_diagplot_multiorganism,
+      out_dir = figdir)
   )
   ,
   
