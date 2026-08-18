@@ -34,7 +34,7 @@ pkg_vec <- list(
   'plotly',
   'predictmeans',
   'purrr',
-  'qs',
+  'qs2',
   'readxl',
   'reshape2',
   'Rfast',

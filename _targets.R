@@ -53,10 +53,10 @@ hydro_combi <- expand.grid(
 if (!interactive()) {
   perf_ratio <- 0.4 #Set how much you want to push your computer (% of cores and RAM)
   nthreads <- round(parallel::detectCores(logical=F)*perf_ratio)
-  future::plan("future::multisession", workers=nthreads)
+  #future::plan("future::multisession", workers=nthreads)
   total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
   options(future.globals.maxSize = perf_ratio*total_ram)
-  # tar_option_set(controller = crew_controller_local(workers = nthreads)) #Set up parallel computing in targets
+  tar_option_set(controller = crew_controller_local(workers = nthreads)) #Set up parallel computing in targets
 }
 
 #--------------------------  Define targets plan -------------------------------
@@ -194,8 +194,6 @@ preformatting_targets <- list(
     #Reach that flows to 0 is outlet in Spain and Croatia
   ),
   
-  
-  
   #Read local environmental data
   tar_target(
     env_dt,
@@ -203,7 +201,7 @@ preformatting_targets <- list(
                in_env_data_path_common = env_data_path_common)
   ),
   
-  #Read and correct river site names 
+  #Read and correct river site names and associated reach_ids
   tar_target(
     sites_dt,
     hydromod_paths_dt[, format_site_dt(in_path = sites_reachids, 
@@ -951,6 +949,15 @@ formatting_targets <- list(
   )
   ,
   
+  tar_target(
+    richness_vs_flowstate_plot,
+    plot_flow_state_richness(in_allvars_sites = allvars_sites,
+                             in_drn_dt = drn_dt, 
+                             in_organism_dt = organism_dt, 
+                             out_dir = figdir)
+  )
+  ,
+  
   #For sites x dates: Create matrices of correlations between predictors and responses, and among predictors
   tar_target(
     cor_matrices_list,
@@ -990,6 +997,8 @@ formatting_targets <- list(
                       p_threshold = 0.05)
   )
   ,
+  
+  
   
   #Check whether diversity is related to habitat volumne (for miv and biofilm)
   #-> No, good
@@ -1416,6 +1425,15 @@ temporal_analysis_targets <- list(
     write_plot = T,
     out_dir = figdir)
   )
+  # ,
+  # 
+  # tar_target(
+  #   summary_table_multiorganism_richness,
+  #   get_multiorganism_summary_table(
+  #     emtrends_dt = emtrends_multiorganism_richness$dt,
+  #     varcomp_dt = varcomp_multiorganism_richness$dt
+  #   )
+  # )
 )
 
 ##############################################################################
@@ -1615,7 +1633,7 @@ annual_analysis_targets <- list(
   
   tar_target(
     ssn_mod_yr_perf_multiorganism,
-    get_perf_table_multiorganism(in_mod_list=ssn_mod_yr_fit_multiorganism)
+    get_perf_table_modyr_multiorganism(in_mod_list=ssn_mod_yr_fit_multiorganism)
   )
   
   ,
@@ -1647,7 +1665,7 @@ annual_analysis_targets <- list(
   
   tar_target(
     diagplots_mosaic,
-    mosaic_mod_yr_diaplots(
+    mosaic_mod_yr_diagplots(
       in_ssn_mod_yr_diagplot_multiorganism = ssn_mod_yr_diagplot_multiorganism,
       out_dir = figdir)
   )
