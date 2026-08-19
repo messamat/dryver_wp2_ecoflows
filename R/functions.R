@@ -7993,6 +7993,7 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
                                   family = "Gaussian",
                                   estmethod = "ml",
                                   standardize_hydro_var = T,
+                                  test_parabolic = F,
                                   include_state_of_flow = F,
                                   include_seasonality = F) {
   
@@ -8013,6 +8014,14 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
                            hydro_var, ':country +', formula_root)
   } else {
     full_formula <- paste0(response_var, ' ~ ', formula_root)
+  }
+  
+  if (test_parabolic) {
+    para_var <- paste0('I(', hydro_var, '^2)')
+    
+    full_formula <- paste0(full_formula, ' + ',
+                          para_var, ' + ',
+                          para_var, ':country')
   }
   
   if (include_seasonality) {
@@ -9373,25 +9382,133 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
   
 }
 
-#------ get_multiorganism_summary_table ----------------------------------------
+#------ get_hydrowindown_multiorganism_summary ----------------------------------------
 # emtrends_dt <- tar_read(emtrends_multiorganism_richness)$dt
 # varcomp_dt <- tar_read(varcomp_multiorganism_richness)$dt
+# out_dir = figdir
 
-get_multiorganism_summary_table <- function(emtrends_dt,
-                                            varcomp_dt) {
-
+get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
+                                                   varcomp_dt,
+                                                   out_dir,
+                                                   write_plot=TRUE) {
+  
+  #Get overall model details and variance decomposition in wide format
+  #(a column for each source of variance)
   varcomp_cast <- data.table::dcast(
     varcomp_dt, 
     formula = (organism_class + organism_sub + organism_label
-               + hydro_class + hydro_label + covtypes + window_d
+               + hydro_class + hydro_label + covtypes + window_d + marginal_fixedR2
                ~varcomp), 
     value.var = 'proportion')
   
-  emtrends_dt
+  #Count the number of countries with sig negative, non-sig, and sig positive trends for each model
+  emtrends_dt[, sigsign := (sign(trend)*(p_value<=0.1))]
+  emtrends_signcount <- emtrends_dt[, .N, by=.(organism_label, hydro_label, sigsign)] %>%
+    dcast(organism_label+hydro_label ~ sigsign, value.var='N') 
+  emtrends_signcount[, (names(.SD)) := lapply(.SD, function(x) fifelse(is.na(x), 0, x)),
+                     .SDcols = is.numeric]  
+  
+  
+  #Assign trend distribution category
+  #All something: Only applies if there are no non-significant (0) counts and all counts are either positive or negative.
+  #Mostly something: Applies if the majority of counts are positive or negative and the non-significant
+  #Slight positive or negative: if three of the sign and no of the other sign
+  #Mixed: if values across all signs and none more than 3
+  emtrends_signcount[, category :=
+              case_when(
+                `1` == 6 ~ "all positive (6/6)",
+                `-1`== 6 ~ "all negative (6/6)",
+                `0` == 6 ~ "all non-significant (6/6)",
+                `1` > 3 ~ "mostly positive (>3/6)",
+                `-1`> 3 ~ "mostly negative (>3/6)",
+                `0` > 3 ~ "mostly non-significant (>3/6)",
+                `-1`==0 & `1`==3 ~ "slightly positive (3/6 and no negative)",
+                `1`==0 & `-1`==3 ~ "slightly negative (3/6 and no positive)",
+                .default = 'mixed'
+              )
+  ]
+  
+  emtrends_signcount[, category := factor(
+    category,
+    levels=c('all negative (6/6)', 
+             'mostly negative (>3/6)', 
+             'slightly negative (3/6 and no positive)',
+             'mixed', 
+             'mostly non-significant (>3/6)', 
+             'all non-significant (6/6)',
+             'slightly positive (3/6 and no negative)', 
+             "mostly positive (>3/6)",
+             "all positive (6/6)")
+  )]
+
+  varcomp_emtrends_merge <- merge(varcomp_cast,
+                                  emtrends_signcount,
+                                  by=c('organism_label', 'hydro_label')
+  )
+  
+
+  
+  #Make a plot ------------
+  varcomp_emtrends_merge[,organism_sub := 
+                           case_when(
+                             organism_sub == 'Sediment' ~ 'Sedi',
+                             organism_sub == 'Biofilm'~ 'Biof',
+                             .default = organism_sub
+                           )]
+  
+  summary_plot <- ggplot(varcomp_emtrends_merge, aes(x=organism_sub, y=hydro_label)) +
+    geom_point(aes(color=category, size=marginal_fixedR2)) +
+    labs(x='Organism', y='Hydrological predictor by category') +
+    scale_color_manual(
+      name='Estimated effect across DRNs',
+      values=c(  
+        '#2166ac', '#4393c3', '#92c5de',
+        '#f7f7f7', '#bababa',  '#878787',
+      '#f4a582',  '#d6604d', '#b2182b')) +
+    scale_size_continuous(name='Marginal Explained Variance (%)',
+                          breaks = c(0.01, 0.05, 0.1, 0.16), 
+                          labels = scales::label_percent()
+                          ) +
+    facet_grid(hydro_class~organism_class, 
+               scales = "free", space = "free", switch='both', shrink=T) 
   
   #Output table
-
+  out_tab <- file.path(out_dir, 
+                       paste0(
+                         "ssn_hydrowindow_varcomp_emtrends_multiorganism_summary", 
+                         "_",
+                         format(Sys.Date(), "%Y%m%d"), 
+                         ".csv"
+                       )
+  )
+  fwrite(varcomp_emtrends_merge, out_tab)
+  
+  if (write_plot & !is.null(out_dir)) {
+    ggsave(
+      filename = file.path(
+        out_dir, 
+        paste0(
+          "ssn_hydrowindow_varcomp_emtrends_multiorganism_summary", 
+          "_",
+          format(Sys.Date(), "%Y%m%d"), 
+          ".png"
+        )),
+      plot = summary_plot,
+      width = 10,
+      height = 10,
+      units='in',
+      dpi=600
+    )
+  }
+  
+  
+  return(list(
+    dt=varcomp_emtrends_merge,
+    plot=summary_plot
+    )
+  )
 }
+
 
 #------ model_miv_richness_yr -----------------------------------------------------------
 # in_allvars_summarized <- tar_read(allvars_summarized)

@@ -51,7 +51,7 @@ hydro_combi <- expand.grid(
   stringsAsFactors = FALSE)
 
 if (!interactive()) {
-  perf_ratio <- 0.4 #Set how much you want to push your computer (% of cores and RAM)
+  perf_ratio <- 0.3 #Set how much you want to push your computer (% of cores and RAM)
   nthreads <- round(parallel::detectCores(logical=F)*perf_ratio)
   #future::plan("future::multisession", workers=nthreads)
   total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
@@ -1134,6 +1134,7 @@ temporal_analysis_targets <- list(
             organism = org,
             response_var = div_index,
             hydro_var = NULL,
+            test_parabolic = F,
             covtypes = covtypes_by_organism[organism==org,]$covtypes[[1]]
           )
           
@@ -1143,8 +1144,16 @@ temporal_analysis_targets <- list(
               organism = org,
               response_var = div_index,
               hydro_var = hv,
+              test_parabolic = F,
               covtypes = covtypes_by_organism[organism==org,]$covtypes[[1]]
             )
+            
+            #Add test for parabolic relationship for fungi and bacteria
+            if (str_sub(org, 1, 3) %in% c('fun', 'bac')) {
+              model_setup_list[[length(model_setup_list) + 1]] <- 
+                model_setup_list[[length(model_setup_list)]]
+              model_setup_list[[length(model_setup_list)]]$test_parabolic <- T
+            }
           }
         }
       }
@@ -1182,10 +1191,15 @@ temporal_analysis_targets <- list(
             in_ssn = ssn_eu,
             organism = in_organism,
             formula_root = "log10(basin_area_km2) + log10(basin_area_km2):country",
+            partition_formula = as.formula("~ as.factor(campaign)"),
+            random_formula = as.formula("~ country"),
             hydro_var = model_setup$hydro_var,
             response_var = in_response_var,
             ssn_covtypes = ssn_covtypes[label %in% model_setup$covtypes, ],
             family = "Gaussian",
+            estmethod = "ml",
+            standardize_hydro_var = T,
+            test_parabolic = model_setup$test_parabolic,
             include_state_of_flow = !(str_split_1(in_organism, '_')[1] == 'miv'), #Include state of flow if microbes
             include_seasonality = FALSE
           )
@@ -1425,15 +1439,15 @@ temporal_analysis_targets <- list(
     write_plot = T,
     out_dir = figdir)
   )
-  # ,
-  # 
-  # tar_target(
-  #   summary_table_multiorganism_richness,
-  #   get_multiorganism_summary_table(
-  #     emtrends_dt = emtrends_multiorganism_richness$dt,
-  #     varcomp_dt = varcomp_multiorganism_richness$dt
-  #   )
-  # )
+  ,
+
+  tar_target(
+    summary_table_multiorganism_richness,
+    get_multiorganism_summary_table(
+      emtrends_dt = emtrends_multiorganism_richness$dt,
+      varcomp_dt = varcomp_multiorganism_richness$dt
+    )
+  )
 )
 
 ##############################################################################
