@@ -8371,7 +8371,7 @@ get_hydrowindow_varcomp <- function(perf_dt, nrow_pag = 2, ncol_pag = 3) {
 #'
 #' @return A `data.table` and plots of estimated marginal means across predictors.
 #' @export
-get_hydrowindow_emmeans <- function(best_dt, in_hydro_vars_dt, in_drn_dt) {
+get_hydrowindow_emmeans <- function(best_dt, in_hydro_vars_dt, in_drn_dt, plot=T) {
   
   emmeans_dt_all <- lapply(best_dt$hydro_var, function(in_pred_var) {
     in_mod <- best_dt[hydro_var == in_pred_var, mod][[1]]
@@ -8398,17 +8398,20 @@ get_hydrowindow_emmeans <- function(best_dt, in_hydro_vars_dt, in_drn_dt) {
                            .(hydro_var_root, hydro_class)], 
           by='hydro_var_root')
   
-  
-  emmeans_plot <- get_ssn_emmeans(in_emm_dt = emmeans_dt_all, 
-                                  interaction_var='country', plot=T)$plot +
-    facet_wrap(~ hydro_class + str_wrap(pred_var_label, 30),
-               ncol = 4,
-               labeller = function (labels) {
-                 labels <- lapply(labels, as.character)
-                 list(do.call(paste, c(labels, list(sep = "\n"))))
-               }, 
-               scales='free')
-  
+  if (plot) {
+    emmeans_plot <- get_ssn_emmeans(in_emm_dt = emmeans_dt_all, 
+                                    interaction_var='country', plot=T)$plot +
+      facet_wrap(~ hydro_class + str_wrap(pred_var_label, 30),
+                 ncol = 4,
+                 labeller = function (labels) {
+                   labels <- lapply(labels, as.character)
+                   list(do.call(paste, c(labels, list(sep = "\n"))))
+                 }, 
+                 scales='free')
+  } else {
+    emmeans_plot <- NULL
+  }
+
   return(list(
     dt=emmeans_dt_all,
     plot=emmeans_plot
@@ -8430,7 +8433,7 @@ get_hydrowindow_emmeans <- function(best_dt, in_hydro_vars_dt, in_drn_dt) {
 #'
 #' @return A `data.table` and plots of estimated slopes across predictors.
 #' @export
-get_hydrowindow_emtrends <- function(best_dt, in_hydro_vars_dt, in_drn_dt) {
+get_hydrowindow_emtrends <- function(best_dt, in_hydro_vars_dt, in_drn_dt, plot) {
   
   emtrends_dt_all <- lapply(best_dt$hydro_var, function(in_pred_var) {
     print(in_pred_var)
@@ -8461,14 +8464,19 @@ get_hydrowindow_emtrends <- function(best_dt, in_hydro_vars_dt, in_drn_dt) {
     ucl_capped = fifelse(asymp.UCL > max(trend), max(trend), asymp.UCL)
   ), by=response_var]
   
-  emtrends_plot <- get_ssn_emtrends(in_emtrends_dt = emtrends_dt_all, 
-                                    interaction_var='country', plot=T)$plot +
-    facet_wrap(~ hydro_class + str_wrap(pred_var_label, 30),
-               ncol = 4,
-               labeller = function (labels) {
-                 labels <- lapply(labels, as.character)
-                 list(do.call(paste, c(labels, list(sep = "\n"))))
-               })
+  if (plot) {
+    emtrends_plot <- get_ssn_emtrends(in_emtrends_dt = emtrends_dt_all, 
+                                      interaction_var='country', plot=T)$plot +
+      facet_wrap(~ hydro_class + str_wrap(pred_var_label, 30),
+                 ncol = 4,
+                 labeller = function (labels) {
+                   labels <- lapply(labels, as.character)
+                   list(do.call(paste, c(labels, list(sep = "\n"))))
+                 })
+  } else {
+    emtrends_plot <- NULL
+  }
+
   
   return(list(
     dt=emtrends_dt_all,
@@ -9262,6 +9270,7 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
     merge(in_hydrowindow_best_intercept_dt[, .(hydro_var_root, organism, intercept)], 
           by=c('hydro_var_root', 'organism')) %>%
     .[, `:=`(trend_rel = trend/abs(intercept),
+             SE_rel = SE/abs(intercept),
              lcl_rel = asymp.LCL/abs(intercept),
              ucl_rel = asymp.UCL/abs(intercept)
     )] 
@@ -9286,70 +9295,73 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
   
   response_var <- unique(emtrends_all$response_var)
   
-  color_vec <- emtrends_all[!duplicated(country),
-                            setNames(color, country)]
-  
-  #Plot trend coefficients
-  emtrends_plot <- ggplot(emtrends_all, aes(x = organism_class, 
-                                            y = trend_rel,
-                                            group = organism_label)) +
-    geom_pointrange(aes(ymin = lcl_rel_capped, ymax = ucl_rel_capped, color= country),
-                    alpha=0.5, fatten=2.5, linewidth=0.5, position = position_dodge(0.5)) +
-    geom_hline(yintercept=0, linetype=2) +
-    geom_text(aes(y=Inf, hjust=0.1,
-                  label=paste(window_d, h_unit)), 
-              position = position_dodge(width = .7), size=2, color="darkgrey") +
-    scale_color_manual(name='Country',
-                       values=color_vec) +
-    labs(y = paste("Estimated slope of", response_var),
-         x = 'Organism') +
-    coord_flip(clip='off') +
-    facet_wrap(~ hydro_class + str_wrap(hydro_label, 35), 
-               ncol = 4, 
-               labeller = function (labels) {
-                 labels <- lapply(labels, as.character)
-                 list(do.call(paste, c(labels, list(sep = "\n"))))
-               },
-               scales='free_x') +
-    theme_minimal() +
-    theme(
-      text = element_text(size=9),
-      axis.title.y = element_blank(),
-      # panel.grid.minor = element_blank(),
-      # panel.grid.major = element_blank(),
-      strip.text = element_text(margin = margin(t = 0, b = 0),
-                                hjust=0), # shrink text padding
-      panel.spacing = unit(1.5, "lines"),        # space between facets
-      plot.margin = margin(l=10, t=0, r=20, b=0),
-      legend.box.margin = margin(l = 20, t = 0, r = 0, b = 0)
-    ) 
-  
-  
-  #Subset variables
-  if (subset_variables) {
-    emtrends_sub <- emtrends_all[hydro_var_root %in% 
-                                   c('maxConD', 'FreD', 'Fdist_mean_undirected',
-                                     'STcon_undirected', 'DurD_CV', 'FstDrE', 
-                                     'sd6', 'oQ10'),]
+  if (write_plot) {
+    color_vec <- emtrends_all[!duplicated(country),
+                              setNames(color, country)]
     
-    emtrends_plot_sub <- emtrends_plot + emtrends_sub +
+    #Plot trend coefficients
+    emtrends_plot <- ggplot(emtrends_all, aes(x = organism_class, 
+                                              y = trend_rel,
+                                              group = organism_label)) +
+      geom_pointrange(aes(ymin = lcl_rel_capped, ymax = ucl_rel_capped, color= country),
+                      alpha=0.5, fatten=2.5, linewidth=0.5, position = position_dodge(0.5)) +
+      geom_hline(yintercept=0, linetype=2) +
+      geom_text(aes(y=Inf, hjust=0.1,
+                    label=paste(window_d, h_unit)), 
+                position = position_dodge(width = .7), size=2, color="darkgrey") +
+      scale_color_manual(name='Country',
+                         values=color_vec) +
+      labs(y = paste("Estimated slope of", response_var),
+           x = 'Organism') +
+      coord_flip(clip='off') +
+      facet_wrap(~ hydro_class + str_wrap(hydro_label, 35), 
+                 ncol = 4, 
+                 labeller = function (labels) {
+                   labels <- lapply(labels, as.character)
+                   list(do.call(paste, c(labels, list(sep = "\n"))))
+                 },
+                 scales='free_x') +
+      theme_minimal() +
       theme(
         text = element_text(size=9),
         axis.title.y = element_blank(),
-        axis.text.y = element_blank(),
         # panel.grid.minor = element_blank(),
         # panel.grid.major = element_blank(),
-        panel.grid = element_blank(),
-        strip.text = element_text(margin = margin(t = 0, b = 0)), # shrink text padding
+        strip.text = element_text(margin = margin(t = 0, b = 0),
+                                  hjust=0), # shrink text padding
         panel.spacing = unit(1.5, "lines"),        # space between facets
         plot.margin = margin(l=10, t=0, r=20, b=0),
-        legend.position = 'bottom',
         legend.box.margin = margin(l = 20, t = 0, r = 0, b = 0)
       ) 
-    
+  
+    #Subset variables
+    if (subset_variables) {
+      emtrends_sub <- emtrends_all[hydro_var_root %in% 
+                                     c('maxConD', 'FreD', 'Fdist_mean_undirected',
+                                       'STcon_undirected', 'DurD_CV', 'FstDrE', 
+                                       'sd6', 'oQ10'),]
+      
+      emtrends_plot_sub <- emtrends_plot + emtrends_sub +
+        theme(
+          text = element_text(size=9),
+          axis.title.y = element_blank(),
+          axis.text.y = element_blank(),
+          # panel.grid.minor = element_blank(),
+          # panel.grid.major = element_blank(),
+          panel.grid = element_blank(),
+          strip.text = element_text(margin = margin(t = 0, b = 0)), # shrink text padding
+          panel.spacing = unit(1.5, "lines"),        # space between facets
+          plot.margin = margin(l=10, t=0, r=20, b=0),
+          legend.position = 'bottom',
+          legend.box.margin = margin(l = 20, t = 0, r = 0, b = 0)
+        ) 
+      
+    }
+  } else {
+    emtrends_plot=NULL
   }
-  
-  
+    
+    
   if (write_plot && !is.null(out_dir)) {
     out_path <- file.path(
       out_dir,
@@ -9508,6 +9520,163 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
     )
   )
 }
+
+
+#------ test_biof_vs_sedi_emtrends ---------------------------------------------
+# tar_load(hydro_vars_dt)
+# tar_load(hydro_vars_dt)
+# tar_load(organism_dt)
+# tar_load(hydrowindow_best_richness_intercept_dt)
+# 
+# hydrowindow_perf_tables_fun_sedi <- tar_read(hydrowindow_perf_tables_richness_fun_sedi_nopools)
+# hydrowindow_perf_tables_fun_biof <- tar_read(hydrowindow_perf_tables_richness_fun_biof_nopools)
+# 
+# 
+# emtrends_sedi <- get_hydrowindow_emtrends(
+#   best_dt = hydrowindow_perf_tables_fun_sedi$all,
+#   in_hydro_vars_dt = hydro_vars_dt,
+#   in_drn_dt = drn_dt,
+#   plot=F)
+# emtrends_biof <- get_hydrowindow_emtrends(
+#   best_dt = hydrowindow_perf_tables_fun_biof$all,
+#   in_hydro_vars_dt = hydro_vars_dt,
+#   in_drn_dt = drn_dt,
+#   plot=F)
+# 
+# 
+# emtrends_dt <- plot_emtrends_multiorganisms(
+#   emtrends_list = list(
+#     fun_sedi_nopools=emtrends_sedi$dt,
+#     fun_biof_nopools=emtrends_biof$dt
+#   ),
+#   in_hydrowindow_best_intercept_dt = hydrowindow_best_richness_intercept_dt,
+#   in_hydro_vars_dt = hydro_vars_dt,
+#   in_organism_dt = organism_dt,
+#   in_drn_dt = drn_dt,
+#   write_plot = F,
+#   subset_variables = F,
+#   out_dir = figdir)$dt
+
+# emtrends_dt <- tar_read(emtrends_multiorganism_all_richness)$dt
+
+
+test_biof_vs_sedi_emtrends <- function(emtrends_dt) {
+  emtrends_micro <- emtrends_dt[organism_class %in% c('Diatoms', 'Fungi', 'Bacteria'),]
+  
+  # emtrends_sub <- emtrends_micro[hydro_var_root=='DurD',]
+  # ggplot(emtrends_sub, aes(x=hydro_var, y=trend_rel, color=organism_sub)) +
+  #   geom_violin() +
+  #   geom_point()
+  
+  # Compute the difference (biofilm - sediment) for each country
+  dt_diff <-  emtrends_micro[, .(
+    country, 
+    trend_biofilm = trend_rel[organism_sub == "Biof."],
+    trend_sediment = trend_rel[organism_sub == "Sedi."],
+    SE_biofilm = SE_rel[organism_sub == "Biof."],
+    SE_sediment = SE_rel[organism_sub == "Sedi."]
+  ),
+  by = .(country, organism_class, hydro_var, 
+         hydro_var_root, window_d, hydro_label)]
+  
+  dt_diff[, `:=`(
+    diff = trend_biofilm - trend_sediment,
+    se_diff = sqrt(SE_biofilm^2 + SE_sediment^2)
+  )]
+  
+  # Run meta-analysis model
+  # https://wviechtb.github.io/metafor/reference/rma.uni.html
+  meta_results <- dt_diff[, {
+    m <- rma(yi = diff, sei = se_diff, method = "REML", data = .SD)
+    .(estimate = as.numeric(m$b), se = m$se, zval = m$zval, pval = m$pval,
+      ci.lb = m$ci.lb, ci.ub = m$ci.ub,
+      I2 = m$I2, QE = m$QE, QEp = m$QEp, n_countries = .N)
+  }, by = .(organism_class, hydro_var, hydro_var_root)] 
+  
+  meta_results[, p_adj := p.adjust(pval, method = "fdr"), 
+               by=.(hydro_var_root, organism)]
+  
+  "
+  meta_results table (one row per organism_class × hydro_var):
+  
+  estimate: the pooled biofilm − sediment difference in slope, averaged across 
+            countries (weighted by precision). Positive = the predictor has a 
+            stronger positive (or weaker negative) effect on richness in biofilm 
+            than sediment; negative = the reverse.
+  pval / p_adj: whether that pooled difference is distinguishable from zero. 
+  I2: percentage of the variance in the country-level differences that reflects
+      genuine cross-country heterogeneity, rather than sampling noise. 
+      Low I² (~0-25%) → the substrate effect is fairly consistent across countries,
+      so the pooled estimate is a good summary. High I² (>50-75%) → the substrate 
+      difference varies a lot by country, meaning the pooled average may be masking 
+      opposite effects in different countries
+      — biofilm vs sediment' story isn't universal even if the pooled p-value is significant.
+  QEp: p-value of the Q-test for heterogeneity; a formal (if underpowered with 
+      few countries) test of whether I² is significantly greater than zero.
+  "
+  return(meta_results)
+}
+
+##------  test_country_ranking_emtrends(emtrends_dt=emtrends_multiorganism_all_richness)
+# tar_load(hydro_vars_dt)
+# tar_load(hydro_vars_dt)
+# tar_load(organism_dt)
+# tar_load(hydrowindow_best_richness_intercept_dt)
+# 
+# hydrowindow_perf_tables_fun_sedi <- tar_read(hydrowindow_perf_tables_richness_fun_sedi_nopools)
+# hydrowindow_perf_tables_fun_biof <- tar_read(hydrowindow_perf_tables_richness_fun_biof_nopools)
+# hydrowindow_perf_tables_miv <- tar_read(hydrowindow_perf_tables_richness_fun_sedi_nopools)
+# hydrowindow_perf_tables_dia_sedi <- tar_read(hydrowindow_perf_tables_richness_dia_sedi_nopools)
+# hydrowindow_perf_tables_dia_biof <- tar_read(hydrowindow_perf_tables_richness_dia_biof_nopools)
+# 
+# emtrends_sedi <- get_hydrowindow_emtrends(
+#   best_dt = hydrowindow_perf_tables_fun_sedi$all,
+#   in_hydro_vars_dt = hydro_vars_dt,
+#   in_drn_dt = drn_dt,
+#   plot=F)
+# emtrends_biof <- get_hydrowindow_emtrends(
+#   best_dt = hydrowindow_perf_tables_fun_biof$all,
+#   in_hydro_vars_dt = hydro_vars_dt,
+#   in_drn_dt = drn_dt,
+#   plot=F)
+# emtrends_miv <- get_hydrowindow_emtrends(
+#   best_dt = hydrowindow_perf_tables_miv$all,
+#   in_hydro_vars_dt = hydro_vars_dt,
+#   in_drn_dt = drn_dt,
+#   plot=F)
+# emtrends_dia_sedi <- get_hydrowindow_emtrends(
+#   best_dt = hydrowindow_perf_tables_dia_sedi$all,
+#   in_hydro_vars_dt = hydro_vars_dt,
+#   in_drn_dt = drn_dt,
+#   plot=F)
+# emtrends_dia_biof <- get_hydrowindow_emtrends(
+#   best_dt = hydrowindow_perf_tables_dia_biof$all,
+#   in_hydro_vars_dt = hydro_vars_dt,
+#   in_drn_dt = drn_dt,
+#   plot=F)
+#
+# 
+# 
+# emtrends_dt <- plot_emtrends_multiorganisms(
+#   emtrends_list = list(
+#     fun_sedi_nopools=emtrends_sedi$dt,
+#     fun_biof_nopools=emtrends_biof$dt
+#     dia_sedi_nopools=emtrends_dia_sedi$dt,
+#     dia_biof_nopools=emtrends_dia_biof$dt
+#     miv_nopools=emtrends_miv$dt,
+#   ),
+#   in_hydrowindow_best_intercept_dt = hydrowindow_best_richness_intercept_dt,
+#   in_hydro_vars_dt = hydro_vars_dt,
+#   in_organism_dt = organism_dt,
+#   in_drn_dt = drn_dt,
+#   write_plot = F,
+#   subset_variables = F,
+#   out_dir = figdir)$dt
+# 
+# emtrends_dt <- tar_read(emtrends_multiorganism_all_richness)$dt
+
+
+
 
 
 #------ model_miv_richness_yr -----------------------------------------------------------

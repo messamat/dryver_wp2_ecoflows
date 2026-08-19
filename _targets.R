@@ -1234,7 +1234,7 @@ temporal_analysis_targets <- list(
     ),
     
     tar_target(
-      hydrowindow_varcomp,
+      hydrowindow_varcomp_all,
       get_hydrowindow_varcomp(
         perf_dt = hydrowindow_perf_tables$all,
         nrow_pag = 2,
@@ -1243,7 +1243,7 @@ temporal_analysis_targets <- list(
     ,
     
     tar_target(
-      hydrowindow_emmeans,
+      hydrowindow_emmeans_best,
       get_hydrowindow_emmeans(
         best_dt = hydrowindow_perf_tables$best,
         in_hydro_vars_dt = hydro_vars_dt,
@@ -1252,11 +1252,22 @@ temporal_analysis_targets <- list(
     ,
     
     tar_target(
-      hydrowindow_emtrends,
+      hydrowindow_emtrends_best,
       get_hydrowindow_emtrends(
         best_dt = hydrowindow_perf_tables$best,
         in_hydro_vars_dt = hydro_vars_dt,
-        in_drn_dt = drn_dt)
+        in_drn_dt = drn_dt,
+        plot=T)
+    )
+    ,
+    
+    tar_target(
+      hydrowindow_emtrends_all,
+      get_hydrowindow_emtrends(
+        best_dt = hydrowindow_perf_tables$all,
+        in_hydro_vars_dt = hydro_vars_dt,
+        in_drn_dt = drn_dt,
+        plot=F)
     )
     ,
     
@@ -1288,11 +1299,11 @@ temporal_analysis_targets <- list(
       ssn_div_hydrowindow_plots_paths,
       save_ssn_div_hydrowindow_plots(
         hydrowindow_perf_tables,
-        plot_varcomp = hydrowindow_varcomp,
+        plot_varcomp = hydrowindow_varcomp_all,
         plot_obs_preds = hydrowindow_obs_preds_plot,
         plot_x_preds = hydrowindow_x_preds_plot,
-        plot_emmeans = hydrowindow_emmeans,
-        plot_emtrends = hydrowindow_emtrends,
+        plot_emmeans = hydrowindow_emmeans_best,
+        plot_emtrends = hydrowindow_emtrends_best,
         in_organism = in_organism,
         in_response_var = in_response_var,
         out_dir = figdir)
@@ -1323,15 +1334,15 @@ temporal_analysis_targets <- list(
   tar_target(
     hydrowindow_varcomp_richness_multiorg,
     list(
-      miv_nopools = hydrowindow_varcomp_richness_miv_nopools$dt,
-      miv_nopools_ept = hydrowindow_varcomp_richness_miv_nopools_ept$dt,
-      miv_nopools_och = hydrowindow_varcomp_richness_miv_nopools_och$dt,
-      dia_biof_nopools = hydrowindow_varcomp_richness_dia_biof_nopools$dt,
-      dia_sedi_nopools = hydrowindow_varcomp_richness_dia_sedi_nopools$dt,
-      fun_biof_nopools = hydrowindow_varcomp_richness_fun_biof_nopools$dt,
-      fun_sedi_nopools = hydrowindow_varcomp_richness_fun_sedi_nopools$dt,
-      bac_biof_nopools = hydrowindow_varcomp_richness_bac_biof_nopools$dt,
-      bac_sedi_nopools = hydrowindow_varcomp_richness_bac_sedi_nopools$dt
+      miv_nopools = hydrowindow_varcomp_all_richness_miv_nopools$dt,
+      miv_nopools_ept = hydrowindow_varcomp_all_richness_miv_nopools_ept$dt,
+      miv_nopools_och = hydrowindow_varcomp_all_richness_miv_nopools_och$dt,
+      dia_biof_nopools = hydrowindow_varcomp_all_richness_dia_biof_nopools$dt,
+      dia_sedi_nopools = hydrowindow_varcomp_all_richness_dia_sedi_nopools$dt,
+      fun_biof_nopools = hydrowindow_varcomp_all_richness_fun_biof_nopools$dt,
+      fun_sedi_nopools = hydrowindow_varcomp_all_richness_fun_sedi_nopools$dt,
+      bac_biof_nopools = hydrowindow_varcomp_all_richness_bac_biof_nopools$dt,
+      bac_sedi_nopools = hydrowindow_varcomp_all_richness_bac_sedi_nopools$dt
     ) %>%
       rbindlist(idcol="organism")
   )
@@ -1360,15 +1371,15 @@ temporal_analysis_targets <- list(
   tar_target(
     hydrowindow_varcomp_invsimpson_multiorg,
     list(
-      miv_nopools = hydrowindow_varcomp_invsimpson_miv_nopools$dt,
-      miv_nopools_ept = hydrowindow_varcomp_invsimpson_miv_nopools_ept$dt,
-      miv_nopools_och = hydrowindow_varcomp_invsimpson_miv_nopools_och$dt,
-      dia_biof_nopools = hydrowindow_varcomp_invsimpson_dia_biof_nopools$dt,
-      dia_sedi_nopools = hydrowindow_varcomp_invsimpson_dia_sedi_nopools$dt,
-      fun_biof_nopools = hydrowindow_varcomp_invsimpson_fun_biof_nopools$dt,
-      fun_sedi_nopools = hydrowindow_varcomp_invsimpson_fun_sedi_nopools$dt,
-      bac_biof_nopools = hydrowindow_varcomp_invsimpson_bac_biof_nopools$dt,
-      bac_sedi_nopools = hydrowindow_varcomp_invsimpson_bac_sedi_nopools$dt
+      miv_nopools = hydrowindow_varcomp_all_invsimpson_miv_nopools$dt,
+      miv_nopools_ept = hydrowindow_varcomp_all_invsimpson_miv_nopools_ept$dt,
+      miv_nopools_och = hydrowindow_varcomp_all_invsimpson_miv_nopools_och$dt,
+      dia_biof_nopools = hydrowindow_varcomp_all_invsimpson_dia_biof_nopools$dt,
+      dia_sedi_nopools = hydrowindow_varcomp_all_invsimpson_dia_sedi_nopools$dt,
+      fun_biof_nopools = hydrowindow_varcomp_all_invsimpson_fun_biof_nopools$dt,
+      fun_sedi_nopools = hydrowindow_varcomp_all_invsimpson_fun_sedi_nopools$dt,
+      bac_biof_nopools = hydrowindow_varcomp_all_invsimpson_bac_biof_nopools$dt,
+      bac_sedi_nopools = hydrowindow_varcomp_all_invsimpson_bac_sedi_nopools$dt
     ) %>%
       rbindlist(idcol="organism")
   )
@@ -1397,40 +1408,65 @@ temporal_analysis_targets <- list(
   ,
   
   tar_target(
-    emtrends_multiorganism_richness,
-    plot_emtrends_multiorganisms(emtrends_list = list(
-      miv_nopools = hydrowindow_emtrends_richness_miv_nopools$dt,
-      miv_nopools_ept = hydrowindow_emtrends_richness_miv_nopools_ept$dt,
-      miv_nopools_och = hydrowindow_emtrends_richness_miv_nopools_och$dt,
-      dia_biof_nopools = hydrowindow_emtrends_richness_dia_biof_nopools$dt,
-      dia_sedi_nopools = hydrowindow_emtrends_richness_dia_sedi_nopools$dt,
-      fun_biof_nopools = hydrowindow_emtrends_richness_fun_biof_nopools$dt,
-      fun_sedi_nopools = hydrowindow_emtrends_richness_fun_sedi_nopools$dt,
-      bac_biof_nopools = hydrowindow_emtrends_richness_bac_biof_nopools$dt,
-      bac_sedi_nopools = hydrowindow_emtrends_richness_bac_sedi_nopools$dt
-    ),
-    in_hydrowindow_best_intercept_dt = hydrowindow_best_richness_intercept_dt,
-    in_hydro_vars_dt = hydro_vars_dt,
-    in_organism_dt = organism_dt,
-    in_drn_dt = drn_dt,
-    write_plot = T,
-    subset_variables = T,
-    out_dir = figdir)
+    emtrends_multiorganism_all_richness,
+    plot_emtrends_multiorganisms(
+      emtrends_list = list(
+        miv_nopools = hydrowindow_emtrends_all_richness_miv_nopools$dt,
+        miv_nopools_ept = hydrowindow_emtrends_all_richness_miv_nopools_ept$dt,
+        miv_nopools_och = hydrowindow_emtrends_all_richness_miv_nopools_och$dt,
+        dia_biof_nopools = hydrowindow_emtrends_all_richness_dia_biof_nopools$dt,
+        dia_sedi_nopools = hydrowindow_emtrends_all_richness_dia_sedi_nopools$dt,
+        fun_biof_nopools = hydrowindow_emtrends_all_richness_fun_biof_nopools$dt,
+        fun_sedi_nopools = hydrowindow_emtrends_all_richness_fun_sedi_nopools$dt,
+        bac_biof_nopools = hydrowindow_emtrends_all_richness_bac_biof_nopools$dt,
+        bac_sedi_nopools = hydrowindow_emtrends_all_richness_bac_sedi_nopools$dt
+      ),
+      in_hydrowindow_best_intercept_dt = hydrowindow_best_richness_intercept_dt,
+      in_hydro_vars_dt = hydro_vars_dt,
+      in_organism_dt = organism_dt,
+      in_drn_dt = drn_dt,
+      write_plot = F,
+      subset_variables = F,
+      out_dir = figdir)
   )
   ,
   
   tar_target(
-    emtrends_multiorganism_invsimpson,
+    emtrends_multiorganism_best_richness,
+    plot_emtrends_multiorganisms(
+      emtrends_list = list(
+        miv_nopools = hydrowindow_emtrends_best_richness_miv_nopools$dt,
+        miv_nopools_ept = hydrowindow_emtrends_best_richness_miv_nopools_ept$dt,
+        miv_nopools_och = hydrowindow_emtrends_best_richness_miv_nopools_och$dt,
+        dia_biof_nopools = hydrowindow_emtrends_best_richness_dia_biof_nopools$dt,
+        dia_sedi_nopools = hydrowindow_emtrends_best_richness_dia_sedi_nopools$dt,
+        fun_biof_nopools = hydrowindow_emtrends_best_richness_fun_biof_nopools$dt,
+        fun_sedi_nopools = hydrowindow_emtrends_best_richness_fun_sedi_nopools$dt,
+        bac_biof_nopools = hydrowindow_emtrends_best_richness_bac_biof_nopools$dt,
+        bac_sedi_nopools = hydrowindow_emtrends_best_richness_bac_sedi_nopools$dt
+      ),
+      in_hydrowindow_best_intercept_dt = hydrowindow_best_richness_intercept_dt,
+      in_hydro_vars_dt = hydro_vars_dt,
+      in_organism_dt = organism_dt,
+      in_drn_dt = drn_dt,
+      write_plot = T,
+      subset_variables = T,
+      out_dir = figdir)
+  )
+  ,
+  
+  tar_target(
+    emtrends_multiorganism_best_invsimpson,
     plot_emtrends_multiorganisms(emtrends_list = list(
-      miv_nopools = hydrowindow_emtrends_invsimpson_miv_nopools$dt,
-      miv_nopools_ept = hydrowindow_emtrends_invsimpson_miv_nopools_ept$dt,
-      miv_nopools_och = hydrowindow_emtrends_invsimpson_miv_nopools_och$dt,
-      dia_biof_nopools = hydrowindow_emtrends_invsimpson_dia_biof_nopools$dt,
-      dia_sedi_nopools = hydrowindow_emtrends_invsimpson_dia_sedi_nopools$dt,
-      fun_biof_nopools = hydrowindow_emtrends_invsimpson_fun_biof_nopools$dt,
-      fun_sedi_nopools = hydrowindow_emtrends_invsimpson_fun_sedi_nopools$dt,
-      bac_biof_nopools = hydrowindow_emtrends_invsimpson_bac_biof_nopools$dt,
-      bac_sedi_nopools = hydrowindow_emtrends_invsimpson_bac_sedi_nopools$dt
+      miv_nopools = hydrowindow_emtrends_best_invsimpson_miv_nopools$dt,
+      miv_nopools_ept = hydrowindow_emtrends_best_invsimpson_miv_nopools_ept$dt,
+      miv_nopools_och = hydrowindow_emtrends_best_invsimpson_miv_nopools_och$dt,
+      dia_biof_nopools = hydrowindow_emtrends_best_invsimpson_dia_biof_nopools$dt,
+      dia_sedi_nopools = hydrowindow_emtrends_best_invsimpson_dia_sedi_nopools$dt,
+      fun_biof_nopools = hydrowindow_emtrends_best_invsimpson_fun_biof_nopools$dt,
+      fun_sedi_nopools = hydrowindow_emtrends_best_invsimpson_fun_sedi_nopools$dt,
+      bac_biof_nopools = hydrowindow_emtrends_best_invsimpson_bac_biof_nopools$dt,
+      bac_sedi_nopools = hydrowindow_emtrends_best_invsimpson_bac_sedi_nopools$dt
     ),
     in_hydrowindow_best_intercept_dt = hydrowindow_best_invsimpson_intercept_dt,
     in_hydro_vars_dt = hydro_vars_dt,
@@ -1447,6 +1483,18 @@ temporal_analysis_targets <- list(
       emtrends_dt = emtrends_multiorganism_richness$dt,
       varcomp_dt = varcomp_multiorganism_richness$dt
     )
+  )
+  ,
+  
+  tar_target(
+    biof_vs_sedi_emtrends_rma_table,
+    test_biof_vs_sedi_emtrends(emtrends_dt=emtrends_multiorganism_all_richness)
+  )
+  ,
+  
+  tar_target(
+    country_ranking_test_table,
+    test_country_ranking_emtrends(emtrends_dt=emtrends_multiorganism_all_richness)
   )
 )
 
