@@ -8114,6 +8114,10 @@ plot_hydro_comparison <- function(var_substr, in_cor_dt, color_list) {
 
 #------ select_ssn_covariance -------------------------------------------------
 # in_ssnmodels <- tar_read(ssn_div_hydrowindow_invsimpson)
+# models_to_run_dt <- tar_read(ssn_div_models_to_run)
+# in_response_var <- 'richness'
+# in_organism <- 'bac_biof_nopools'
+
 
 #' @title Select the best-performing SSN covariance structure
 #' @description This function takes a list of fitted SSN models and evaluates 
@@ -8171,23 +8175,22 @@ select_ssn_covariance <- function(in_ssnmodels) {
 }
 
 #------ prepare_hydrowindow_perf_table -----------------------------------------------------
-# in_response_var <- 'invsimpson'
-# in_organism <- 'miv_nopools_ept'
+# in_response_var <- 'richness'
+# in_organism <- 'bac_biof_nopools'
 # tar_load(ssn_div_models_to_run)
-# ssn_div_hydrowindow <- tar_read_raw(paste0('ssn_div_hydrowindow_', 
+# ssn_div_hydrowindow <- tar_read_raw(paste0('ssn_div_hydrowindow_',
 #                                            in_response_var, '_', in_organism))
 # 
 # 
 # ssn_model_names <- do.call(rbind, ssn_div_models_to_run)[
-#   , c("organism", "hydro_var", "response_var")] %>%
+#   , c("organism", "hydro_var", "response_var", "test_parabolic")] %>%
 #   as.data.table() %>%
 #   .[response_var == in_response_var & organism == in_organism, ]
 # 
 # ssnmodels <- cbind(ssn_model_names, ssn_div_hydrowindow)
-# names(ssnmodels)[ncol(ssnmodels)] <- "ssn_div_models"
-# 
-# in_ssnmodels <- ssnmodels 
-# in_covtype_selected <- tar_read_raw(paste0('ssn_covtype_selected_', 
+# names(ssnmodels)[ncol(ssnmodels)] <- "ssn_div_models"#
+# in_ssnmodels <- ssnmodels
+# in_covtype_selected <- tar_read_raw(paste0('ssn_covtype_selected_',
 #                                            in_response_var, '_', in_organism))
 # in_hydro_vars_dt <- tar_read(hydro_vars_dt)
 
@@ -8211,18 +8214,39 @@ prepare_hydrowindow_perf_table <- function(in_ssnmodels, in_organism,
   # selected covariance type for this organism
   org_covtype <- in_covtype_selected$dt_sub[organism == in_organism, covtypes]
   
+  #Unlist columns in ssn_models 
+  in_ssnmodels_fixed <- in_ssnmodels[
+    , `:=`(
+      organism = sapply(organism, `[`, 1L),
+      hydro_var = sapply(hydro_var, function(x) if (length(x) == 0) NA_character_ else x[[1L]]),
+      response_var = sapply(response_var, `[`, 1L),
+      test_parabolic = sapply(test_parabolic, `[`, 1L)
+    )
+  ]
+  
   # combine glance tables with models
-  perf_dt <- lapply(
-    in_ssnmodels[organism == in_organism, ssn_div_models],
-    function(x) {
-      merge(
-        x[["ssn_glance"]],
-        data.table(covtypes = names(x[["ssn_list"]]), mod = x[["ssn_list"]]),
-        by = "covtypes"
-      )
-    }) %>%
-    rbindlist(fill = TRUE) %>%
-    .[covtypes == org_covtype, ] %>%
+  get_mod_info <- function(x) {
+    merge(
+      x[["ssn_glance"]],
+      data.table(covtypes = names(x[["ssn_list"]]), mod = x[["ssn_list"]]),
+      by = "covtypes"
+    )
+  }
+  
+  perf_dt <- in_ssnmodels_fixed[
+    organism == in_organism,
+    .(
+      perf = lapply(ssn_div_models, get_mod_info),
+      hydro_var = hydro_var,
+      test_parabolic = test_parabolic
+    )
+  ]
+  
+  combined <- rbindlist(perf_dt$perf, fill = TRUE, idcol = "row_id")
+  meta <- perf_dt[, .(row_id = .I, test_parabolic)]
+  perf_dt <- merge(combined , meta, by=c("row_id")) %>%
+    .[, row_id := NULL] %>%
+    .[covtypes == org_covtype,] %>%
     .[is.na(hydro_var), hydro_var := "null"]
   
   # attach hydro_var_root
@@ -8423,6 +8447,11 @@ get_hydrowindow_emmeans <- function(best_dt, in_hydro_vars_dt, in_drn_dt, plot=T
 # best_dt <- hydrowindown_perf_tables$best
 # in_hydro_vars_dt <- tar_read(hydro_vars_dt)
 # in_drn_dt <- drn_dt
+
+# perf_dt = tar_read(hydrowindow_perf_tables_richness_miv_nopools)$all
+# in_hydro_vars_dt = hydro_vars_dt
+# in_drn_dt = drn_dt
+# plot=F
 
 #' Extract and plot marginal slopes (EMTrends) from best models
 #'
@@ -9232,19 +9261,19 @@ plot_varcomp_multiorganisms <- function(in_hydrowindow_varcomp_multiorg,
 # in_hydrowindow_best_intercept_dt <- tar_read(hydrowindow_best_richness_intercept_dt)
 # 
 # emtrends_list = list(
-#   miv_nopools = tar_read(hydrowindow_emtrends_richness_miv_nopools)$dt,
-#   miv_nopools_ept = tar_read(hydrowindow_emtrends_richness_miv_nopools_ept)$dt,
-#   miv_nopools_och = tar_read(hydrowindow_emtrends_richness_miv_nopools_och)$dt,
-#   dia_biof_nopools = tar_read(hydrowindow_emtrends_richness_dia_biof_nopools)$dt,
-#   dia_sedi_nopools = tar_read(hydrowindow_emtrends_richness_dia_sedi_nopools)$dt,
-#   fun_biof_nopools = tar_read(hydrowindow_emtrends_richness_fun_biof_nopools)$dt,
-#   fun_sedi_nopools = tar_read(hydrowindow_emtrends_richness_fun_sedi_nopools)$dt,
-#   bac_biof_nopools = tar_read(hydrowindow_emtrends_richness_bac_biof_nopools)$dt,
-#   bac_sedi_nopools = tar_read(hydrowindow_emtrends_richness_bac_sedi_nopools)$dt
+#   miv_nopools = tar_read(hydrowindow_emtrends_all_richness_miv_nopools)$dt,
+#   miv_nopools_ept = tar_read(hydrowindow_emtrends_all_richness_miv_nopools_ept)$dt,
+#   miv_nopools_och = tar_read(hydrowindow_emtrends_all_richness_miv_nopools_och)$dt,
+#   dia_biof_nopools = tar_read(hydrowindow_emtrends_all_richness_dia_biof_nopools)$dt,
+#   dia_sedi_nopools = tar_read(hydrowindow_emtrends_all_richness_dia_sedi_nopools)$dt,
+#   fun_biof_nopools = tar_read(hydrowindow_emtrends_all_richness_fun_biof_nopools)$dt,
+#   fun_sedi_nopools = tar_read(hydrowindow_emtrends_all_richness_fun_sedi_nopools)$dt,
+#   bac_biof_nopools = tar_read(hydrowindow_emtrends_all_richness_bac_biof_nopools)$dt,
+#   bac_sedi_nopools = tar_read(hydrowindow_emtrends_all_richness_bac_sedi_nopools)$dt
 # )
 # in_drn_dt <- drn_dt
-# write_plot = T
-# subset_variables = T
+# write_plot = F
+# subset_variables = F
 # out_dir = figdir
 
 plot_emtrends_multiorganisms <- function(emtrends_list,
@@ -9523,40 +9552,6 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
 
 
 #------ test_biof_vs_sedi_emtrends ---------------------------------------------
-# tar_load(hydro_vars_dt)
-# tar_load(hydro_vars_dt)
-# tar_load(organism_dt)
-# tar_load(hydrowindow_best_richness_intercept_dt)
-# 
-# hydrowindow_perf_tables_fun_sedi <- tar_read(hydrowindow_perf_tables_richness_fun_sedi_nopools)
-# hydrowindow_perf_tables_fun_biof <- tar_read(hydrowindow_perf_tables_richness_fun_biof_nopools)
-# 
-# 
-# emtrends_sedi <- get_hydrowindow_emtrends(
-#   best_dt = hydrowindow_perf_tables_fun_sedi$all,
-#   in_hydro_vars_dt = hydro_vars_dt,
-#   in_drn_dt = drn_dt,
-#   plot=F)
-# emtrends_biof <- get_hydrowindow_emtrends(
-#   best_dt = hydrowindow_perf_tables_fun_biof$all,
-#   in_hydro_vars_dt = hydro_vars_dt,
-#   in_drn_dt = drn_dt,
-#   plot=F)
-# 
-# 
-# emtrends_dt <- plot_emtrends_multiorganisms(
-#   emtrends_list = list(
-#     fun_sedi_nopools=emtrends_sedi$dt,
-#     fun_biof_nopools=emtrends_biof$dt
-#   ),
-#   in_hydrowindow_best_intercept_dt = hydrowindow_best_richness_intercept_dt,
-#   in_hydro_vars_dt = hydro_vars_dt,
-#   in_organism_dt = organism_dt,
-#   in_drn_dt = drn_dt,
-#   write_plot = F,
-#   subset_variables = F,
-#   out_dir = figdir)$dt
-
 # emtrends_dt <- tar_read(emtrends_multiorganism_all_richness)$dt
 
 
@@ -9570,14 +9565,12 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt) {
   
   # Compute the difference (biofilm - sediment) for each country
   dt_diff <-  emtrends_micro[, .(
-    country, 
     trend_biofilm = trend_rel[organism_sub == "Biof."],
     trend_sediment = trend_rel[organism_sub == "Sedi."],
     SE_biofilm = SE_rel[organism_sub == "Biof."],
     SE_sediment = SE_rel[organism_sub == "Sedi."]
   ),
-  by = .(country, organism_class, hydro_var, 
-         hydro_var_root, window_d, hydro_label)]
+  by = .(country, organism_class, hydro_var)]
   
   dt_diff[, `:=`(
     diff = trend_biofilm - trend_sediment,
@@ -9587,7 +9580,7 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt) {
   # Run meta-analysis model
   # https://wviechtb.github.io/metafor/reference/rma.uni.html
   meta_results <- dt_diff[, {
-    m <- rma(yi = diff, sei = se_diff, method = "REML", data = .SD)
+    m <- metafor::rma(yi = diff, sei = se_diff, method = "REML", data = .SD)
     .(estimate = as.numeric(m$b), se = m$se, zval = m$zval, pval = m$pval,
       ci.lb = m$ci.lb, ci.ub = m$ci.ub,
       I2 = m$I2, QE = m$QE, QEp = m$QEp, n_countries = .N)
@@ -9618,61 +9611,7 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt) {
 }
 
 ##------  test_country_ranking_emtrends(emtrends_dt=emtrends_multiorganism_all_richness)
-# tar_load(hydro_vars_dt)
-# tar_load(hydro_vars_dt)
-# tar_load(organism_dt)
-# tar_load(hydrowindow_best_richness_intercept_dt)
-# 
-# hydrowindow_perf_tables_fun_sedi <- tar_read(hydrowindow_perf_tables_richness_fun_sedi_nopools)
-# hydrowindow_perf_tables_fun_biof <- tar_read(hydrowindow_perf_tables_richness_fun_biof_nopools)
-# hydrowindow_perf_tables_miv <- tar_read(hydrowindow_perf_tables_richness_fun_sedi_nopools)
-# hydrowindow_perf_tables_dia_sedi <- tar_read(hydrowindow_perf_tables_richness_dia_sedi_nopools)
-# hydrowindow_perf_tables_dia_biof <- tar_read(hydrowindow_perf_tables_richness_dia_biof_nopools)
-# 
-# emtrends_sedi <- get_hydrowindow_emtrends(
-#   best_dt = hydrowindow_perf_tables_fun_sedi$all,
-#   in_hydro_vars_dt = hydro_vars_dt,
-#   in_drn_dt = drn_dt,
-#   plot=F)
-# emtrends_biof <- get_hydrowindow_emtrends(
-#   best_dt = hydrowindow_perf_tables_fun_biof$all,
-#   in_hydro_vars_dt = hydro_vars_dt,
-#   in_drn_dt = drn_dt,
-#   plot=F)
-# emtrends_miv <- get_hydrowindow_emtrends(
-#   best_dt = hydrowindow_perf_tables_miv$all,
-#   in_hydro_vars_dt = hydro_vars_dt,
-#   in_drn_dt = drn_dt,
-#   plot=F)
-# emtrends_dia_sedi <- get_hydrowindow_emtrends(
-#   best_dt = hydrowindow_perf_tables_dia_sedi$all,
-#   in_hydro_vars_dt = hydro_vars_dt,
-#   in_drn_dt = drn_dt,
-#   plot=F)
-# emtrends_dia_biof <- get_hydrowindow_emtrends(
-#   best_dt = hydrowindow_perf_tables_dia_biof$all,
-#   in_hydro_vars_dt = hydro_vars_dt,
-#   in_drn_dt = drn_dt,
-#   plot=F)
-#
-# 
-# 
-# emtrends_dt <- plot_emtrends_multiorganisms(
-#   emtrends_list = list(
-#     fun_sedi_nopools=emtrends_sedi$dt,
-#     fun_biof_nopools=emtrends_biof$dt
-#     dia_sedi_nopools=emtrends_dia_sedi$dt,
-#     dia_biof_nopools=emtrends_dia_biof$dt
-#     miv_nopools=emtrends_miv$dt,
-#   ),
-#   in_hydrowindow_best_intercept_dt = hydrowindow_best_richness_intercept_dt,
-#   in_hydro_vars_dt = hydro_vars_dt,
-#   in_organism_dt = organism_dt,
-#   in_drn_dt = drn_dt,
-#   write_plot = F,
-#   subset_variables = F,
-#   out_dir = figdir)$dt
-# 
+
 # emtrends_dt <- tar_read(emtrends_multiorganism_all_richness)$dt
 
 

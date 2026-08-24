@@ -51,12 +51,12 @@ hydro_combi <- expand.grid(
   stringsAsFactors = FALSE)
 
 if (!interactive()) {
-  perf_ratio <- 0.3 #Set how much you want to push your computer (% of cores and RAM)
+  perf_ratio <- 0.25 #Set how much you want to push your computer (% of cores and RAM)
   nthreads <- round(parallel::detectCores(logical=F)*perf_ratio)
   #future::plan("future::multisession", workers=nthreads)
   total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
   options(future.globals.maxSize = perf_ratio*total_ram)
-  tar_option_set(controller = crew_controller_local(workers = nthreads)) #Set up parallel computing in targets
+  # targets::tar_option_set(controller = crew_controller_local(workers = nthreads)) #Set up parallel computing in targets
 }
 
 #--------------------------  Define targets plan -------------------------------
@@ -1217,7 +1217,7 @@ temporal_analysis_targets <- list(
       {
         # Combine model metadata with results
         ssn_model_names <- do.call(rbind, ssn_div_models_to_run)[
-          , c("organism", "hydro_var", "response_var")] %>%
+          , c("organism", "hydro_var", "response_var", "test_parabolic")] %>%
           as.data.table() %>%
           .[response_var == in_response_var & organism == in_organism, ]
         
@@ -1485,13 +1485,13 @@ temporal_analysis_targets <- list(
     )
   )
   ,
-  
+
   tar_target(
     biof_vs_sedi_emtrends_rma_table,
     test_biof_vs_sedi_emtrends(emtrends_dt=emtrends_multiorganism_all_richness)
   )
   ,
-  
+
   tar_target(
     country_ranking_test_table,
     test_country_ranking_emtrends(emtrends_dt=emtrends_multiorganism_all_richness)

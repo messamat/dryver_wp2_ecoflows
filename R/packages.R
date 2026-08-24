@@ -27,6 +27,7 @@ pkg_vec <- list(
   'lwgeom',
   'magrittr',
   'memuse',
+  'metafor',
   'MuMIn', 
   'ncdf4',
   'patchwork',
