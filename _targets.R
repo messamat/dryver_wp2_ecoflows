@@ -1476,6 +1476,21 @@ temporal_analysis_targets <- list(
     out_dir = figdir)
   )
   ,
+  
+  tar_target(
+  hydrowindow_permutation_results,
+  lapply(unique(hydrowindow_best_richness_intercept_dt$organism),
+         function(in_organism) {
+           permutation_results <- run_all_ssn_permutations(
+             perf_dt = hydrowindow_best_richness_intercept_dt[organism==in_organism,],
+             n_perm = 50,
+             n_cores = 2,
+             out_dir = file.path(resdir, "permutation_results")
+           )
+         }
+  ) %>% rbindlist(fill=T, use.names=T)
+  )
+  ,
 
   tar_target(
     summary_table_multiorganism_richness,

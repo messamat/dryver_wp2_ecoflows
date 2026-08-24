@@ -2051,6 +2051,295 @@ plot_formula_emtrends <- function(in_mod_fit,
 }
 
 ################################################################################
+#------ get_covariate_name -----------------------------------------------------
+#' Identify target covariate
+#'
+#' Makes sure that the provided hydrological covariate is in the formula
+#' Otherwise, extracts the exact name, handling cases where the covariate might 
+#' have scaling suffixes.
+#'
+#' @param fit_mod A fitted SSN2 model object
+#' @param hydro_var The hydrological variable name (may be root name)
+#' @return Character string of the exact covariate name in the model
+#' @examples
+#' get_covariate_name(fit_mod, "DurD") # Returns "DurD180past_scaled"
+get_covariate_name <- function(fit_mod, hydro_var) {
+  form <- formula(fit_mod)
+  all_terms <- all.vars(form)
+  
+  # Direct match first
+  if (hydro_var %in% all_terms) {
+    return(hydro_var)
+  }
+  
+  # Partial match for scaled/transformed versions
+  matches <- grep(hydro_var, all_terms, fixed = TRUE, value = TRUE)
+  if (length(matches) > 0) {
+    return(matches[1])  # Return first match
+  }
+  
+  stop(paste("Could not find covariate", hydro_var, "in model formula. Available terms:",
+             paste(all_terms, collapse = ", ")))
+}
+
+#------ get_known_covariance_params --------------------------------------------
+#' Extract covariance parameters as initial objects for SSN2 models
+#'
+#' Extracts estimated covariance parameters from a fitted SSN2 model and returns
+#' them as initial objects with known="given" to fix them during subsequent fitting.
+#'
+#' @param fit_mod A fitted SSN2 model object (from ssn_lm() or ssn_glm())
+#' @return Named list containing:
+#' \describe{
+#'   \item{tailup}{List with type and init object for upstream covariance}
+#'   \item{taildown}{List with type and init object for downstream covariance}
+#'   \item{euclid}{List with type and init object for Euclidean distance covariance}
+#'   \item{nugget}{List with type and init object for nugget effect}
+#'   \item{randcov}{List with type and init object for random effects}
+#'   \item{dispersion}{Initial object for dispersion parameter (GLMs only)}
+#' }
+#' @details
+#' The function extracts the spatial covariance structure from a fitted SSN2 model
+#' and converts it into the format required by the \code{*_initial()} functions.
+#' All parameters are marked as known ("given") so they will be fixed during
+#' subsequent model fitting. For covariance types of "none", returns NULL.
+#'
+#' @seealso \code{\link[SSN2]{ssn_lm}}, \code{\link[SSN2]{ssn_glm}},
+#'          \code{\link[SSN2]{tailup_initial}}, \code{\link[SSN2]{nugget_initial}}
+#' @examples
+#' \dontrun{
+#' fit <- ssn_lm(y ~ x1 + x2, ssn.object = my_ssn, tailup_type = "linear")
+#' cov_params <- get_known_covariance_params(fit)
+#' }
+get_known_covariance_params <- function(fit_mod) {
+  mod_params <- fit_mod$coefficients$params_object
+  
+  # Helper to extract covariance type from class attribute
+  get_cov_type <- function(param_obj) {
+    class_attr <- attr(param_obj, "class")
+    if (length(class_attr) == 0) return(NULL)
+    strsplit(class_attr, "_")[[1]][2]
+  }
+  
+  # Helper to create initial objects
+  create_initial <- function(param_name, param_obj) {
+    cov_type <- get_cov_type(param_obj)
+    
+    # Return NULL init for "none" types
+    if (!is.null(cov_type) && cov_type == "none") {
+      return(list(name = param_name, type = cov_type, init = NULL))
+    }
+    
+    # Get parameter values
+    param_values <- as.list(param_obj)
+    
+    # Create appropriate initial object
+    init_obj <- switch(
+      param_name,
+      "tailup" = do.call(SSN2::tailup_initial,
+                         c(list(tailup_type = cov_type, known = "given"),
+                           param_values)),
+      "taildown" = do.call(SSN2::taildown_initial,
+                           c(list(taildown_type = cov_type, known = "given"),
+                             param_values)),
+      "euclid" = do.call(SSN2::euclid_initial,
+                         c(list(euclid_type = cov_type, known = "given"),
+                           param_values)),
+      "nugget" = do.call(SSN2::nugget_initial,
+                         c(list(nugget_type = cov_type, known = "given"),
+                           param_values)),
+      "randcov" = {
+        randcov_args <- c(param_values, list(known = "given"))
+        do.call(spmodel::randcov_initial, randcov_args)
+      },
+      stop(paste("Unknown parameter type:", param_name))
+    )
+    
+    return(list(name = param_name, type = cov_type, init = init_obj))
+  }
+  
+  # Extract dispersion parameter (for GLMs)
+  dispersion_initial <- NULL
+  if (!is.null(fit_mod$dispersion)) {
+    dispersion_initial <- spmodel::dispersion_initial(
+      type = attr(fit_mod$dispersion, "type"),
+      dispersion = fit_mod$dispersion,
+      known = "given"
+    )
+  }
+  
+  # Create list of all initial objects
+  params_to_get <- c('tailup', 'taildown', 'euclid', 'nugget', 'randcov')
+  out_list <- lapply(params_to_get, function(name) {
+    create_initial(name, mod_params[[name]])
+  }) %>% setNames(params_to_get)
+  out_list[['dispersion']] <- dispersion_initial
+  
+  return(out_list)
+}
+
+#------ run_permutations_for_ssn_model ---------------------------------------------
+#' Run permutation test for a single SSN model
+#'
+#' Performs permutation test for one SSN model by:
+#' 1. Extracting covariance parameters from the fitted model
+#' 2. Permuting the target covariate n_perm times
+#' 3. Re-fitting the model with fixed spatial structure
+#' 4. Comparing AIC values to compute significance
+#'
+#' @param fit_mod A fitted SSN2 model object
+#' @param ssn_obj The SSN object used in original fitting
+#' @param cov_name Name of covariate to permute
+#' @param n_perm Number of permutations (default: 500)
+#' @param cov_params Optional pre-extracted covariance parameters
+#' @param progress Logical, whether to show progress (default: TRUE)
+#' @return List with original_AIC, permutation_results, p_value, etc.
+#' @details
+#' This function maintains the original spatial covariance structure by:
+#' - Extracting all covariance parameters (tailup, taildown, euclid, nugget)
+#' - Setting them as known="given" in subsequent fits
+#' - Only permuting the target covariate
+#'
+#' The p-value is calculated as the proportion of permutations where the
+#' permuted model has AIC <= original model's AIC (better or equal fit).
+#'
+#' @examples
+#' \dontrun{
+#' result <- run_permutations_for_ssn_model(fit_mod, ssn_obj, "DurD180past_scaled", n_perm = 500)
+#' print(paste("p-value:", result$p_value))
+#' }
+run_permutations_for_ssn_model <- function(fit_mod, ssn_obj, cov_name, n_perm = 500,
+                                           cov_params = NULL, progress = TRUE) {
+  
+  # Validate model type
+  model_class <- class(fit_mod)[1]
+  if (!(model_class %in% c("ssn_lm", "ssn_glm"))) {
+    stop("fit_mod must be an ssn_lm or ssn_glm object. Got: ", model_class)
+  }
+  
+  # Extract formula and covariance parameters
+  formula <- formula(fit_mod)
+  if (is.null(cov_params)) {
+    cov_params <- get_known_covariance_params(fit_mod)
+  }
+  
+  # Get original AIC
+  orig_aic <- AIC(fit_mod)
+  
+  # Validate covariate exists in SSN data
+  if (!(cov_name %in% names(ssn_obj$obs))) {
+    stop(paste("Covariate", cov_name, "not found in SSN data. Available:",
+               paste(names(ssn_obj$obs), collapse = ", ")))
+  }
+  
+  # Extract model components
+  model_components <- list(
+    additive = fit_mod$additive,
+    estmethod = fit_mod$estmethod,
+    random = fit_mod$random,
+    partition_factor = fit_mod$partition,
+    family = if (model_class == "ssn_glm") fit_mod$family else NULL,
+    tailup_type = if (!is.null(cov_params[['tailup']])) cov_params[['tailup']]$type else "none",
+    taildown_type = if (!is.null(cov_params[['taildown']])) cov_params[['taildown']]$type else "none",
+    euclid_type = if (!is.null(cov_params[['euclid']])) cov_params[['euclid']]$type else "none"
+  )
+  
+  # Prepare initial objects
+  init_objects <- list(
+    tailup_initial = if (!is.null(cov_params[['tailup']])) cov_params[['tailup']]$init else NULL,
+    taildown_initial = if (!is.null(cov_params[['taildown']])) cov_params[['taildown']]$init else NULL,
+    euclid_initial = if (!is.null(cov_params[['euclid']])) cov_params[['euclid']]$init else NULL,
+    nugget_initial = if (!is.null(cov_params[['nugget']])) cov_params[['nugget']]$init else NULL,
+    randcov_initial = if (!is.null(cov_params[['randcov']])) cov_params[['randcov']]$init else NULL,
+    dispersion_initial = if (!is.null(cov_params[['dispersion']])) cov_params[['dispersion']] else NULL
+  )
+  
+  # Select fitting function
+  fit_func <- if (model_class == "ssn_lm") SSN2::ssn_lm else SSN2::ssn_glm
+  
+  # Pre-allocate results
+  perm_results <- data.table(
+    permutation = 1:n_perm,
+    AIC = numeric(n_perm),
+    logLik = numeric(n_perm),
+    deviance = numeric(n_perm)
+  )
+  
+  # Get original data
+  orig_data <- ssn_obj$obs
+  
+  # Pre-create list of permuted indices to avoid repeated sampling
+  perm_indices <- replicate(n_perm, sample.int(nrow(orig_data)), simplify = FALSE)
+  
+  # Run permutations
+  for (i in 1:n_perm) {
+    # Create modified SSN object with permuted covariate
+    perm_ssn <- ssn_obj
+    perm_ssn$obs[[cov_name]] <- orig_data[[cov_name]][perm_indices[[i]]]
+    
+    # Build model call with all fixed parameters
+    model_args <- list(
+      formula = formula,
+      ssn.object = perm_ssn,
+      tailup_type = model_components$tailup_type,
+      taildown_type = model_components$taildown_type,
+      euclid_type = model_components$euclid_type,
+      additive = model_components$additive,
+      estmethod = model_components$estmethod,
+      random = model_components$random,
+      partition_factor = model_components$partition_factor,
+      tailup_initial = init_objects$tailup_initial,
+      taildown_initial = init_objects$taildown_initial,
+      euclid_initial = init_objects$euclid_initial,
+      nugget_initial = init_objects$nugget_initial,
+      randcov_initial = init_objects$randcov_initial,
+      control = list(ems = FALSE)  # Disable EM since params are fixed
+    )
+    
+    # Add GLM-specific parameters
+    if (model_class == "ssn_glm") {
+      model_args$family <- model_components$family
+      model_args$dispersion_initial <- init_objects$dispersion_initial
+    }
+    
+    # Fit model
+    perm_fit <- tryCatch({
+      suppressMessages(do.call(fit_func, model_args))
+    }, error = function(e) NULL)
+    
+    # Store results
+    if (!is.null(perm_fit)) {
+      perm_results$AIC[i] <- AIC(perm_fit)
+      perm_results$logLik[i] <- logLik(perm_fit)
+      perm_results$deviance[i] <- deviance(perm_fit)
+    }
+    
+    # Progress reporting
+    if (progress && i %% 50 == 0) {
+      message(paste("Completed", i, "/", n_perm, "permutations"))
+    }
+  }
+  
+  # Calculate p-value
+  valid_count <- sum(!is.na(perm_results$AIC))
+  p_value <- if (valid_count > 0) {
+    sum(perm_results$AIC <= orig_aic, na.rm = TRUE) / valid_count
+  } else {
+    NA
+  }
+  
+  # Return comprehensive results
+  list(
+    original_AIC = orig_aic,
+    permutation_results = perm_results,
+    p_value = p_value,
+    n_successful = valid_count,
+    n_permutations = n_perm,
+    model_type = model_class,
+    cov_name = cov_name
+  )
+}
+
 #---------------------------------- workflow functions ---------------------------------------------
 # path_list = tar_read(bio_data_paths)
 # in_metadata_edna <- tar_read(metadata_edna)
@@ -9434,6 +9723,119 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
   
 }
 
+#------ run_all_ssn_permutations ---------------------------------------------------
+#' Run permutation tests for all Models in parallel
+#'
+#' Processes all models in parallel.
+#' Each worker handles one complete model (all permutations).
+#'
+#' @param best_dt Data.table of best models
+#' @param n_perm Number of permutations per model (default: 500)
+#' @param out_dir Output directory
+#' @param n_cores Number of cores (default: detectCores() - 1)
+#' @param save_individual Save individual permutation results?
+run_all_ssn_permutations <- function(perf_dt, n_perm = 500, out_dir = "permutation_results",
+                                     n_cores = parallel::detectCores() - 1,
+                                     save_individual = TRUE) {
+  
+  # Setup
+  if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+  models_to_test <- perf_dt[hydro_var_root != "null", ]
+  
+  # Prepare tasks
+  tasks <- lapply(1:nrow(models_to_test), function(i) {
+    row <- models_to_test[i,]
+    fit_mod <- row[, mod][[1]]
+    
+    list(
+      row_idx = i,
+      fit_mod = fit_mod,
+      ssn_obj = fit_mod$ssn.object, 
+      hydro_var = row$hydro_var,
+      hydro_var_root = row$hydro_var_root,
+      organism = row$organism,
+      hydro_label = as.character(row$hydro_label),
+      window_d = as.character(row$window_d),
+      test_parabolic = row$test_parabolic,
+      n_perm = n_perm,
+      out_dir = out_dir,
+      save_individual = save_individual
+    )
+  })
+  
+  # Set up parallel cluster
+  cl <- parallel::makeCluster(n_cores)
+  parallel::clusterExport(cl, c("run_permutations_for_ssn_model", "get_covariate_name",
+                                "get_known_covariance_params"),
+                          envir = environment())
+  parallel::clusterEvalQ(cl, {
+    library(data.table)
+    library(magrittr)
+    library(qs2)
+    library(SSN2)
+    library(spmodel)
+  })
+  
+  message(paste("Starting permutation tests for", length(tasks),
+                "models using", n_cores, "cores"))
+  
+  # Process in parallel
+  results <- parallel::parLapply(cl, tasks, function(task) {
+    cov_name <- tryCatch({
+      get_covariate_name(task$fit_mod, task$hydro_var)
+    }, error = function(e) task$hydro_var)
+    
+    perm_result <- run_permutations_for_ssn_model(
+      fit_mod = task$fit_mod,
+      ssn_obj = task$ssn_obj,
+      cov_name = cov_name,
+      n_perm = task$n_perm,
+      progress = FALSE
+    )
+    
+    if (task$save_individual) {
+      qs2::qs_save(perm_result,
+                   file = file.path(
+                     task$out_dir,
+                     paste0(task$organism, "_", task$hydro_var_root, "_perm.qs")))
+    }
+    
+    # Print completion message for each model
+    message(paste("Completed:", task$organism, "-", task$hydro_var_root))
+    
+    # Return summary
+    perm_aics <- perm_result$permutation_results$AIC
+    valid_aics <- perm_aics[!is.na(perm_aics)]
+    
+    list(
+      row_idx = task$row_idx,
+      organism = task$organism,
+      hydro_var_root = task$hydro_var_root,
+      hydro_var = task$hydro_var,
+      hydro_label = task$hydro_label,
+      test_parabolic = task$test_parabolic,
+      original_AIC = perm_result$original_AIC,
+      mean_perm_AIC = if (length(valid_aics) > 0) mean(valid_aics, na.rm = TRUE) else NA,
+      sd_perm_AIC = if (length(valid_aics) > 0) sd(valid_aics, na.rm = TRUE) else NA,
+      p_value = perm_result$p_value,
+      n_successful = perm_result$n_successful,
+      n_permutations = perm_result$n_permutations,
+      window_d = task$window_d
+    )
+  })
+  
+  parallel::stopCluster(cl)
+  
+  # Combine results
+  all_results <- rbindlist(results, fill = TRUE)
+  setorder(all_results, organism, hydro_var_root)
+  
+  # Save summary
+  #qs2::qs_save(all_results, file.path(out_dir, "permutation_summary.qs"))
+  message(paste("All done. Results saved to", out_dir))
+  
+  return(all_results)
+}
 #------ get_hydrowindown_multiorganism_summary ----------------------------------------
 # emtrends_dt <- tar_read(emtrends_multiorganism_richness)$dt
 # varcomp_dt <- tar_read(varcomp_multiorganism_richness)$dt
