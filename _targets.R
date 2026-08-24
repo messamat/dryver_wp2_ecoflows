@@ -917,6 +917,12 @@ formatting_targets <- list(
     plot_hydrocon_summarized(in_allvars_summarized = allvars_summarized,
                              in_drn_dt = drn_dt_format, 
                              in_hydro_vars_dt = hydro_vars_dt, 
+                             in_hydrocon_sites_proj = rbindlist(hydrocon_sites_proj_gcm),
+                             reference_years = seq(1991, 2020),
+                             sample_year = 2021,
+                             future_years = list(mid_century=seq(2041, 2070), 
+                                                 late_century=seq(2071, 2100)),
+                             scenario='ssp585',
                              outdir = figdir)
   )
   ,
@@ -1329,6 +1335,25 @@ temporal_analysis_targets <- list(
   
   #Combine performance tables
   tar_target(
+    hydrowindow_all_richness_intercept_dt,
+    list(
+      miv_nopools = hydrowindow_perf_tables_richness_miv_nopools$all,
+      miv_nopools_ept = hydrowindow_perf_tables_richness_miv_nopools_ept$all,
+      miv_nopools_och = hydrowindow_perf_tables_richness_miv_nopools_och$all,
+      dia_biof_nopools = hydrowindow_perf_tables_richness_dia_biof_nopools$all,
+      dia_sedi_nopools = hydrowindow_perf_tables_richness_dia_sedi_nopools$all,
+      fun_biof_nopools = hydrowindow_perf_tables_richness_fun_biof_nopools$all,
+      fun_sedi_nopools = hydrowindow_perf_tables_richness_fun_sedi_nopools$all,
+      bac_biof_nopools = hydrowindow_perf_tables_richness_bac_biof_nopools$all,
+      bac_sedi_nopools = hydrowindow_perf_tables_richness_bac_sedi_nopools$all
+    ) %>%
+      rbindlist(idcol='organism') %>%
+      .[, intercept := coef(mod[[1]])[1], by=.(organism, hydro_var_root)] %>%
+      .[, .SD, .SDcols=!c('mod')]
+  )
+  ,
+  
+  tar_target(
     hydrowindow_best_richness_intercept_dt,
     list(
       miv_nopools = hydrowindow_perf_tables_richness_miv_nopools$best,
@@ -1427,17 +1452,17 @@ temporal_analysis_targets <- list(
     emtrends_multiorganism_all_richness,
     plot_emtrends_multiorganisms(
       emtrends_list = list(
-        miv_nopools = hydrowindow_emtrends_all_richness_miv_nopools$dt,
-        miv_nopools_ept = hydrowindow_emtrends_all_richness_miv_nopools_ept$dt,
-        miv_nopools_och = hydrowindow_emtrends_all_richness_miv_nopools_och$dt,
-        dia_biof_nopools = hydrowindow_emtrends_all_richness_dia_biof_nopools$dt,
-        dia_sedi_nopools = hydrowindow_emtrends_all_richness_dia_sedi_nopools$dt,
-        fun_biof_nopools = hydrowindow_emtrends_all_richness_fun_biof_nopools$dt,
-        fun_sedi_nopools = hydrowindow_emtrends_all_richness_fun_sedi_nopools$dt,
-        bac_biof_nopools = hydrowindow_emtrends_all_richness_bac_biof_nopools$dt,
-        bac_sedi_nopools = hydrowindow_emtrends_all_richness_bac_sedi_nopools$dt
+        miv_nopools = hydrowindow_emtrends_all_richness_miv_nopools,
+        miv_nopools_ept = hydrowindow_emtrends_all_richness_miv_nopools_ept,
+        miv_nopools_och = hydrowindow_emtrends_all_richness_miv_nopools_och,
+        dia_biof_nopools = hydrowindow_emtrends_all_richness_dia_biof_nopools,
+        dia_sedi_nopools = hydrowindow_emtrends_all_richness_dia_sedi_nopools,
+        fun_biof_nopools = hydrowindow_emtrends_all_richness_fun_biof_nopools,
+        fun_sedi_nopools = hydrowindow_emtrends_all_richness_fun_sedi_nopools,
+        bac_biof_nopools = hydrowindow_emtrends_all_richness_bac_biof_nopools,
+        bac_sedi_nopools = hydrowindow_emtrends_all_richness_bac_sedi_nopools
       ),
-      in_hydrowindow_best_intercept_dt = hydrowindow_best_richness_intercept_dt,
+      in_hydrowindow_best_intercept_dt = hydrowindow_all_richness_intercept_dt,
       in_hydro_vars_dt = hydro_vars_dt,
       in_organism_dt = organism_dt,
       in_drn_dt = drn_dt,
@@ -1493,20 +1518,20 @@ temporal_analysis_targets <- list(
   )
   ,
   
-  tar_target(
-  hydrowindow_permutation_results,
-  lapply(unique(hydrowindow_best_richness_intercept_dt$organism),
-         function(in_organism) {
-           permutation_results <- run_all_ssn_permutations(
-             perf_dt = hydrowindow_best_richness_intercept_dt[organism==in_organism,],
-             n_perm = 50,
-             n_cores = 2,
-             out_dir = file.path(resdir, "permutation_results")
-           )
-         }
-  ) %>% rbindlist(fill=T, use.names=T)
-  )
-  ,
+  # tar_target(
+  # hydrowindow_permutation_results,
+  # lapply(unique(hydrowindow_best_richness_intercept_dt$organism),
+  #        function(in_organism) {
+  #          permutation_results <- run_all_ssn_permutations(
+  #            perf_dt = hydrowindow_best_richness_intercept_dt[organism==in_organism,],
+  #            n_perm = 50,
+  #            n_cores = 2,
+  #            out_dir = file.path(resdir, "permutation_results")
+  #          )
+  #        }
+  # ) %>% rbindlist(fill=T, use.names=T)
+  # )
+  # ,
 
   tar_target(
     summary_table_multiorganism_richness,

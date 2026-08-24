@@ -9174,9 +9174,18 @@ plot_hydrocon_histproj <- function(in_hydrocon_proj,
 # in_drn_dt <- drn_dt_format
 # in_hydro_vars_dt <- tar_read(hydro_vars_dt)
 # outdir = figdir
+# reference_years = seq(1991, 2020)
+# sample_year = 2021
+# future_years = list(mid_century=seq(2041, 2070), 
+#                     late_century=seq(2071, 2100))
+# scenario='ssp585'
+
 
 plot_hydrocon_summarized <- function(in_allvars_summarized,
+                                     in_hydrocon_sites_proj,
                                      in_drn_dt, in_hydro_vars_dt, 
+                                     reference_years, sample_year, future_years,
+                                     scenario='ssp585',
                                      outdir, write_plot=T) {
   
   metacols_sub <- c(intersect(metacols, names(in_allvars_summarized$dt)), 'stream_type')
@@ -9187,7 +9196,7 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
     .[, Fdist_mean_10past_undirected_avg_samp_log10 := 
         log10(Fdist_mean_10past_undirected_avg_samp+0.1)] 
   
-  hydrocon_melt <- hydrocon_sub %>%
+  hydrocon_samp_melt <- hydrocon_sub %>%
     melt(id.vars=metacols_sub) %>%
     merge(in_drn_dt, by='country')  %>%
     .[, variable_name := get_full_hydrolabel(in_hydro_vars_dt, 
@@ -9197,18 +9206,18 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
       country,
       levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain" ),
       ordered=T)
-    ] 
+    ] %>%
+    .[, period:='2021']
   
-  color_vec <-  hydrocon_melt[!duplicated(country),
-                              setNames(color, country)]
-  
-  #Create boxplot --------------------------------------------------------------
+  color_vec <-  hydrocon_samp_melt[!duplicated(country),
+                                   setNames(color, country)]
   vars_sub <- c("DurD_samp", "PDurD365past", "FreD_samp", "meanConD_yr", 
                 "FstDrE", "FstDrE_diff10yrpast",
                 "DurD_CV30yrpast", "FstDrE_SD30yrpast", 
                 "Fdist_mean_10past_undirected_avg_samp_log10")
   
-  hydrocon_summarized_plot <- hydrocon_melt[variable %in% vars_sub,] %>%
+  #Create boxplot --------------------------------------------------------------
+  hydrocon_summarized_reanalysis_plot <- hydrocon_samp_melt[variable %in% vars_sub,] %>%
     ggplot(aes(x=country, y=value, fill=country, color=country)) +
     geom_point(alpha=0.5) +
     geom_boxplot(alpha=0.2) +
@@ -9223,22 +9232,94 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
           axis.title.y = element_blank(),
           strip.text = element_text(size=19))
   
+  ##############################################################################
+  #Do it for GCM output
+  #Subset to keep the desired scenario
+  hydrocon_sites_proj <- in_hydrocon_sites_proj[scenario==scenario,]
+  
+  hydrocon_sites_proj[, Fdist_undmean_yr_log10 := 
+                        log10(Fdist_undmean_yr+0.1)] 
+  
+  years_label <-rbindlist(list(
+    data.table(period= '1991-2020', year=reference_years),
+    data.table(period='2021', year=sample_year),
+    data.table(period='2071-2100', year=future_years$late_century)
+  ))
+  
+  hydrocon_sites_proj <- merge(
+    hydrocon_sites_proj,
+    years_label,
+    by='year',
+    all.x=F
+  )
+  
+  metacols_sub_gcm <- c('site', 'country', 'period')
+  
+  vars_sub_gcm <- c("DurD_yr", "FreD_yr", "meanConD_yr", 
+                    "FstDrE", "DurD_CV30yrpast", "FstDrE_SD30yrpast", 
+                    "Fdist_undmean_yr_log10")
+  
+  vars_labels <- hydrocon_sites_proj[1,c(metacols_sub_gcm, vars_sub_gcm), with=F] %>%
+    melt(id.vars=metacols_sub_gcm) %>%
+    .[, variable_name := get_full_hydrolabel(in_hydro_vars_dt, 
+                                             in_hydro_var=variable),
+      by=.I]
+  
+  hydrocon_gcm_melt <- hydrocon_sites_proj %>%
+    .[, c(metacols_sub_gcm, vars_sub_gcm), with=F] %>%
+    melt(id.vars=metacols_sub_gcm) %>%
+    merge(in_drn_dt, by='country')  %>%
+    merge(vars_labels[, .(variable, variable_name)], by='variable')  %>%
+    .[, country := factor(
+      country,
+      levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain" ),
+      ordered=T)
+    ] 
+  
+  hydrocon_samp_gcm_melt <- rbind(
+    hydrocon_gcm_melt[period!='2021',], 
+    hydrocon_samp_melt,
+    use.names=T, fill=T) %>%
+    .[, period := factor(period, levels=c('1991-2020', '2021', '2071-2100'))]
+  
+  #Create boxplot --------------------------------------------------------------
+  hydrocon_summarized_gcm_plot <- hydrocon_samp_gcm_melt[variable %in% vars_sub_gcm,] %>%
+    ggplot(aes(x=country, y=value, fill=country, color=country, linetype=period)) +
+    # geom_point(alpha=0.5) +
+    geom_boxplot(alpha=0.2) +
+    scale_fill_manual(name='Country', values=color_vec) +
+    scale_color_manual(name='Country', values=color_vec) +
+    facet_wrap(~variable,
+               scales='free_x',
+               labeller = label_wrap_gen(width = 22)) +
+    coord_flip() +
+    theme_classic() +
+    theme(axis.title.y = element_blank(),
+          strip.text = element_text(size=19))
+  
   #Export boxplots  -------------------------------------------------------------
   out_plot_path <- file.path(outdir, 'hydrocon_summarized_boxplot.pdf')
   ggsave(out_plot_path,
-         hydrocon_summarized_plot,
+         hydrocon_summarized_reanalysis_plot,
          width = 6, height = 6, dpi=300)
   
-  
-  #Ordinate annual stats  ------------------------------------------------------
-  pca_subcols <-  c("FreD_samp","meanConD_yr", "FstDrE",
-                    "FreD_CV30yrpast","meanConD_CV30yrpast", "FstDrE_SD30yrpast",  
-                    "sd6_30yrpast",  
+  ##############################################################################
+  # Ordinate annual stats using sampling year PCA loadings --------------------
+  pca_subcols <-  c("FreD_samp",
+                    "meanConD_yr", 
+                    "FstDrE",
+                    # "FreD_CV30yrpast",
+                    "meanConD_CV30yrpast", 
+                    "FstDrE_SD30yrpast",
+                    # "sd6_30yrpast",
                     "Fdist_mean_10past_undirected_avg_samp")
   
+  # Get the original data used for PCA
+  pca_data <- in_allvars_summarized$dt[
+    (DurD_samp>0) & !duplicated(site) & site != 'BUT08',] # & 
+  
   hydro_pca <- trans_pca_wrapper(
-    in_dt = in_allvars_summarized$dt[
-      (DurD_samp>0) & !duplicated(site) & site != 'BUT08',], 
+    in_dt = pca_data, 
     in_cols_to_ordinate =  pca_subcols, 
     id_cols = intersect(names(in_allvars_summarized$dt), metacols), 
     group_cols = NULL, 
@@ -9251,24 +9332,152 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
   
   loadings <- hydro_pca$pca$rotation
   
-  loadings_plot <-  ggplot(data = loadings) + 
+  loadings_plot <-  ggplot(data = loadings) +
     geom_segment( aes(x = 0, y = 0, xend = PC1*5, yend = PC2*5),
-                 arrow = arrow(length = unit(0.2, "cm")), color = "black") +
+                  arrow = arrow(length = unit(0.2, "cm")), color = "black") +
     geom_text(data = loadings,
-              aes(x = PC1*5, y = PC2*5, label = rownames(loadings)),
+              aes(x = PC1*5, y = PC2*5, label = str_wrap(gsub('_', ' ', rownames(loadings)), 10)),
               color = "black", vjust = -0.5) +
     theme_void() +
-    coord_cartesian(expand=T, clip='off') 
+    coord_cartesian(expand=T, clip='off')
+  
+  # Extract PCA parameters for projecting new data
+  pca_obj <- hydro_pca$pca
+  pca_rotation <- pca_obj$rotation
+  
+  # Get the actual data used for PCA to calculate center/scale
+  pca_data_sub <- as.data.table(pca_data)[, ..pca_subcols]
+  
+  # Calculate center and scale from the TRAINING DATA
+  pca_center <- colMeans(pca_data_sub, na.rm = TRUE)
+  pca_scale <- apply(pca_data_sub, 2, sd, na.rm = TRUE)
+  
+  # Map PCA columns to projection data columns
+  pca_to_proj_mapping <- list(
+    "FreD_samp" = "FreD_yr",
+    "meanConD_yr" = "meanConD_yr",
+    "FstDrE" = "FstDrE",
+    # "FreD_CV30yrpast" = "FreD_CV30yrpast",
+    "meanConD_CV30yrpast" = "meanConD_CV30yrpast",
+    "FstDrE_SD30yrpast" = "FstDrE_SD30yrpast",
+    # "sd6_30yrpast" = "sd6_30yrpast",
+    "Fdist_mean_10past_undirected_avg_samp" = "Fdist_undmean_yr"
+  )
+  
+  # Get projection columns that correspond to PCA columns
+  proj_pca_cols <- sapply(pca_subcols, function(col) pca_to_proj_mapping[[col]])
+  
+  # Verify all projection columns exist
+  missing_cols <- setdiff(proj_pca_cols, names(hydrocon_sites_proj))
+  if(length(missing_cols) > 0) {
+    stop(paste("Missing projection columns:", paste(missing_cols, collapse = ", ")))
+  }
+  
+  # Filter projection data for reference and future periods
+  ref_data <- hydrocon_sites_proj[period == '1991-2020', ]
+  future_data <- hydrocon_sites_proj[period == '2071-2100', ]
+  
+  # Function to compute PC scores using existing PCA parameters
+  compute_pc_scores <- function(dt, cols, center, scale, rotation) {
+    # Select only the columns we need
+    dt_sub <- dt[, cols, with=F]
     
+    # Convert to matrix
+    dt_mat <- as.matrix(dt_sub)
+    
+    # Center using PCA means
+    dt_centered <- dt_mat
+    for(i in 1:ncol(dt_mat)) {
+      dt_centered[,i] <- dt_mat[,i] - center[i]
+    }
+    
+    # Scale using PCA SDs (only if SD > 0)
+    dt_scaled <- dt_centered
+    for(i in 1:ncol(dt_centered)) {
+      if(scale[i] > 0) {
+        dt_scaled[,i] <- dt_centered[,i] / scale[i]
+      }
+    }
+    
+    # Multiply by rotation matrix to get PC scores
+    pc_scores <- dt_scaled %*% rotation
+    
+    # Return as data.table with metadata
+    result <- as.data.table(pc_scores)
+    names(result) <- paste0("env_PC", 1:ncol(result))
+    return(cbind(dt[, .(site, country, period)], result))
+  }
+  
+  # Compute PC scores for reference and future data
+  ref_pc <- compute_pc_scores(ref_data, proj_pca_cols, pca_center, pca_scale, pca_rotation)
+  future_pc <- compute_pc_scores(future_data, proj_pca_cols, pca_center, pca_scale, pca_rotation)
+  # Get current site points (from sampling year PCA)
+  current_points <- hydro_pca$dt[, .(site, country, env_PC1, env_PC2)]
+  
+  # Prepare data for comparison plot
+  # For hulls: reference and future PC scores
+  ref_hull_data <- ref_pc[, .(country, env_PC1, env_PC2, period)]
+  future_hull_data <- future_pc[, .(country, env_PC1, env_PC2, period)]
+  
+  # Combine hull data
+  hull_data <- rbindlist(list(ref_hull_data, future_hull_data))
+  
+  # For current points: need to appear in both reference and future panels
+  current_left <- copy(current_points)
+  current_left$period <- '1991-2020'
+  
+  current_right <- copy(current_points)
+  current_right$period <- '2071-2100'
+  
+  current_data <- rbindlist(list(current_left, current_right))
+  
+  # Create comparison plot with facets
+  hydrocon_pca_comparison_plot <- ggplot() +
+    # Draw convex hulls for each period and country
+    geom_mark_hull(
+      data = hull_data,
+      aes(x = env_PC1, y = env_PC2, fill = country, color = country),
+      alpha = 0.2, concavity = 7, linetype = 0,
+      con.type = 'none', expand = unit(2.5, 'mm')
+    ) +
+    # Draw current site points
+    geom_point(
+      data = current_data,
+      aes(x = env_PC1, y = env_PC2, color = country),
+      size = 4, alpha = 0.7
+    ) +
+    labs(
+      x = sprintf('PC1 (%s %%)', round(100 * pc_importance_dt[2, PC1])),
+      y = sprintf('PC2 (%s %%)', round(100 * pc_importance_dt[2, PC2]))
+    ) +
+    scale_color_manual(name = 'DRN', values = color_vec) +
+    scale_fill_manual(name = 'DRN', values = color_vec) +
+    scale_x_continuous(limits = c(-10, 5), expand = F) +
+    scale_y_continuous(limits = c(-10, 5), breaks=seq(-3, 2, 1), expand = F) +
+    theme_classic() +
+    theme(
+      text = element_text(size = 14),
+      strip.text = element_text(size = 14)
+    ) +
+    facet_grid(country ~ period, scales = 'free', switch = 'y')
+  
+  layout_comparison <- c(
+    patchwork::area(t = 1, l = 1, b = 12, r = 12),
+    patchwork::area(t = 1, l = 12, b =3, r = 14)
+  )
+  
+  hydrocon_pca_comparison_plot_assembled <- 
+    hydrocon_pca_comparison_plot + loadings_plot +
+    plot_layout(design = layout_comparison)
+  
+  
+  # Create the original PCA plot for reference
   hydrocon_pca_plot <- ggplot(hydro_pca$dt, aes(x=env_PC1, y=env_PC2)) +
-    geom_mark_hull(aes(fill = country, color=country), 
-                       #label = drn_format), 
+    geom_mark_hull(aes(fill = country, color=country),
                    alpha=0.2, concavity=7, linetype=0,
-                   #label.fill = "inherit", label.colour = "inherit", label.buffer = unit(0, 'mm'),
                    con.type = 'none', expand=unit(2.5, 'mm')) +
     geom_point(aes(color=country), size=4, alpha=0.7) +
-    # stat_ellipse(aes(fill=country), geom = "polygon", alpha=0.2, type='t') +
-    labs(x=sprintf('PC1 (%s %%)', round(100*pc_importance_dt[2, PC1])), 
+    labs(x=sprintf('PC1 (%s %%)', round(100*pc_importance_dt[2, PC1])),
          y=sprintf('PC2 (%s %%)', round(100*pc_importance_dt[2, PC2]))) +
     scale_color_manual(name='Country', values=color_vec) +
     scale_fill_manual(name='Country', values=color_vec) +
@@ -9278,22 +9487,26 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
     theme(legend.position = 'none',
           text = element_text(size=18))
   
-  
-  layout <- c(
+  # Assemble plots: comparison plot on left, loadings plot on right
+  layout_original <- c(
     patchwork::area(t = 1, l = 1, b = 7, r = 7),
-    patchwork::area(t = 5, l = 1, b = 7, r = 3)
+    patchwork::area(t = 5, l = 2, b = 7, r = 3)
   )
-
+  
   hydrocon_pca_plot_assembled <- 
     hydrocon_pca_plot + loadings_plot +
-    plot_layout(design = layout)
+    plot_layout(design = layout_original)
   
   #Export ordination plot  -------------------------------------------------------------
-  out_plot_path <- file.path(outdir, 'hydrocon_summarized_ordiplot.pdf')
+  out_plot_path <- file.path(outdir, 'hydrocon_summarized_ordiplot_sampling.pdf')
   ggsave(out_plot_path,
          hydrocon_pca_plot_assembled,
-         width = 6, height = 6, dpi=300)
-
+         width = 10, height = 8, dpi=300)
+  
+  out_plot_path <- file.path(outdir, 'hydrocon_summarized_ordiplot_comparison.pdf')
+  ggsave(out_plot_path,
+         hydrocon_pca_comparison_plot_assembled,
+         width = 8, height = 12, dpi=300)
   
   #Export statistics for subset of variables  ----------------------------------
   out_tab_path <- file.path(outdir, 'hydrocon_summarized.csv')
@@ -9303,10 +9516,11 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
     group.long = FALSE,
     out = "csv",
     file = out_tab_path)
-
+  
   return(list(
     boxplot = hydrocon_summarized_plot,
-    ordiplot = hydrocon_pca_plot,
+    ordiplot = hydrocon_pca_comparison_plot,
+    ordiplot_assembled = hydrocon_pca_comparison_assembled,
     tab_path = out_tab_path
   )
   )
@@ -9560,15 +9774,15 @@ plot_varcomp_multiorganisms <- function(in_hydrowindow_varcomp_multiorg,
 # in_hydrowindow_best_intercept_dt <- tar_read(hydrowindow_best_richness_intercept_dt)
 # 
 # emtrends_list = list(
-#   miv_nopools = tar_read(hydrowindow_emtrends_all_richness_miv_nopools)$dt,
-#   miv_nopools_ept = tar_read(hydrowindow_emtrends_all_richness_miv_nopools_ept)$dt,
-#   miv_nopools_och = tar_read(hydrowindow_emtrends_all_richness_miv_nopools_och)$dt,
-#   dia_biof_nopools = tar_read(hydrowindow_emtrends_all_richness_dia_biof_nopools)$dt,
-#   dia_sedi_nopools = tar_read(hydrowindow_emtrends_all_richness_dia_sedi_nopools)$dt,
-#   fun_biof_nopools = tar_read(hydrowindow_emtrends_all_richness_fun_biof_nopools)$dt,
-#   fun_sedi_nopools = tar_read(hydrowindow_emtrends_all_richness_fun_sedi_nopools)$dt,
-#   bac_biof_nopools = tar_read(hydrowindow_emtrends_all_richness_bac_biof_nopools)$dt,
-#   bac_sedi_nopools = tar_read(hydrowindow_emtrends_all_richness_bac_sedi_nopools)$dt
+#   miv_nopools = tar_read(hydrowindow_emtrends_all_richness_miv_nopools),
+#   miv_nopools_ept = tar_read(hydrowindow_emtrends_all_richness_miv_nopools_ept),
+#   miv_nopools_och = tar_read(hydrowindow_emtrends_all_richness_miv_nopools_och),
+#   dia_biof_nopools = tar_read(hydrowindow_emtrends_all_richness_dia_biof_nopools),
+#   dia_sedi_nopools = tar_read(hydrowindow_emtrends_all_richness_dia_sedi_nopools),
+#   fun_biof_nopools = tar_read(hydrowindow_emtrends_all_richness_fun_biof_nopools),
+#   fun_sedi_nopools = tar_read(hydrowindow_emtrends_all_richness_fun_sedi_nopools),
+#   bac_biof_nopools = tar_read(hydrowindow_emtrends_all_richness_bac_biof_nopools),
+#   bac_sedi_nopools = tar_read(hydrowindow_emtrends_all_richness_bac_sedi_nopools)
 # )
 # in_drn_dt <- drn_dt
 # write_plot = F
@@ -9596,8 +9810,8 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
   #Normalize coefficients by intercept
   emtrends_all <- emtrends_all %>% 
     merge(in_hydrowindow_best_intercept_dt[
-      , .(hydro_var_root, organism, intercept, test_parabolic)], 
-          by=c('hydro_var_root', 'organism', 'test_parabolic')) %>%
+      , .(hydro_var, organism, intercept, test_parabolic)], 
+          by=c('hydro_var', 'organism', 'test_parabolic')) %>%
     .[, `:=`(trend_rel = trend/abs(intercept),
              SE_rel = SE/abs(intercept),
              lcl_rel = asymp.LCL/abs(intercept),

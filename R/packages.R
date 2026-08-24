@@ -14,6 +14,7 @@ pkg_vec <- list(
   'ggh4x',
   'ggnewscale',
   'ggnetwork',
+  'ggpattern',
   'ggplot2',
   'ggridges',
   'ggspatial',
