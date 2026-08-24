@@ -1263,11 +1263,27 @@ temporal_analysis_targets <- list(
     
     tar_target(
       hydrowindow_emtrends_all,
-      get_hydrowindow_emtrends(
-        perf_dt = hydrowindow_perf_tables$all,
-        in_hydro_vars_dt = hydro_vars_dt,
-        in_drn_dt = drn_dt,
-        plot=F)
+      {
+        perf_dt_all <- hydrowindow_perf_tables$all[fit_status=='ok']
+        if (TRUE %in% unique(perf_dt_all$test_parabolic)) {
+          emtrends_all_para <- get_hydrowindow_emtrends(
+            perf_dt = perf_dt_all[test_parabolic==TRUE,],
+            in_hydro_vars_dt = hydro_vars_dt,
+            in_drn_dt = drn_dt,
+            plot=F)
+        } else {
+          emtrends_all_para <- NULL
+        }
+        
+        emtrends_all_nopara <- get_hydrowindow_emtrends(
+          perf_dt = perf_dt_all[test_parabolic==FALSE,],
+          in_hydro_vars_dt = hydro_vars_dt,
+          in_drn_dt = drn_dt,
+          plot=F)
+        
+        return(rbind(emtrends_all_para$dt, 
+                     emtrends_all_nopara$dt))
+      }
     )
     ,
     

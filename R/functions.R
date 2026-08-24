@@ -9983,7 +9983,7 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt) {
     SE_biofilm = SE_rel[organism_sub == "Biof."],
     SE_sediment = SE_rel[organism_sub == "Sedi."]
   ),
-  by = .(country, organism_class, hydro_var)]
+  by = .(country, organism_class, hydro_var, test_parabolic)]
   
   dt_diff[, `:=`(
     diff = trend_biofilm - trend_sediment,
@@ -9997,7 +9997,7 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt) {
     .(estimate = as.numeric(m$b), se = m$se, zval = m$zval, pval = m$pval,
       ci.lb = m$ci.lb, ci.ub = m$ci.ub,
       I2 = m$I2, QE = m$QE, QEp = m$QEp, n_countries = .N)
-  }, by = .(organism_class, hydro_var, hydro_var_root)] 
+  }, by = .(organism_class, hydro_var)] 
   
   meta_results[, p_adj := p.adjust(pval, method = "fdr"), 
                by=.(hydro_var_root, organism)]
