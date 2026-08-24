@@ -8301,7 +8301,8 @@ get_hydrowindow_varcomp <- function(perf_dt, nrow_pag = 2, ncol_pag = 3) {
         as.data.table(SSN2::varcomp(mod[[1]])) #Extract variance decomposition
       } else data.table()
     },
-    by = .(response_var, hydro_var, covtypes, hydro_label, window_d)
+    by = .(response_var, hydro_var, covtypes, 
+           hydro_label, window_d, test_parabolic)
   ] %>%
     merge(
       data.table(
@@ -8444,12 +8445,12 @@ get_hydrowindow_emmeans <- function(best_dt, in_hydro_vars_dt, in_drn_dt, plot=T
 
 #------ get_hydrowindow_emtrends -------------------------------------------------------
 # hydrowindown_perf_tables <- tar_read(hydrowindow_perf_tables_richness_miv_nopools_ept)
-# best_dt <- hydrowindown_perf_tables$best
+# perf_dt <- hydrowindown_perf_tables$best
 # in_hydro_vars_dt <- tar_read(hydro_vars_dt)
 # in_drn_dt <- drn_dt
-
-# perf_dt = tar_read(hydrowindow_perf_tables_richness_miv_nopools)$all
-# in_hydro_vars_dt = hydro_vars_dt
+# 
+# perf_dt = tar_read(hydrowindow_perf_tables_richness_bac_biof_nopools)$all
+# in_hydro_vars_dt = tar_read(hydro_vars_dt)
 # in_drn_dt = drn_dt
 # plot=F
 
@@ -8462,14 +8463,19 @@ get_hydrowindow_emmeans <- function(best_dt, in_hydro_vars_dt, in_drn_dt, plot=T
 #'
 #' @return A `data.table` and plots of estimated slopes across predictors.
 #' @export
-get_hydrowindow_emtrends <- function(best_dt, in_hydro_vars_dt, in_drn_dt, plot) {
+get_hydrowindow_emtrends <- function(perf_dt, in_hydro_vars_dt, in_drn_dt, plot) {
   
-  emtrends_dt_all <- lapply(best_dt$hydro_var, function(in_pred_var) {
+  emtrends_dt_all <- lapply(perf_dt$hydro_var, function(in_pred_var) {
     print(in_pred_var)
-    in_mod <- best_dt[hydro_var == in_pred_var, mod][[1]]
-    if (in_pred_var == "null") in_pred_var <- all.vars(in_mod$formula)[2]
+    in_mod <- perf_dt[hydro_var == in_pred_var, mod][[1]]
+    if (in_pred_var == "null") {
+      in_pred_var <- all.vars(in_mod$formula)[2]
+      test_para <- FALSE
+    } else {
+      test_para <- perf_dt[hydro_var == in_pred_var, test_parabolic][[1]]
+    }
     
-    get_ssn_emtrends(
+    ssn_emtrends <- get_ssn_emtrends(
       in_mod=in_mod, 
       in_pred_var=in_pred_var, 
       in_pred_var_label=in_pred_var, 
@@ -8477,7 +8483,11 @@ get_hydrowindow_emtrends <- function(best_dt, in_hydro_vars_dt, in_drn_dt, plot)
       interaction_var = "country", 
       plot = FALSE)$dt
     
-  }) %>% rbindlist(use.names = TRUE, fill = TRUE) %>%
+    ssn_emtrends$test_parabolic <- test_para
+    
+    return(ssn_emtrends)
+  }) %>% 
+    rbindlist(use.names = TRUE, fill = TRUE) %>%
     .[, pred_var_label := get_full_hydrolabel(in_hydro_vars_dt, pred_var_name),
       by=.(pred_var_name, country)] %>%
     setnames('pred_var_name', 'hydro_var') %>%
@@ -9184,14 +9194,14 @@ plot_varcomp_multiorganisms <- function(in_hydrowindow_varcomp_multiorg,
   
   varcomp_best <- in_hydrowindow_varcomp_multiorg %>%
     .[varcomp=="Covariates (PR-sq)", 
-      .SD[which.max(proportion), list(window_d, proportion, hydro_var)],
+      .SD[which.max(proportion), list(window_d, proportion, hydro_var, test_parabolic)],
       by=.(hydro_label, response_var, organism)] %>%
     .[, null_fixedR2 := .SD[hydro_var=='null', proportion], by=organism] %>%
     .[, marginal_fixedR2 := proportion - null_fixedR2] %>%
     .[, proportion := NULL] %>%
     merge(in_hydrowindow_varcomp_multiorg,
           by=c('hydro_label', 'hydro_var', 'response_var', 
-               'organism', 'window_d'))  %>%
+               'organism', 'window_d', 'test_parabolic'))  %>%
     .[!(hydro_label %in% c('Null', 'Mean flow percentile')),] %>%
     merge(in_organism_dt, by='organism') %>%
     merge(in_hydro_vars_dt[!duplicated(hydro_label),
@@ -9296,8 +9306,9 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
   
   #Normalize coefficients by intercept
   emtrends_all <- emtrends_all %>% 
-    merge(in_hydrowindow_best_intercept_dt[, .(hydro_var_root, organism, intercept)], 
-          by=c('hydro_var_root', 'organism')) %>%
+    merge(in_hydrowindow_best_intercept_dt[
+      , .(hydro_var_root, organism, intercept, test_parabolic)], 
+          by=c('hydro_var_root', 'organism', 'test_parabolic')) %>%
     .[, `:=`(trend_rel = trend/abs(intercept),
              SE_rel = SE/abs(intercept),
              lcl_rel = asymp.LCL/abs(intercept),

@@ -1254,7 +1254,7 @@ temporal_analysis_targets <- list(
     tar_target(
       hydrowindow_emtrends_best,
       get_hydrowindow_emtrends(
-        best_dt = hydrowindow_perf_tables$best,
+        perf_dt = hydrowindow_perf_tables$best,
         in_hydro_vars_dt = hydro_vars_dt,
         in_drn_dt = drn_dt,
         plot=T)
@@ -1264,7 +1264,7 @@ temporal_analysis_targets <- list(
     tar_target(
       hydrowindow_emtrends_all,
       get_hydrowindow_emtrends(
-        best_dt = hydrowindow_perf_tables$all,
+        perf_dt = hydrowindow_perf_tables$all,
         in_hydro_vars_dt = hydro_vars_dt,
         in_drn_dt = drn_dt,
         plot=F)
