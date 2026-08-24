@@ -16,6 +16,7 @@ pkg_vec <- list(
   'ggnetwork',
   'ggpattern',
   'ggplot2',
+  'ggrepel',
   'ggridges',
   'ggspatial',
   'gridExtra',

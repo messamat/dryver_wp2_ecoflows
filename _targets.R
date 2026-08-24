@@ -51,7 +51,7 @@ hydro_combi <- expand.grid(
   stringsAsFactors = FALSE)
 
 if (!interactive()) {
-  perf_ratio <- 0.25 #Set how much you want to push your computer (% of cores and RAM)
+  perf_ratio <- 0.7 #Set how much you want to push your computer (% of cores and RAM)
   nthreads <- round(parallel::detectCores(logical=F)*perf_ratio)
   #future::plan("future::multisession", workers=nthreads)
   total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
@@ -1329,6 +1329,16 @@ temporal_analysis_targets <- list(
         in_organism = in_organism,
         in_response_var = in_response_var,
         out_dir = figdir)
+    ),
+    
+    tar_target(
+      ssn_div_hydrowindow_permutations,
+      permutation_results <- run_all_ssn_permutations(
+        perf_dt = hydrowindow_perf_tables$best,
+        n_perm = 500,
+        n_cores = nthreads,
+        out_dir = file.path(resdir, "permutation_results")
+      )
     )
   )
   ,
@@ -1523,9 +1533,9 @@ temporal_analysis_targets <- list(
   # lapply(unique(hydrowindow_best_richness_intercept_dt$organism),
   #        function(in_organism) {
   #          permutation_results <- run_all_ssn_permutations(
-  #            perf_dt = hydrowindow_best_richness_intercept_dt[organism==in_organism,],
-  #            n_perm = 50,
-  #            n_cores = 2,
+  #            perf_dt = hydrowindow_perf_tables_richness_miv_nopools,
+  #            n_perm = 20,
+  #            n_cores = 11,
   #            out_dir = file.path(resdir, "permutation_results")
   #          )
   #        }
@@ -1535,23 +1545,24 @@ temporal_analysis_targets <- list(
 
   tar_target(
     summary_table_multiorganism_richness,
-    get_multiorganism_summary_table(
-      emtrends_dt = emtrends_multiorganism_richness$dt,
-      varcomp_dt = varcomp_multiorganism_richness$dt
+    get_hydrowindown_multiorganism_summary(
+      emtrends_dt = emtrends_multiorganism_best_richness$dt,
+      varcomp_dt = varcomp_multiorganism_richness$dt,
+      out_dir = figdir
     )
   )
   ,
 
   tar_target(
     biof_vs_sedi_emtrends_rma_table,
-    test_biof_vs_sedi_emtrends(emtrends_dt=emtrends_multiorganism_all_richness)
+    test_biof_vs_sedi_emtrends(emtrends_dt=emtrends_multiorganism_all_richness$dt)
   )
-  ,
-
-  tar_target(
-    country_ranking_test_table,
-    test_country_ranking_emtrends(emtrends_dt=emtrends_multiorganism_all_richness)
-  )
+  # ,
+  # 
+  # tar_target(
+  #   country_ranking_test_table,
+  #   test_country_ranking_emtrends(emtrends_dt=emtrends_multiorganism_all_richness$dt)
+  # )
 )
 
 ##############################################################################

@@ -9174,9 +9174,10 @@ plot_hydrocon_histproj <- function(in_hydrocon_proj,
 # in_drn_dt <- drn_dt_format
 # in_hydro_vars_dt <- tar_read(hydro_vars_dt)
 # outdir = figdir
+# in_hydrocon_sites_proj <- rbindlist(tar_read(hydrocon_sites_proj_gcm))
 # reference_years = seq(1991, 2020)
 # sample_year = 2021
-# future_years = list(mid_century=seq(2041, 2070), 
+# future_years = list(mid_century=seq(2041, 2070),
 #                     late_century=seq(2071, 2100))
 # scenario='ssp585'
 
@@ -9283,7 +9284,7 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
     .[, period := factor(period, levels=c('1991-2020', '2021', '2071-2100'))]
   
   #Create boxplot --------------------------------------------------------------
-  hydrocon_summarized_gcm_plot <- hydrocon_samp_gcm_melt[variable %in% vars_sub_gcm,] %>%
+  hydrocon_summarized_comparison_plot <- hydrocon_samp_gcm_melt[variable %in% vars_sub_gcm,] %>%
     ggplot(aes(x=country, y=value, fill=country, color=country, linetype=period)) +
     # geom_point(alpha=0.5) +
     geom_boxplot(alpha=0.2) +
@@ -9305,22 +9306,20 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
   
   ##############################################################################
   # Ordinate annual stats using sampling year PCA loadings --------------------
-  pca_subcols <-  c("FreD_samp",
-                    "meanConD_yr", 
-                    "FstDrE",
-                    # "FreD_CV30yrpast",
-                    "meanConD_CV30yrpast", 
-                    "FstDrE_SD30yrpast",
-                    # "sd6_30yrpast",
-                    "Fdist_mean_10past_undirected_avg_samp")
-  
+  pca_subcols_mapping <- list("DurD_samp"="DurD_yr",
+                              "FreD_samp"="FreD_yr",
+                              "qsim_avg_samp"="meanQ",
+                              "PDurD365past"="PDurD_yr",
+                              "DurD_CV10yrpast"="DurD_CV10yrpast"
+  )
+
   # Get the original data used for PCA
   pca_data <- in_allvars_summarized$dt[
     (DurD_samp>0) & !duplicated(site) & site != 'BUT08',] # & 
   
   hydro_pca <- trans_pca_wrapper(
     in_dt = pca_data, 
-    in_cols_to_ordinate =  pca_subcols, 
+    in_cols_to_ordinate =  names(pca_subcols_mapping), 
     id_cols = intersect(names(in_allvars_summarized$dt), metacols), 
     group_cols = NULL, 
     num_pca_axes = 4)
@@ -9346,26 +9345,14 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
   pca_rotation <- pca_obj$rotation
   
   # Get the actual data used for PCA to calculate center/scale
-  pca_data_sub <- as.data.table(pca_data)[, ..pca_subcols]
+  pca_data_sub <- as.data.table(pca_data)[, names(pca_subcols_mapping), with=F]
   
   # Calculate center and scale from the TRAINING DATA
   pca_center <- colMeans(pca_data_sub, na.rm = TRUE)
   pca_scale <- apply(pca_data_sub, 2, sd, na.rm = TRUE)
   
-  # Map PCA columns to projection data columns
-  pca_to_proj_mapping <- list(
-    "FreD_samp" = "FreD_yr",
-    "meanConD_yr" = "meanConD_yr",
-    "FstDrE" = "FstDrE",
-    # "FreD_CV30yrpast" = "FreD_CV30yrpast",
-    "meanConD_CV30yrpast" = "meanConD_CV30yrpast",
-    "FstDrE_SD30yrpast" = "FstDrE_SD30yrpast",
-    # "sd6_30yrpast" = "sd6_30yrpast",
-    "Fdist_mean_10past_undirected_avg_samp" = "Fdist_undmean_yr"
-  )
-  
   # Get projection columns that correspond to PCA columns
-  proj_pca_cols <- sapply(pca_subcols, function(col) pca_to_proj_mapping[[col]])
+  proj_pca_cols <- sapply(names(pca_subcols_mapping), function(col) pca_subcols_mapping[[col]])
   
   # Verify all projection columns exist
   missing_cols <- setdiff(proj_pca_cols, names(hydrocon_sites_proj))
@@ -9373,9 +9360,9 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
     stop(paste("Missing projection columns:", paste(missing_cols, collapse = ", ")))
   }
   
-  # Filter projection data for reference and future periods
-  ref_data <- hydrocon_sites_proj[period == '1991-2020', ]
-  future_data <- hydrocon_sites_proj[period == '2071-2100', ]
+  # Filter projection data for reference and future periods (focusing on NPR sites)
+  ref_data <- hydrocon_sites_proj[(DurD_yr > 0) & period == '1991-2020', ]
+  future_data <- hydrocon_sites_proj[(DurD_yr > 0) & period == '2071-2100', ]
   
   # Function to compute PC scores using existing PCA parameters
   compute_pc_scores <- function(dt, cols, center, scale, rotation) {
@@ -9437,7 +9424,7 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
     geom_mark_hull(
       data = hull_data,
       aes(x = env_PC1, y = env_PC2, fill = country, color = country),
-      alpha = 0.2, concavity = 7, linetype = 0,
+      alpha = 0.2, concavity = 8, linetype = 0,
       con.type = 'none', expand = unit(2.5, 'mm')
     ) +
     # Draw current site points
@@ -9452,8 +9439,8 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
     ) +
     scale_color_manual(name = 'DRN', values = color_vec) +
     scale_fill_manual(name = 'DRN', values = color_vec) +
-    scale_x_continuous(limits = c(-10, 5), expand = F) +
-    scale_y_continuous(limits = c(-10, 5), breaks=seq(-3, 2, 1), expand = F) +
+    scale_x_continuous(limits = c(-5, 5), breaks=seq(-4, 5, 2), expand = F) +
+    scale_y_continuous(limits = c(-5, 5), breaks=seq(-4, 5, 2), expand = F) +
     theme_classic() +
     theme(
       text = element_text(size = 14),
@@ -9518,9 +9505,12 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
     file = out_tab_path)
   
   return(list(
-    boxplot = hydrocon_summarized_plot,
-    ordiplot = hydrocon_pca_comparison_plot,
-    ordiplot_assembled = hydrocon_pca_comparison_assembled,
+    boxplot_reanalysis = hydrocon_summarized_reanalysis_plot,
+    boxplot_comparison = hydrocon_summarized_comparison_plot,
+    ordiplot= hydrocon_pca_plot,
+    ordiplot_assembled = hydrocon_pca_plot_assembled,
+    ordiplot_comparison = hydrocon_pca_comparison_plot,
+    ordiplot_comparison_assembled = hydrocon_pca_comparison_plot_assembled,
     tab_path = out_tab_path
   )
   )
@@ -9938,6 +9928,12 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
 }
 
 #------ run_all_ssn_permutations ---------------------------------------------------
+# perf_dt = tar_read(hydrowindow_perf_tables_richness_fun_biof_nopools)
+# n_perm = 500
+# n_cores = 10
+# out_dir = file.path(resdir, "permutation_results")
+# save_individual = FALSE
+
 #' Run permutation tests for all Models in parallel
 #'
 #' Processes all models in parallel.
@@ -9954,7 +9950,7 @@ run_all_ssn_permutations <- function(perf_dt, n_perm = 500, out_dir = "permutati
   
   # Setup
   if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
-  models_to_test <- perf_dt[hydro_var_root != "null", ]
+  models_to_test <- perf_dt[hydro_var != "null", ]
   
   # Prepare tasks
   tasks <- lapply(1:nrow(models_to_test), function(i) {
@@ -9966,13 +9962,13 @@ run_all_ssn_permutations <- function(perf_dt, n_perm = 500, out_dir = "permutati
       fit_mod = fit_mod,
       ssn_obj = fit_mod$ssn.object, 
       hydro_var = row$hydro_var,
-      hydro_var_root = row$hydro_var_root,
       organism = row$organism,
       hydro_label = as.character(row$hydro_label),
       window_d = as.character(row$window_d),
       test_parabolic = row$test_parabolic,
       n_perm = n_perm,
       out_dir = out_dir,
+      fit_status = row$fit_status,
       save_individual = save_individual
     )
   })
@@ -10007,24 +10003,36 @@ run_all_ssn_permutations <- function(perf_dt, n_perm = 500, out_dir = "permutati
       progress = FALSE
     )
     
+    if (task$fit_status != 'ok') {
+      out_mod_summary <- list(
+        row_idx = task$row_idx,
+        organism = task$organism,
+        hydro_var = task$hydro_var,
+        hydro_label = task$hydro_label,
+        test_parabolic = task$test_parabolic,
+        fit_status = task$fit_status,
+        window_d = task$window_d
+      )
+      return(out_mod_summary)
+    }
+    
     if (task$save_individual) {
       qs2::qs_save(perm_result,
                    file = file.path(
                      task$out_dir,
-                     paste0(task$organism, "_", task$hydro_var_root, "_perm.qs")))
+                     paste0(task$organism, "_", task$hydro_var, "_perm.qs")))
     }
     
     # Print completion message for each model
-    message(paste("Completed:", task$organism, "-", task$hydro_var_root))
+    message(paste("Completed:", task$organism, "-", task$hydro_var))
     
     # Return summary
     perm_aics <- perm_result$permutation_results$AIC
     valid_aics <- perm_aics[!is.na(perm_aics)]
     
-    list(
+    out_mod_summary <- list(
       row_idx = task$row_idx,
       organism = task$organism,
-      hydro_var_root = task$hydro_var_root,
       hydro_var = task$hydro_var,
       hydro_label = task$hydro_label,
       test_parabolic = task$test_parabolic,
@@ -10036,13 +10044,14 @@ run_all_ssn_permutations <- function(perf_dt, n_perm = 500, out_dir = "permutati
       n_permutations = perm_result$n_permutations,
       window_d = task$window_d
     )
+    return(out_mod_summary)
   })
   
   parallel::stopCluster(cl)
   
   # Combine results
-  all_results <- rbindlist(results, fill = TRUE)
-  setorder(all_results, organism, hydro_var_root)
+  all_results <- rbindlist(results, fill = T, use.names = T)
+  setorder(all_results, organism, hydro_var)
   
   # Save summary
   #qs2::qs_save(all_results, file.path(out_dir, "permutation_summary.qs"))
@@ -10050,6 +10059,7 @@ run_all_ssn_permutations <- function(perf_dt, n_perm = 500, out_dir = "permutati
   
   return(all_results)
 }
+
 #------ get_hydrowindown_multiorganism_summary ----------------------------------------
 # emtrends_dt <- tar_read(emtrends_multiorganism_richness)$dt
 # varcomp_dt <- tar_read(varcomp_multiorganism_richness)$dt
@@ -10183,24 +10193,32 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
 
 
 test_biof_vs_sedi_emtrends <- function(emtrends_dt) {
-  emtrends_micro <- emtrends_dt[organism_class %in% c('Diatoms', 'Fungi', 'Bacteria'),]
+  dry_vars <- setdiff(unique(emtrends_dt$hydro_var_root), c('maxPQ', 'oQ10'))
   
-  # emtrends_sub <- emtrends_micro[hydro_var_root=='DurD',]
-  # ggplot(emtrends_sub, aes(x=hydro_var, y=trend_rel, color=organism_sub)) +
-  #   geom_violin() +
-  #   geom_point()
+  #Substract data to only keep microbes, variables related to drying
+  #and discarding parabolic relationships
+  emtrends_micro <- emtrends_dt[
+    organism_class %in% c('Diatoms', 'Fungi', 'Bacteria') 
+    & hydro_var_root %in% dry_vars
+    & test_parabolic == F,]
+  
+  #Get average estimate across countries
+  emtrends_micro[
+    , estimate_trend_avg := mean(trend_rel),
+    by = .(organism, hydro_var, hydro_var_root, test_parabolic)]
   
   # Compute the difference (biofilm - sediment) for each country
   dt_diff <-  emtrends_micro[, .(
     trend_biofilm = trend_rel[organism_sub == "Biof."],
     trend_sediment = trend_rel[organism_sub == "Sedi."],
     SE_biofilm = SE_rel[organism_sub == "Biof."],
-    SE_sediment = SE_rel[organism_sub == "Sedi."]
+    SE_sediment = SE_rel[organism_sub == "Sedi."],
+    avg_trend_sediment = estimate_trend_avg[organism_sub == "Sedi."]
   ),
-  by = .(country, organism_class, hydro_var, test_parabolic)]
+  by = .(country, organism_class, hydro_var, hydro_var_root, test_parabolic)]
   
   dt_diff[, `:=`(
-    diff = trend_biofilm - trend_sediment,
+    diff = trend_sediment - trend_biofilm,
     se_diff = sqrt(SE_biofilm^2 + SE_sediment^2)
   )]
   
@@ -10208,21 +10226,27 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt) {
   # https://wviechtb.github.io/metafor/reference/rma.uni.html
   meta_results <- dt_diff[, {
     m <- metafor::rma(yi = diff, sei = se_diff, method = "REML", data = .SD)
-    .(estimate = as.numeric(m$b), se = m$se, zval = m$zval, pval = m$pval,
+    .(diff_estimate = as.numeric(m$b), se = m$se, zval = m$zval, pval = m$pval,
       ci.lb = m$ci.lb, ci.ub = m$ci.ub,
       I2 = m$I2, QE = m$QE, QEp = m$QEp, n_countries = .N)
-  }, by = .(organism_class, hydro_var)] 
+  }, by = .(organism_class, hydro_var, hydro_var_root, 
+            test_parabolic, avg_trend_sediment)] 
   
   meta_results[, p_adj := p.adjust(pval, method = "fdr"), 
-               by=.(hydro_var_root, organism)]
+               by=.(hydro_var_root, test_parabolic, organism_class)]
+  meta_results[, `:=`(p_signif=as.factor(p_adj < 0.05),
+                      QEp_signif=QEp < 0.05,
+                      avg_trend_sed_sign = fifelse(avg_trend_sediment>0,
+                                                   'positive', 'negative')
+                      )]
   
   "
   meta_results table (one row per organism_class × hydro_var):
   
-  estimate: the pooled biofilm − sediment difference in slope, averaged across 
+  estimate: the pooled sediment-biofilm difference in slope, averaged across 
             countries (weighted by precision). Positive = the predictor has a 
-            stronger positive (or weaker negative) effect on richness in biofilm 
-            than sediment; negative = the reverse.
+            stronger positive (or weaker negative) effect on richness in sediment 
+            than biofilm; negative = the reverse.
   pval / p_adj: whether that pooled difference is distinguishable from zero. 
   I2: percentage of the variance in the country-level differences that reflects
       genuine cross-country heterogeneity, rather than sampling noise. 
@@ -10234,14 +10258,55 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt) {
   QEp: p-value of the Q-test for heterogeneity; a formal (if underpowered with 
       few countries) test of whether I² is significantly greater than zero.
   "
-  return(meta_results)
+  
+  dt_to_display  <- meta_results[p_signif==TRUE & I2 < 25,]
+  substrate_metatrenddiff_plot <- ggplot(meta_results,
+         aes(x=diff_estimate, y=I2+0.1, 
+             color=avg_trend_sed_sign, alpha=p_signif)) +
+    geom_hline(yintercept=0.1, color='grey') +
+    geom_jitter(height=0.1) +
+    geom_text_repel(
+      data=dt_to_display, 
+      aes(label=str_wrap(gsub('_', ' ', gsub('past_scaled', '', hydro_var)), 10)),
+      max.overlaps=nrow(dt_to_display)*2) +
+    scale_alpha_manual(values=c(0.2, 1)) +
+    scale_color_manual(values=c('blue', 'red')) +
+    scale_y_log10(name=expression(I^2),
+                  limits=c(0.01, 100),
+                  breaks=c(0.1, 1, 10, 100), 
+                  labels=c(0, 1, 10, 100)) +
+    scale_x_continuous(name="Difference in average marginal trend estimate: sediment - biofilm") +
+    theme_classic() +
+    facet_wrap(~organism_class, scales='free', nrow=3)
+  
+  meta_results[p_signif==TRUE & QEp_signif==FALSE,]
+  
+  #Interpretation:
+  #For diatom, no significant difference
+  
+  #For fungi: significant difference for drying unpredictability 
+  # (SD in date of first drying, CV of drying freuqneucy, and CV of drying duration)
+  # greater unpredictability translates to lower fungi richess and fungi in
+  # sediments are more strongly affected by this unpredictability
+  
+  #For bacteria: significant difference for unpredictability of first drying date,
+  #percentile drying duration, and drying frequency.
+  # unpredictability increases richness, PDurD increases richness, FreD mixed
+  # unpredictability increases richness less for sediments than bacteria
+  # PDurD increases richness less for sediments than bacteria
+  # FreD mixed
+  
+  return(list(
+    dt=meta_results,
+    plot=substrate_metatrenddiff_plot
+  ))
 }
 
-##------  test_country_ranking_emtrends(emtrends_dt=emtrends_multiorganism_all_richness)
+#------ test_country_ranking_emtrends -----------------------------------------
 
 # emtrends_dt <- tar_read(emtrends_multiorganism_all_richness)$dt
 
-
+# test_country_ranking_emtrends(emtrends_dt=emtrends_multiorganism_all_richness)
 
 
 
