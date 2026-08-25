@@ -10061,12 +10061,14 @@ run_all_ssn_permutations <- function(perf_dt, n_perm = 500, out_dir = "permutati
 }
 
 #------ get_hydrowindown_multiorganism_summary ----------------------------------------
-# emtrends_dt <- tar_read(emtrends_multiorganism_richness)$dt
-# varcomp_dt <- tar_read(varcomp_multiorganism_richness)$dt
+# emtrends_dt = tar_read(emtrends_multiorganism_best_richness)$dt
+# varcomp_dt = tar_read(varcomp_multiorganism_richness)$dt
+# permutations_dt = tar_read(hydrowindow_permutations_all_dt)
 # out_dir = figdir
 
 get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
                                                    varcomp_dt,
+                                                   permutations_dt,
                                                    out_dir,
                                                    write_plot=TRUE) {
   
@@ -10074,7 +10076,7 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
   #(a column for each source of variance)
   varcomp_cast <- data.table::dcast(
     varcomp_dt, 
-    formula = (organism_class + organism_sub + organism_label
+    formula = (organism_class + organism_sub + organism_label + organism +
                + hydro_class + hydro_label + covtypes + window_d + marginal_fixedR2
                ~varcomp), 
     value.var = 'proportion')
@@ -10119,12 +10121,30 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
              "all positive (6/6)")
   )]
 
+  #Merge all dt
   varcomp_emtrends_merge <- merge(varcomp_cast,
                                   emtrends_signcount,
                                   by=c('organism_label', 'hydro_label')
-  )
+  ) %>%
+    merge(permutations_dt[,c('organism', 'hydro_label', 'test_parabolic',
+                             'original_AIC', 'mean_perm_AIC', 'p_value',
+                             'n_successful'), with=F],
+          by=c('organism', 'hydro_label'))
   
-
+  # factor(
+  #   fcase(
+  #     p_value < 0.001, '***',
+  #     p_value < 0.01, '**',
+  #     p_value < 0.05, '*',
+  #     p_value < 0.1, '.',
+  #     p_value >= 0.1, 'ns'
+  #   ), 
+  #   levels=c('ns', '.', '*', '**', '***')
+  varcomp_emtrends_merge[, permut_sig := 
+                           fifelse(p_value < 0.05, 
+                                   'Significant model', 
+                                   'Non-significant model')]
+  
   
   #Make a plot ------------
   varcomp_emtrends_merge[,organism_sub := 
@@ -10134,21 +10154,32 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
                              .default = organism_sub
                            )]
   
-  summary_plot <- ggplot(varcomp_emtrends_merge, aes(x=organism_sub, y=hydro_label)) +
-    geom_point(aes(color=category, size=marginal_fixedR2)) +
+  summary_plot <- ggplot(varcomp_emtrends_merge, 
+                         aes(x=organism_sub, y=str_wrap(hydro_label, 30))) +
+    geom_point(aes(color=category, size=marginal_fixedR2, shape=permut_sig), 
+               stroke = 1) +
+    geom_point(data=varcomp_emtrends_merge[
+      test_parabolic==TRUE & permut_sig == 'Significant model',], 
+      color='white', size=0.5) +
     labs(x='Organism', y='Hydrological predictor by category') +
+    scale_shape_manual(
+      name='Model significance',
+      values=c(1, 16)
+    ) +
     scale_color_manual(
       name='Estimated effect across DRNs',
       values=c(  
-        '#2166ac', '#4393c3', '#92c5de',
+        '#053061', '#4393c3', '#92c5de',
         '#f7f7f7', '#bababa',  '#878787',
       '#f4a582',  '#d6604d', '#b2182b')) +
-    scale_size_continuous(name='Marginal Explained Variance (%)',
-                          breaks = c(0.01, 0.05, 0.1, 0.16), 
-                          labels = scales::label_percent()
-                          ) +
-    facet_grid(hydro_class~organism_class, 
-               scales = "free", space = "free", switch='both', shrink=T) 
+    scale_radius(name='Marginal Explained Variance (%)',
+                 breaks = c(0.01, 0.05, 0.1, 0.16), 
+                 range=c(1,10),
+                 labels = scales::label_percent()
+    ) +
+    facet_grid(str_wrap(hydro_class, 10)~organism_class, 
+               scales = "free", space = "free", switch='y', shrink=T) +
+    theme(text=element_text(size=14))
   
   #Output table
   out_tab <- file.path(out_dir, 
@@ -10172,7 +10203,7 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
           ".png"
         )),
       plot = summary_plot,
-      width = 10,
+      width = 10.5,
       height = 10,
       units='in',
       dpi=600

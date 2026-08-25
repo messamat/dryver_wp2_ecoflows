@@ -1097,7 +1097,7 @@ formatting_targets <- list(
 )
 
 
-temporal_analysis_targets <- list(   
+temporal_analysis_targets_prep <- list(   
   # Run a first SSN with a single hydrological variable for each organism
   # to determine the top spatial covariance types
   tar_target(
@@ -1167,184 +1167,196 @@ temporal_analysis_targets <- list(
       return(model_setup_list)
     }
   )
+)
+
+#Run SSN for each chosen variable and time window ----------------------------
+temporal_analysis_targets_mapped <- tar_map(
+  values = tidyr::expand_grid(
+    in_response_var = c("invsimpson", "richness"),
+    in_organism = c(
+      "miv_nopools", "miv_nopools_ept", "miv_nopools_och",
+      "fun_sedi_nopools", "fun_biof_nopools",
+      "dia_sedi_nopools", "dia_biof_nopools",
+      "bac_sedi_nopools", "bac_biof_nopools"
+    )
+  ),
+  names = c("in_response_var", "in_organism"),
+  
+  # fit models
+  tar_target(
+    ssn_div_hydrowindow,
+    {
+      models_subset <- keep(
+        ssn_div_models_to_run,
+        function(x) x$response_var == in_response_var && x$organism == in_organism
+      )
+      
+      future_lapply(models_subset, function(model_setup) {
+        print(paste(in_organism, in_response_var, model_setup$hydro_var, sep = " - "))
+        model_ssn_hydrowindow(
+          in_ssn = ssn_eu,
+          organism = in_organism,
+          formula_root = "log10(basin_area_km2) + log10(basin_area_km2):country",
+          partition_formula = as.formula("~ as.factor(campaign)"),
+          random_formula = as.formula("~ country"),
+          hydro_var = model_setup$hydro_var,
+          response_var = in_response_var,
+          ssn_covtypes = ssn_covtypes[label %in% model_setup$covtypes, ],
+          family = "Gaussian",
+          estmethod = "ml",
+          standardize_hydro_var = T,
+          test_parabolic = model_setup$test_parabolic,
+          include_state_of_flow = !(str_split_1(in_organism, '_')[1] == 'miv'), #Include state of flow if microbes
+          include_seasonality = FALSE
+        )
+      })
+    }
+  ),
+  
+  tar_target(
+    ssn_covtype_selected,
+    select_ssn_covariance(in_ssnmodels = ssn_div_hydrowindow)
+  ),
+  
+  tar_target(
+    hydrowindow_perf_tables,
+    {
+      # Combine model metadata with results
+      ssn_model_names <- do.call(rbind, ssn_div_models_to_run)[
+        , c("organism", "hydro_var", "response_var", "test_parabolic")] %>%
+        as.data.table() %>%
+        .[response_var == in_response_var & organism == in_organism, ]
+      
+      ssnmodels <- cbind(ssn_model_names, ssn_div_hydrowindow)
+      names(ssnmodels)[ncol(ssnmodels)] <- "ssn_div_models"
+      
+      # Format per organism
+      prepare_hydrowindow_perf_table(
+        in_ssnmodels = ssnmodels,
+        in_organism = in_organism,
+        in_covtype_selected = ssn_covtype_selected,
+        in_hydro_vars_dt = hydro_vars_dt)
+    }
+  ),
+  
+  tar_target(
+    hydrowindow_varcomp_all,
+    get_hydrowindow_varcomp(
+      perf_dt = hydrowindow_perf_tables$all,
+      nrow_pag = 2,
+      ncol_pag = 3)
+  )
   ,
   
-  #Run SSN for each chosen variable and time window ----------------------------
-  tar_map(
-    values = tidyr::expand_grid(
-      in_response_var = c("invsimpson", "richness"),
-      in_organism = c(
-        "miv_nopools", "miv_nopools_ept", "miv_nopools_och",
-        "fun_sedi_nopools", "fun_biof_nopools",
-        "dia_sedi_nopools", "dia_biof_nopools",
-        "bac_sedi_nopools", "bac_biof_nopools"
-      )
-    ),
-    names = c("in_response_var", "in_organism"),
-    
-    # fit models
-    tar_target(
-      ssn_div_hydrowindow,
-      {
-        models_subset <- keep(
-          ssn_div_models_to_run,
-          function(x) x$response_var == in_response_var && x$organism == in_organism
-        )
-        
-        future_lapply(models_subset, function(model_setup) {
-          print(paste(in_organism, in_response_var, model_setup$hydro_var, sep = " - "))
-          model_ssn_hydrowindow(
-            in_ssn = ssn_eu,
-            organism = in_organism,
-            formula_root = "log10(basin_area_km2) + log10(basin_area_km2):country",
-            partition_formula = as.formula("~ as.factor(campaign)"),
-            random_formula = as.formula("~ country"),
-            hydro_var = model_setup$hydro_var,
-            response_var = in_response_var,
-            ssn_covtypes = ssn_covtypes[label %in% model_setup$covtypes, ],
-            family = "Gaussian",
-            estmethod = "ml",
-            standardize_hydro_var = T,
-            test_parabolic = model_setup$test_parabolic,
-            include_state_of_flow = !(str_split_1(in_organism, '_')[1] == 'miv'), #Include state of flow if microbes
-            include_seasonality = FALSE
-          )
-        })
-      }
-    ),
-    
-    tar_target(
-      ssn_covtype_selected,
-      select_ssn_covariance(in_ssnmodels = ssn_div_hydrowindow)
-    ),
-    
-    tar_target(
-      hydrowindow_perf_tables,
-      {
-        # Combine model metadata with results
-        ssn_model_names <- do.call(rbind, ssn_div_models_to_run)[
-          , c("organism", "hydro_var", "response_var", "test_parabolic")] %>%
-          as.data.table() %>%
-          .[response_var == in_response_var & organism == in_organism, ]
-        
-        ssnmodels <- cbind(ssn_model_names, ssn_div_hydrowindow)
-        names(ssnmodels)[ncol(ssnmodels)] <- "ssn_div_models"
-        
-        # Format per organism
-        prepare_hydrowindow_perf_table(
-          in_ssnmodels = ssnmodels,
-          in_organism = in_organism,
-          in_covtype_selected = ssn_covtype_selected,
-          in_hydro_vars_dt = hydro_vars_dt)
-      }
-    ),
-    
-    tar_target(
-      hydrowindow_varcomp_all,
-      get_hydrowindow_varcomp(
-        perf_dt = hydrowindow_perf_tables$all,
-        nrow_pag = 2,
-        ncol_pag = 3)
-    )
-    ,
-    
-    tar_target(
-      hydrowindow_emmeans_best,
-      get_hydrowindow_emmeans(
-        best_dt = hydrowindow_perf_tables$best,
-        in_hydro_vars_dt = hydro_vars_dt,
-        in_drn_dt = drn_dt)
-    )
-    ,
-    
-    tar_target(
-      hydrowindow_emtrends_best,
-      get_hydrowindow_emtrends(
-        perf_dt = hydrowindow_perf_tables$best,
-        in_hydro_vars_dt = hydro_vars_dt,
-        in_drn_dt = drn_dt,
-        plot=T)
-    )
-    ,
-    
-    tar_target(
-      hydrowindow_emtrends_all,
-      {
-        perf_dt_all <- hydrowindow_perf_tables$all[fit_status=='ok']
-        if (TRUE %in% unique(perf_dt_all$test_parabolic)) {
-          emtrends_all_para <- get_hydrowindow_emtrends(
-            perf_dt = perf_dt_all[test_parabolic==TRUE,],
-            in_hydro_vars_dt = hydro_vars_dt,
-            in_drn_dt = drn_dt,
-            plot=F)
-        } else {
-          emtrends_all_para <- NULL
-        }
-        
-        emtrends_all_nopara <- get_hydrowindow_emtrends(
-          perf_dt = perf_dt_all[test_parabolic==FALSE,],
+  tar_target(
+    hydrowindow_emmeans_best,
+    get_hydrowindow_emmeans(
+      best_dt = hydrowindow_perf_tables$best,
+      in_hydro_vars_dt = hydro_vars_dt,
+      in_drn_dt = drn_dt)
+  )
+  ,
+  
+  tar_target(
+    hydrowindow_emtrends_best,
+    get_hydrowindow_emtrends(
+      perf_dt = hydrowindow_perf_tables$best,
+      in_hydro_vars_dt = hydro_vars_dt,
+      in_drn_dt = drn_dt,
+      plot=T)
+  )
+  ,
+  
+  tar_target(
+    hydrowindow_emtrends_all,
+    {
+      perf_dt_all <- hydrowindow_perf_tables$all[fit_status=='ok']
+      if (TRUE %in% unique(perf_dt_all$test_parabolic)) {
+        emtrends_all_para <- get_hydrowindow_emtrends(
+          perf_dt = perf_dt_all[test_parabolic==TRUE,],
           in_hydro_vars_dt = hydro_vars_dt,
           in_drn_dt = drn_dt,
           plot=F)
-        
-        return(rbind(emtrends_all_para$dt, 
-                     emtrends_all_nopara$dt))
+      } else {
+        emtrends_all_para <- NULL
       }
-    )
-    ,
-    
-    tar_target(
-      hydrowindow_best_preds,
-      get_hydrowindow_predictions(
-        best_dt = hydrowindow_perf_tables$best)
-    )
-    ,
-    
-    tar_target(
-      hydrowindow_obs_preds_plot,
-      plot_hydrowindow_obs_preds(
-        preds = hydrowindow_best_preds,
-        resp_var = in_response_var)
-    )
-    ,
-    
-    tar_target(
-      hydrowindow_x_preds_plot,
-      plot_hydrowindow_x_preds(
-        preds = hydrowindow_best_preds,
-        best_dt = hydrowindow_best_preds
-      )
-    )
-    ,
-    
-    tar_target(
-      ssn_div_hydrowindow_plots_paths,
-      save_ssn_div_hydrowindow_plots(
-        hydrowindow_perf_tables,
-        plot_varcomp = hydrowindow_varcomp_all,
-        plot_obs_preds = hydrowindow_obs_preds_plot,
-        plot_x_preds = hydrowindow_x_preds_plot,
-        plot_emmeans = hydrowindow_emmeans_best,
-        plot_emtrends = hydrowindow_emtrends_best,
-        in_organism = in_organism,
-        in_response_var = in_response_var,
-        out_dir = figdir)
-    ),
-    
-    tar_target(
-      ssn_div_hydrowindow_permutations,
-      if (in_response_var=='richness') {
-        run_all_ssn_permutations(
-          perf_dt = hydrowindow_perf_tables$best,
-          n_perm = 500,
-          n_cores = nthreads,
-          out_dir = file.path(resdir, "permutation_results")
-        )
-      }
+      
+      emtrends_all_nopara <- get_hydrowindow_emtrends(
+        perf_dt = perf_dt_all[test_parabolic==FALSE,],
+        in_hydro_vars_dt = hydro_vars_dt,
+        in_drn_dt = drn_dt,
+        plot=F)
+      
+      return(rbind(emtrends_all_para$dt, 
+                   emtrends_all_nopara$dt))
+    }
+  )
+  ,
+  
+  tar_target(
+    hydrowindow_best_preds,
+    get_hydrowindow_predictions(
+      best_dt = hydrowindow_perf_tables$best)
+  )
+  ,
+  
+  tar_target(
+    hydrowindow_obs_preds_plot,
+    plot_hydrowindow_obs_preds(
+      preds = hydrowindow_best_preds,
+      resp_var = in_response_var)
+  )
+  ,
+  
+  tar_target(
+    hydrowindow_x_preds_plot,
+    plot_hydrowindow_x_preds(
+      preds = hydrowindow_best_preds,
+      best_dt = hydrowindow_best_preds
     )
   )
   ,
   
+  tar_target(
+    ssn_div_hydrowindow_plots_paths,
+    save_ssn_div_hydrowindow_plots(
+      hydrowindow_perf_tables,
+      plot_varcomp = hydrowindow_varcomp_all,
+      plot_obs_preds = hydrowindow_obs_preds_plot,
+      plot_x_preds = hydrowindow_x_preds_plot,
+      plot_emmeans = hydrowindow_emmeans_best,
+      plot_emtrends = hydrowindow_emtrends_best,
+      in_organism = in_organism,
+      in_response_var = in_response_var,
+      out_dir = figdir)
+  ),
+  
+  tar_target(
+    ssn_div_hydrowindow_permutations,
+    if (in_response_var=='richness') {
+      run_all_ssn_permutations(
+        perf_dt = hydrowindow_perf_tables$best,
+        n_perm = 500,
+        n_cores = nthreads,
+        out_dir = file.path(resdir, "permutation_results")
+      )
+    }
+  )
+)
+
+
+
+temporal_analysis_permutations <- list(
+  #Combine permutation results - VERY finicky syntax
+  tar_combine(
+    name = hydrowindow_permutations_all_dt, 
+    targets = temporal_analysis_targets_mapped[["ssn_div_hydrowindow_permutations"]],  
+    command = rbindlist(list(!!!.x))
+  )
+)
+
+
+temporal_analysis_targets_combined <- list(
   #Combine performance tables
   tar_target(
     hydrowindow_all_richness_intercept_dt,
@@ -1531,10 +1543,11 @@ temporal_analysis_targets <- list(
   ,
   
   tar_target(
-    summary_table_multiorganism_richness,
+    summary_multiorganism_richness,
     get_hydrowindown_multiorganism_summary(
       emtrends_dt = emtrends_multiorganism_best_richness$dt,
       varcomp_dt = varcomp_multiorganism_richness$dt,
+      permutations_dt = hydrowindow_permutations_all_dt,
       out_dir = figdir
     )
   )
@@ -1843,7 +1856,10 @@ list(preformatting_targets
      , mapped_hydrotargets
      , combined_hydrotargets
      , formatting_targets
-     , temporal_analysis_targets
+     , temporal_analysis_targets_prep 
+     , temporal_analysis_targets_mapped
+     , temporal_analysis_permutations
+     , temporal_analysis_targets_combined
      , annual_analysis_targets
 ) %>%
   unlist(recursive = FALSE)
