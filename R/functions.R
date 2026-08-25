@@ -10303,10 +10303,306 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt) {
 }
 
 #------ test_country_ranking_emtrends -----------------------------------------
-
 # emtrends_dt <- tar_read(emtrends_multiorganism_all_richness)$dt
 
-# test_country_ranking_emtrends(emtrends_dt=emtrends_multiorganism_all_richness)
+#' Test for country-level differences in trends
+#'
+#' Performs three complementary analyses to evaluate country-specific biodiversity
+#' responses to hydrological predictors:
+#' 1. **Heterogeneity Test**: Assesses whether slope estimates differ significantly across countries
+#'    for each organism × hydrological variable combination using random-effects meta-analysis.
+#' 2. **Rank Consistency Test**: Evaluates whether country rankings are consistent across
+#'    hydrological models using Kendall's W coefficient of concordance.
+#' 3. **Hypothesis Test**: Tests whether observed country rankings match the hypothesized order
+#'    (Finland > Hungary > France > Czechia > Croatia > Spain) using a bootstrap + permutation approach.
+#'
+#' @param emtrends_dt A data.table containing hydrological trend estimates with required columns:
+#'   - `organism`: Organism identifier (e.g., "bac_biof_nopools")
+#'   - `hydro_var`: Hydrological variable name (e.g., "DurD365past_scaled")
+#'   - `test_parabolic`: Logical indicating if parabolic test was used (TRUE/FALSE)
+#'   - `hydro_var_root`: Root hydrological variable (e.g., "DurD", "FreD")
+#'   - `country`: Country name (must include all 6: Finland, Hungary, France, Czechia, Croatia, Spain)
+#'   - `trend`: Estimated trend coefficient
+#'   - `SE`: Standard error of the trend estimate
+#'   - `hydro_class`: Hydrological class (e.g., "Drying duration")
+#'   - `organism_class`: Organism class (e.g., "Bacteria", "Macroinvertebrates")
+#'   - `organism_label`: Human-readable organism label
+#'   - `organism_sub`: Substrate type ("Biof." or "Sedi.")
+#'   - `hydro_label`: Human-readable hydrological variable label
+#'
+#' @return A list containing:
+#'   - `heterogeneity_dt`: Data.table with heterogeneity test results (Q, Qp, tau², I²)
+#'   - `heterogeneity_plot`: ggplot object visualizing heterogeneity across organisms/models
+#'   - `kendallw_dt`: Data.table with Kendall's W test results for rank consistency
+#'   - `rank_test_dt`: Data.table with bootstrap test results for hypothesized order fit
+#'
+#' @details
+#' ### Statistical Methods
+#'
+#' **1. Heterogeneity Test (Random-Effects Meta-Analysis)**
+#' - Uses `metafor::rma()` with REML estimation to test if country-level slope estimates
+#'   differ significantly within each organism × hydro_var × test_parabolic group.
+#' - **Q-test**: Tests for heterogeneity (Qp < 0.05 indicates significant differences across countries).
+#' - **I²**: Quantifies the percentage of variance due to between-country heterogeneity (0-100%).
+#'   - I² < 25%: Low heterogeneity (consistent across countries)
+#'   - I² > 50%: High heterogeneity (substantial country-specific differences)
+#' - Groups with < 2 countries or invalid SEs return NA.
+#'
+#' **2. Rank Consistency Test (Kendall's W)**
+#' - Tests whether country rankings are consistent across hydrological models (hydro_var_root).
+#' - Uses `vegan::kendall.global()` with 999 permutations and Holm p-value adjustment.
+#' - Only applied to drying variables (excludes flow magnitude: 'oQ10', 'maxPQ').
+#' - For variables where higher values indicate stronger drying effects (FstDrE, STcon),
+#'   trend signs are reversed to ensure consistent ranking direction.
+#'
+#' **3. Hypothesis Test (Bootstrap + Permutation)**
+#' - Tests if observed country rankings match the hypothesized order:
+#'   **Finland > Hungary > France > Czechia > Croatia > Spain**
+#'    (1 = most negative trends, 6 = lest negative trend).
+#' - For each organism × hydro_var_root group:
+#'   1. Draws 1000 bootstrap samples from N(μ = trend_rel, σ = SE_rel)
+#'   2. Ranks the bootstrap estimates across countries
+#'   3. Computes Spearman's ρ between bootstrap ranks and hypothesized ranks
+#'   4. Generates null distribution by permuting ranks within each bootstrap iteration
+#'   5. Calculates p-value as proportion of null correlations where |ρ_null| ≥ |ρ_obs|
+#'
+test_country_emtrends <- function(emtrends_dt) {
+  # ----------------------------------------------------------------------------
+  # Test for heterogeneity in slopes across countries
+  # ----------------------------------------------------------------------------
+  # Purpose: Test whether the estimated slopes (trend_rel) differ significantly
+  #          across countries for each organism × hydro_var × test_parabolic group.
+  #
+  # Methods: Random-effects meta-analysis using REML (restricted maximum likelihood)
+  #         via metafor::rma(). The test evaluates if the between-country variance
+  #         (tau²) is significantly > 0.
+  #
+  # Interpretation:
+  #   - Qp < 0.05: Countries differ significantly in their response to the predictor
+  #   - I²: % of variance due to between-country heterogeneity (0-100%)
+  #         Low I² (<25%) = consistent across countries; High I² (>50%) = variable
+  #   - tau²: Estimated between-country variance (0 = no heterogeneity)
+  #
+  # Notes:
+  #   - Requires ≥ 2 countries per group (returns NA otherwise)
+  #   - Requires valid SE > 0 (returns NA otherwise)
+  #   - Uses REML estimation for tau² (more stable than ML for small samples)
+  
+  
+  # dentify valid groups (with non-NA/positive SEs)
+  groups_to_keep <- emtrends_dt[!is.na(SE_rel) & SE_rel > 0,
+                                unique(.SD),
+                                .SDcols = c('organism', 'hydro_var', 'test_parabolic')]
+  
+  # Filter data to valid groups only
+  emtrends_clean <- emtrends_dt %>%
+    unique(by = c('organism', 'hydro_var', 'test_parabolic', 'country')) %>%
+    merge(groups_to_keep, by = c('organism', 'hydro_var', 'test_parabolic'), all.x = TRUE)
+  
+  # efine heterogeneity test function
+  test_heterogeneity_bydtgroup <- function(x) {
+    n <- as.integer(x[,.N])  # Number of countries in this group
+    
+    # Initialize default result with numeric NA to ensure type consistency
+    default_result <- list(
+      Q = NA_real_,       # Q-test statistic
+      Qp = NA_real_,      # Q-test p-value
+      tau2 = NA_real_,    # Between-country variance
+      I2 = NA_real_,      # I² statistic (% variance due to heterogeneity)
+      n_countries = n    # Number of countries
+    )
+    
+    # Skip groups with insufficient data
+    if (n < 2 || any(is.na(x$SE_rel)) || any(x$SE_rel <= 0)) {
+      return(default_result)
+    }
+    
+    # Fit random-effects meta-analysis model
+    m <- tryCatch({
+      metafor::rma(yi = trend_rel, vi = SE_rel^2, method = "REML", data = x)
+    }, error = function(e) {
+      return(default_result)  # Return NA if model fails to converge
+    })
+    
+    # Return model results if successful
+    if (!inherits(m, "try-error") && !is.null(m)) {
+      return(list(
+        Q = m$QE,          # Q-test statistic
+        Qp = m$QEp,        # P-value for heterogeneity test
+        tau2 = m$tau2,     # Estimated between-country variance
+        I2 = m$I2,         # I² statistic (percentage)
+        n_countries = n    # Number of countries
+      ))
+    } else {
+      return(default_result)
+    }
+  }
+  
+  # Apply heterogeneity test to each group
+  country_heterogeneity <- emtrends_dt[
+    , test_heterogeneity_bydtgroup(.SD),
+    by = .(organism, organism_sub, organism_class,
+           hydro_var, hydro_var_root, hydro_label, hydro_class,
+           test_parabolic)
+  ] %>%
+    .[, Qp_sig := Qp < 0.05]  # Add significance flag
+  
+  # Step 1.5: Create visualization of heterogeneity results
+  heterogeneity_plot <- ggplot(country_heterogeneity, aes(x = organism_sub, y = hydro_label)) +
+    geom_point(aes(color = Qp_sig, size = I2)) +
+    labs(
+      x = 'Organism and Substrate',
+      y = 'Hydrological predictor',
+      color = 'Significant heterogeneity (Qp < 0.05)',
+      size = expression(I^2)
+    ) +
+    scale_color_manual(
+      values = c("FALSE" = "gray", "TRUE" = "red"),
+      name = 'Significant Q-test'
+    ) +
+    scale_size_continuous(name = expression(I^2)) +
+    facet_grid(hydro_class ~ organism_class,
+               scales = "free", space = "free", switch = 'both', shrink = TRUE) +
+    theme_minimal()
+  
+  # ----------------------------------------------------------------------------
+  # Test for consistency in country trend ranking amont models
+  # ----------------------------------------------------------------------------
+  # Purpose: Test whether country rankings are consistent across different
+  #          hydrological predictors (models) within each organism.
+  #
+  # Method: Kendall's W coefficient of concordance (vegan::kendall.global)
+  #         - Tests if there is significant agreement among rankings across models
+  #         - Uses 999 permutations and Holm p-value adjustment for multiple testing
+  #
+  # Interpretation:
+  #   - W ≈ 1: Perfect agreement in rankings across models
+  #   - W ≈ 0: No agreement (random rankings)
+  #   - p-value < 0.05: Rankings are significantly consistent across models
+  #
+  # Notes:
+  #   - Only applied to drying variables (excludes flow magnitude: 'oQ10', 'maxPQ')
+  #   - For variables where higher values indicate stronger drying effects (FstDrE, STcon),
+  #     trend signs are reversed to ensure consistent ranking direction
+  #     (Finland = most negative effect = rank 1, Spain = least negative = rank 6)
+  # =============================================================================
+  
+  # Select drying variables only
+  drying_vars <- setdiff(unique(emtrends_dt$hydro_var_root), c('oQ10', 'maxPQ'))
+  emtrends_sub <- emtrends_dt[hydro_var_root %in% drying_vars, ]
+  
+  # Reverse signs for specific variables to ensure consistent direction
+  # Note: FstDrE and STcon variables are reversed because higher values indicate
+  #       stronger drying effects (more negative impact), so we flip signs to make
+  #       Finland (most affected) rank lowest (1) and Spain (least affected) rank highest (6)
+  trends_to_reverse <- c('FstDrE', 'FstDrE_mean', 'STcon_directed', 'STcon_undirected')
+  
+  emtrends_sub[, `:=`(
+    trend_rel_forrank = fifelse(hydro_var_root %in% trends_to_reverse,
+                                -trend_rel, trend_rel),
+    SE_rel_forrank = fifelse(hydro_var_root %in% trends_to_reverse,
+                             -SE_rel, SE_rel)
+  )]
+  
+  # Compute ranks within each organism × hydro_var group
+  emtrends_sub[, drn_trend_rank := rank(trend_rel_forrank),
+               by = .(organism, hydro_var)]
+  
+  # Create visualization of rank distributions
+  mean_estimate_rank <- ggplot(
+    emtrends_sub, aes(x = country, y = drn_trend_rank, color = country)) +
+    geom_jitter(alpha = 0.3, height = 0, width = 0.3) +
+    geom_violin(fill = NA) +
+    scale_y_continuous(name = 'Trend estimate ranking (1 = lowest, 6 = highest)') +
+    theme_minimal() +
+    facet_wrap(organism_class ~ organism_label, scales = 'free', nrow = 4)
+  
+  # Compute Kendall's W for each organism
+  kendall_w <- dcast(emtrends_sub,
+                     organism + country ~ hydro_var_root,
+                     value.var = 'drn_trend_rank') %>%
+    .[, {
+      k_test <- vegan::kendall.global(Y = .SD, nperm = 999, mult = 'holm')
+      # Convert list output to named vector for proper column creation
+      as.data.table(t(k_test$Concordance_analysis))
+    },
+    .SDcols = unique(emtrends_sub$hydro_var_root),
+    by = organism]
+  
+  # ----------------------------------------------------------------------------
+  # Test whether rankings match hypothesized order
+  # ----------------------------------------------------------------------------
+  # Purpose: Test if the observed country rankings match the hypothesized order:
+  #          Finland > Hungary > France > Czechia > Croatia > Spain
+  #          (where ">" means more negative impact of drying)
+  #
+  # Method: Bootstrap + permutation test
+  #         For each organism × hydro_var_root group:
+  #         1. Draw 1000 bootstrap samples from N(μ = trend_rel, σ = SE_rel)
+  #         2. Rank the bootstrap estimates across all countries
+  #         3. Compute Spearman's ρ between bootstrap ranks and hypothesized ranks
+  #         4. Generate null distribution by permuting the hypothesized ranks
+  #         5. Calculate p-value as proportion of null |ρ| ≥ observed |ρ|
+  #
+  # Interpretation:
+  #   - observed_rho: Spearman's ρ between observed ranks and hypothesized order
+  #     +1 = perfect match, -1 = perfect opposite, 0 = no relationship
+  #   - p_perm: p-value (proportion of null correlations with |ρ| ≥ observed |ρ|)
+  #     < 0.05 indicates significant match to hypothesized order
+  #
+  # Notes:
+  #   - Uses Spearman's rank correlation (robust to non-linear relationships)
+  #   - Accounts for uncertainty in trend estimates via bootstrap resampling
+  #   - Tests significance via permutation (non-parametric)
+  # =============================================================================
+  
+  # Define hypothesized country order
+  # Finland is expected to have the most negative drying impacts (rank 1),
+  # Spain the least negative (rank 6)
+  hypothesized_ranks <- data.table(
+    country = c("Finland", "Hungary", "France", "Czechia", "Croatia", "Spain"),
+    drn_hypothesized_rank = 1:6  
+  )
+  
+  # Define bootstrap test function
+  cor_emtrends_rank_boot <- function(dt) {
+    dt_boot <- dt[, .( #Create all country x bootstrap combinations
+      trend_rel_forrank_boot = rnorm(999, 
+                                     mean = trend_rel_forrank, 
+                                     sd = SE_rel_forrank)),
+      by = .(country)] %>%
+      .[, boot_i := .SD[,.I], by=country] %>% #Assign bootstrap iteration IDs (1:n_boot repeated for each country)
+      .[, drn_trend_rank_boot := rank(trend_rel_forrank_boot), by=boot_i] %>%  # Rank within each bootstrap iteration
+      .[, drn_trend_rank_null := sample(drn_trend_rank_boot, replace=FALSE), by=boot_i] %>% # Create null by permuting ranks within each bootstrap iteration
+      merge(hypothesized_ranks, by='country')
+    
+    
+    dt_boot_cor <- dt_boot[, list( # Calculate correlations for each bootstrap iteration
+      cor_boot =  cor(drn_trend_rank_boot, drn_hypothesized_rank, method = "spearman"),
+      cor_null = cor(drn_trend_rank_null, drn_hypothesized_rank, method = "spearman")
+    ), by=boot_i] %>%
+      .[, list( #Summarize: mean correlation and p-value (proportion where boot > null)
+        mean_cor = mean(cor_boot),
+        p_perm = mean(abs(cor_boot)>abs(cor_null)) # Two-tailed: abs(boot) > abs(null)
+      )]
+    
+    return(dt_boot_cor)
+  }
+  
+  #Apply bootstrap test to each organism × hydro_var_root group
+  rank_test_boot <- emtrends_sub[, cor_emtrends_rank_boot(.SD),
+                                 by = .(organism, hydro_var_root)]
+  
+  # ----------------------------------------------------------------------------
+  # Return all results --------------------------------------------------------
+  return(list(
+    heterogeneity_dt = country_heterogeneity,  # Heterogeneity test results
+    heterogeneity_plot = heterogeneity_plot,   # Heterogeneity visualization
+    kendallw_dt = kendall_w,                   # Kendall's W test results
+    rank_test_dt = rank_test_boot,             # Hypothesis test results
+    mean_estimate_rank_plot = mean_estimate_rank  # Rank distribution visualization
+  ))
+}
 
 
 

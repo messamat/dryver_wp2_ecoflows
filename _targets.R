@@ -1333,12 +1333,14 @@ temporal_analysis_targets <- list(
     
     tar_target(
       ssn_div_hydrowindow_permutations,
-      permutation_results <- run_all_ssn_permutations(
-        perf_dt = hydrowindow_perf_tables$best,
-        n_perm = 500,
-        n_cores = nthreads,
-        out_dir = file.path(resdir, "permutation_results")
-      )
+      if (in_response_var=='richness') {
+        run_all_ssn_permutations(
+          perf_dt = hydrowindow_perf_tables$best,
+          n_perm = 500,
+          n_cores = nthreads,
+          out_dir = file.path(resdir, "permutation_results")
+        )
+      }
     )
   )
   ,
@@ -1528,21 +1530,6 @@ temporal_analysis_targets <- list(
   )
   ,
   
-  # tar_target(
-  # hydrowindow_permutation_results,
-  # lapply(unique(hydrowindow_best_richness_intercept_dt$organism),
-  #        function(in_organism) {
-  #          permutation_results <- run_all_ssn_permutations(
-  #            perf_dt = hydrowindow_perf_tables_richness_miv_nopools,
-  #            n_perm = 20,
-  #            n_cores = 11,
-  #            out_dir = file.path(resdir, "permutation_results")
-  #          )
-  #        }
-  # ) %>% rbindlist(fill=T, use.names=T)
-  # )
-  # ,
-
   tar_target(
     summary_table_multiorganism_richness,
     get_hydrowindown_multiorganism_summary(
@@ -1557,12 +1544,12 @@ temporal_analysis_targets <- list(
     biof_vs_sedi_emtrends_rma_table,
     test_biof_vs_sedi_emtrends(emtrends_dt=emtrends_multiorganism_all_richness$dt)
   )
-  # ,
-  # 
-  # tar_target(
-  #   country_ranking_test_table,
-  #   test_country_ranking_emtrends(emtrends_dt=emtrends_multiorganism_all_richness$dt)
-  # )
+  ,
+
+  tar_target(
+    country_ranking_test_table,
+    test_country_emtrends(emtrends_dt=emtrends_multiorganism_best_richness$dt)
+  )
 )
 
 ##############################################################################
