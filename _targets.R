@@ -1250,7 +1250,7 @@ temporal_analysis_targets_mapped <- tar_map(
   
   tar_target(
     hydrowindow_emmeans_best,
-    get_hydrowindow_emmeans(
+    get_hydrowindow_emmeans( 
       best_dt = hydrowindow_perf_tables$best,
       in_hydro_vars_dt = hydro_vars_dt,
       in_drn_dt = drn_dt)
@@ -1562,6 +1562,16 @@ temporal_analysis_targets_combined <- list(
   tar_target(
     country_ranking_test_table,
     test_country_emtrends(emtrends_dt=emtrends_multiorganism_best_richness$dt)
+  )
+  ,
+  
+  tar_target(
+    hydrowindow_multiorganism_varcomp_boxplot,
+    get_hydrowindow_multiorganism_varcomp_boxplot(
+      varcomp_dt=varcomp_multiorganism_richness$dt,
+      best_intercept_dt=hydrowindow_best_richness_intercept_dt,
+      out_dir=figdir
+    )
   )
 )
 

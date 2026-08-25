@@ -8684,6 +8684,9 @@ get_hydrowindow_varcomp <- function(perf_dt, nrow_pag = 2, ncol_pag = 3) {
 #' @param in_hydro_vars_dt Metadata table with hydro variable names and labels.
 #'
 #' @return A `data.table` and plots of estimated marginal means across predictors.
+#' @note This approach is adequate even for models with quadratic terms
+#'  as long as they are explicitly included in the model with a I() or poly()
+#' @references [emmeans documentation](https://rvlenth.github.io/emmeans/articles/basics.html#depcovs)
 #' @export
 get_hydrowindow_emmeans <- function(best_dt, in_hydro_vars_dt, in_drn_dt, plot=T) {
   
@@ -10635,6 +10638,77 @@ test_country_emtrends <- function(emtrends_dt) {
   ))
 }
 
+
+
+#------ get_hydrowindow_multiorganism_varcomp_summary --------------------------
+# varcomp_dt=tar_read(varcomp_multiorganism_richness)
+# best_intercept_dt <- tar_read(hydrowindow_best_richness_intercept_dt)
+
+get_hydrowindow_multiorganism_varcomp_boxplot <- function(varcomp_dt,
+                                                          best_intercept_dt,
+                                                          out_dir=figdir) {
+  varcomp_sub <- merge(varcomp_dt, 
+        best_intercept_dt[, .(organism, hydro_var, test_parabolic)], 
+        by=c('organism', 'hydro_var', 'test_parabolic'),
+        all.x=F)
+  
+  varcomp_sub[, varcomp_label_simple := 
+                fifelse(varcomp %in% c("euclid_de", "taildown_de", "tailup_de"),
+                        'Spatially-dependent variance',
+                        as.character(varcomp_label))]
+  
+  varcomp_simple <- varcomp_sub[
+    varcomp != 'nugget', 
+    list(proportion =sum(proportion)),
+    by=.(organism, organism_sub, organism_class, 
+         hydro_var, varcomp_label_simple)]
+  
+  varcomp_sub[organism=='miv_nopools_ept', mean(proportion), by=varcomp]
+  
+  varcomp_best_boxplot <- ggplot(varcomp_simple, 
+         aes(x=organism_sub, y=proportion, 
+             fill=varcomp_label_simple, 
+             color=varcomp_label_simple, 
+             group=interaction(organism_sub, varcomp_label_simple))) +
+    geom_jitter(position = position_jitterdodge(dodge.width = 0.4), alpha=0.5) +
+    geom_boxplot(alpha=0.8, position=position_dodge(0.4), outliers = F) +
+    scale_y_continuous(name='Percentage of variance',
+                       labels = scales::label_percent(),
+                       expand=c(0,0)) +
+    scale_color_manual(name='Variance component',
+                       values=c('#feb24c', '#f1b6da', '#a6cee3')) +
+    scale_fill_manual(name='Variance component',
+                      values=c('#feb24c', '#f1b6da', '#a6cee3')) +
+    facet_grid(organism_class~., scales='free_y', switch='y') +
+    coord_flip() +
+    theme_minimal() +
+    theme(text=element_text(size=14),
+          axis.title.y = element_blank(),
+          strip.text=element_text(size=14),
+          strip.placement = "outside")
+  
+  
+  #Output t
+  ggsave(
+    filename = file.path(
+      out_dir, 
+      paste0(
+        "ssn_hydrowindow_multiorganism_varcomp_boxplot", 
+        "_",
+        format(Sys.Date(), "%Y%m%d"), 
+        ".png"
+      )),
+    plot = varcomp_best_boxplot,
+    width = 6,
+    height = 8,
+    units='in',
+    dpi=600
+  )
+
+
+  return(varcomp_best_boxplot)
+       
+}
 
 
 #------ model_miv_richness_yr -----------------------------------------------------------
