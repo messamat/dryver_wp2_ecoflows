@@ -10067,11 +10067,13 @@ run_all_ssn_permutations <- function(perf_dt, n_perm = 500, out_dir = "permutati
 # emtrends_dt = tar_read(emtrends_multiorganism_best_richness)$dt
 # varcomp_dt = tar_read(varcomp_multiorganism_richness)$dt
 # permutations_dt = tar_read(hydrowindow_permutations_all_dt)
+# hydro_vars_dt <- tar_read(hydro_vars_dt)
 # out_dir = figdir
 
 get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
                                                    varcomp_dt,
                                                    permutations_dt,
+                                                   hydro_vars_dt,
                                                    out_dir,
                                                    write_plot=TRUE) {
   
@@ -10084,10 +10086,17 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
                ~varcomp), 
     value.var = 'proportion')
   
+  #Adjust p-values by number of countries
+  #emtrends_dt[, p_value_adj := p.adjust(p_value, method = "fdr")] #Benjamini and Hochberg (1995) correction
+  
+  
   #Count the number of countries with sig negative, non-sig, and sig positive trends for each model
   emtrends_dt[, sigsign := (sign(trend)*(p_value<=0.1))]
-  emtrends_signcount <- emtrends_dt[, .N, by=.(organism_label, hydro_label, sigsign)] %>%
-    dcast(organism_label+hydro_label ~ sigsign, value.var='N') 
+  emtrends_signcount <- emtrends_dt %>%
+    .[, .N, by=.(organism_label, hydro_label, 
+                 hydro_var, hydro_var_root, sigsign)] %>%
+    dcast(organism_label + hydro_label + hydro_var+ hydro_var_root
+          ~ sigsign, value.var='N') 
   emtrends_signcount[, (names(.SD)) := lapply(.SD, function(x) fifelse(is.na(x), 0, x)),
                      .SDcols = is.numeric]  
   
@@ -10124,47 +10133,65 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
              "all positive (6/6)")
   )]
 
+  
   #Merge all dt
+  setnames(permutations_dt, 'p_value', 'p_value_mod_perm', skip_absent=TRUE)
+  
   varcomp_emtrends_merge <- merge(varcomp_cast,
                                   emtrends_signcount,
                                   by=c('organism_label', 'hydro_label')
   ) %>%
     merge(permutations_dt[,c('organism', 'hydro_label', 'test_parabolic',
-                             'original_AIC', 'mean_perm_AIC', 'p_value',
+                             'original_AIC', 'mean_perm_AIC', 'p_value_mod_perm',
                              'n_successful'), with=F],
           by=c('organism', 'hydro_label'))
   
-  # factor(
-  #   fcase(
-  #     p_value < 0.001, '***',
-  #     p_value < 0.01, '**',
-  #     p_value < 0.05, '*',
-  #     p_value < 0.1, '.',
-  #     p_value >= 0.1, 'ns'
-  #   ), 
-  #   levels=c('ns', '.', '*', '**', '***')
   varcomp_emtrends_merge[, permut_sig := 
-                           fifelse(p_value < 0.05, 
+                           fifelse(p_value_mod_perm < 0.1, 
                                    'Significant model', 
                                    'Non-significant model')]
   
+  #Compute ratio of temporal window rank to max possible temporal window rank 
+  #(i.e., 7 possible ranks, 6 out of 7)
+  varcomp_emtrends_merge <- merge(
+    varcomp_emtrends_merge,
+    hydro_vars_dt[, list(
+      max_window_d = max(as.numeric(window_d))),
+      by=hydro_var_root],
+    by='hydro_var_root') %>%
+    .[, window_d_ratio := (as.numeric(window_d)-1)/(max_window_d-1)] %>%
+    .[, hydro_full_label := get_full_hydrolabel(hydro_vars_dt, 
+                                                gsub('_scaled', '', hydro_var)),
+      by=.I] %>%
+    .[, t_unit := tail(str_split_1(hydro_full_label, pattern=' '), n=1), by=.I] %>%
+    .[, t_unit := fifelse(t_unit %in% c('d', 'y'), t_unit, NA)] %>%
+    .[, window_d := as.numeric(as.character(window_d))] %>%
+    .[, window_d_format := fcase(
+      window_d < 365 & t_unit == 'd', window_d/30,
+      window_d >= 365 & t_unit == 'd', 12*window_d/365,
+      t_unit == 'y', window_d*12
+    )] %>%
+    # .[, window_d_format := fifelse(
+    #   permut_sig == "Significant model", 
+    #   paste0("italic('", window_d_format, "')"),
+    #   as.character(window_d_format)
+    # )] %>%
+    .[,organism_sub := 
+        case_when(
+          organism_sub == 'Sediment' ~ 'Sedi',
+          organism_sub == 'Biofilm'~ 'Biof',
+          .default = organism_sub
+        )]
   
-  #Make a plot ------------
-  varcomp_emtrends_merge[,organism_sub := 
-                           case_when(
-                             organism_sub == 'Sediment' ~ 'Sedi',
-                             organism_sub == 'Biofilm'~ 'Biof',
-                             .default = organism_sub
-                           )]
-  
-  summary_plot <- ggplot(varcomp_emtrends_merge, 
+  #Make a summary plot of trends metric x organism -----------------------------
+  emtrends_plot <- ggplot(varcomp_emtrends_merge, 
                          aes(x=organism_sub, y=str_wrap(hydro_label, 30))) +
     geom_point(aes(color=category, size=marginal_fixedR2, shape=permut_sig), 
                stroke = 1) +
-    geom_point(data=varcomp_emtrends_merge[
-      test_parabolic==TRUE & permut_sig == 'Significant model',], 
-      color='white', size=0.5) +
-    labs(x='Organism', y='Hydrological predictor by category') +
+    geom_point(data=varcomp_emtrends_merge[test_parabolic==TRUE 
+                                           & permut_sig == 'Significant model',], 
+               color='white', size=0.5) +
+    labs(x='Organism group', y='Hydrological predictor') +
     scale_shape_manual(
       name='Model significance',
       values=c(1, 16)
@@ -10174,15 +10201,156 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
       values=c(  
         '#053061', '#4393c3', '#92c5de',
         '#f7f7f7', '#bababa',  '#878787',
-      '#f4a582',  '#d6604d', '#b2182b')) +
+        '#f4a582',  '#d6604d', '#b2182b')) +
     scale_radius(name='Marginal Explained Variance (%)',
+                 limits=range(varcomp_emtrends_merge$marginal_fixedR2),
                  breaks = c(0.01, 0.05, 0.1, 0.16), 
                  range=c(1,10),
                  labels = scales::label_percent()
     ) +
+    facet_grid(hydro_class~organism_class, 
+               scales = "free", space = "free", switch='y', shrink=T,
+               labeller = labeller(hydro_class = label_wrap_gen(10))) +
+    theme(text=element_text(size=14),
+          legend.position = 'right',
+          legend.justification = "top",
+          panel.grid.major.x  = element_blank(),
+          panel.grid.major.y = element_line(color='grey'),
+          plot.margin = margin(0, 0, 0, 0))
+  
+  
+  #Create a synthetic figure of mean stats by organism class x hydro class -----
+  tot_sign_count <- emtrends_dt[
+    , .N, by=.(hydro_class, organism_class, sigsign)] %>%
+    .[, N_tot := sum(N), by=.(hydro_class, organism_class)]
+  
+  contract_lab <- function(x, y) {paste0(casefold(str_sub(gsub('Drying', '', x), 1, y)))}
+  
+  overall_emtrends <- varcomp_emtrends_merge[,
+                                             list(mean_R2 = mean(marginal_fixedR2)),
+                                             by=.(hydro_class, organism_class)] %>%
+    merge(tot_sign_count[, .SD[which.max(N),], 
+                         by=.(hydro_class, organism_class)],
+          by=c('hydro_class', 'organism_class')) %>%
+    merge(emtrends_dt[, 
+                      list(sigsign_mean = mean(sigsign)), 
+                      by=.(hydro_class, organism_class)],
+          by=c('hydro_class', 'organism_class')) %>%
+    .[
+      , `:=`(
+        hydro_class_format = factor(
+          contract_lab(hydro_class, 5),
+          levels = rev(contract_lab(levels(hydro_class), 5))
+        )
+        ,
+        organism_class_format = factor(
+          contract_lab(organism_class, 4),
+          levels = contract_lab(levels(organism_class), 4)
+        )
+      )
+    ]
+  
+  overall_emtrends_plot <- ggplot(overall_emtrends, 
+         aes(x=organism_class_format, y=hydro_class_format)) +
+    geom_point(aes(color=sigsign_mean, size=mean_R2)) +
+    # geom_text(aes(label=round(sigsign_mean, 1))) +
+    labs(x='Organism group', y='Hydrological predictor') +
+    scale_color_stepsn(
+      name = str_wrap('Mean trend sign', 15),
+      limits=c(-0.75, 0.75),
+      breaks = c(-0.75, -0.50, -0.33, 0, 0.33, 0.50, 0.75),
+      colors = c('#053061', '#4393c3', '#92c5de','white', 'white', 'white',  '#d6604d','#b2182b', '#b2182b')
+    ) +
+    scale_radius(name='Mean MEV (%)',
+                 limits=range(varcomp_emtrends_merge$marginal_fixedR2),
+                 breaks = c(0.01, 0.05, 0.1, 0.16), 
+                 range=c(1,10),
+                 labels = scales::label_percent(),
+                 guide = 'none'
+    ) +
+    # facet_grid(hydro_class_format~organism_class_format, 
+    #            scales = "free", space = "free", switch='y', shrink=T) +
+    theme(text=element_text(size=14),
+          legend.position = 'right',
+          axis.text.y = element_text(angle=90, hjust=0.5),
+          axis.ticks = element_blank(),
+          axis.title = element_blank(),
+          panel.grid.major  = element_blank(),
+          plot.background = element_blank(),
+          panel.spacing = unit(0, "lines")
+          )
+  
+  #Assemble a composite plot -----------------------------------------------------
+  layout_original <- c(
+    patchwork::area(t = 1, l = 1, b = 8, r = 15),
+    patchwork::area(t = 1, l = 15, b = 4, r = 16),
+    patchwork::area(t = 6, l = 15, b = 8, r = 16)
+  )
+  
+  g <- ggplotGrob(overall_emtrends_plot)
+  g$widths[g$layout$l[g$layout$name == "spacer"]][[3]] <- unit(2, "cm")
+  overall_emtrends_plot_narrow <- patchwork::wrap_elements(full = g)
+  
+  overall_emtrends_plot_aligned <-
+    (plot_spacer() & theme(plot.background = element_rect(fill = "transparent"))) +
+    overall_emtrends_plot_narrow +
+    plot_layout(widths = c(0.1, 1))
+  
+  summary_plot_assembled <- 
+    emtrends_plot + 
+    plot_spacer() + 
+    overall_emtrends_plot_aligned +
+    plot_layout(design = layout_original) +
+    plot_annotation(tag_levels = 'a')
+  
+  summary_plot_assembled
+  
+
+  #Make a plot of chosen time windows ------------------------------------------
+  
+  #Create a data.table listing the variables used in the selected annual models (for CC projections)
+  selected_summary_mod_vars <- rbindlist(list(
+    list(organism='miv_nopools', hydro_var_root=c("DurD", "FreD")), #hydro_var=c("DurD365past_scaled", "FreD365past_scaled")),
+    list(organism='miv_nopools_ept', hydro_var_root=c("DurD")), #hydro_var=c("DurD365past_scaled")),
+    list(organism='miv_nopools_och', hydro_var_root=c("DurD")), #hydro_var=c("DurD365past_scaled")),
+    list(organism='dia_biof_nopools', hydro_var_root=c("PDurD")), #hydro_var=c("PDurD365past_scaled")),
+    list(organism='fun_sedi_nopools', hydro_var_root=c("DurD", "DurD_CV")) #hydro_var=c("DurD365past_scaled", "DurD_CV10yrpast_scaled"))
+  )) %>%
+    merge(unique(hydro_vars_dt[, .(hydro_var_root, hydro_label, hydro_class)]),
+          by='hydro_var_root') %>%
+    merge(unique(varcomp_emtrends_merge[
+      , .(organism, organism_sub, organism_class)]),
+      by='organism')
+    
+  time_plot <- ggplot(varcomp_emtrends_merge, 
+                         aes(x=organism_sub, y=str_wrap(hydro_label, 30))) +
+    geom_text(aes(color=permut_sig, alpha=window_d_ratio, label=window_d_format), 
+              fontface = "bold") + #parse=TRUE,
+    geom_point(data=selected_summary_mod_vars, aes(shape='1'), size=10, stroke=1.5) +
+    labs(x='Organism group', y='Hydrological predictor') +
+    scale_color_manual(
+      name='Model significance',
+      values=c('#b2182b', '#2166ac')
+    ) +
+    scale_alpha_binned(
+      name='Temporal window length', 
+      range=c(0.3, 1),
+      breaks=seq(0, 1, 0.25),
+      labels=c('Shortest', '',  'Intermediate','', 'Longest')
+    ) +
+    scale_shape_manual(
+      name=NULL,
+      values=1,
+      labels=str_wrap('Variable used in modeling future mean annual richness', 30)
+    ) +
     facet_grid(str_wrap(hydro_class, 10)~organism_class, 
                scales = "free", space = "free", switch='y', shrink=T) +
-    theme(text=element_text(size=14))
+    theme(text=element_text(size=14),
+          panel.background = element_blank(),
+          legend.position = 'right',
+          panel.grid.major.x  = element_blank(),
+          panel.grid.major.y = element_line(color='lightgrey')) 
+  
   
   #Output table
   out_tab <- file.path(out_dir, 
@@ -10205,7 +10373,24 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
           format(Sys.Date(), "%Y%m%d"), 
           ".png"
         )),
-      plot = summary_plot,
+      plot = summary_plot_assembled,
+      width = 12,
+      height = 10,
+      units='in',
+      dpi=600
+    )
+    
+    
+    ggsave(
+      filename = file.path(
+        out_dir, 
+        paste0(
+          "ssn_hydrowindow_temporal_window_multiorganism_summary", 
+          "_",
+          format(Sys.Date(), "%Y%m%d"), 
+          ".png"
+        )),
+      plot = time_plot,
       width = 10.5,
       height = 10,
       units='in',
@@ -10216,7 +10401,7 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
   
   return(list(
     dt=varcomp_emtrends_merge,
-    plot=summary_plot
+    plot=summary_plot_assembled
     )
   )
 }
@@ -10566,65 +10751,99 @@ test_country_emtrends <- function(emtrends_dt) {
   # ----------------------------------------------------------------------------
   # Test whether rankings match hypothesized order
   # ----------------------------------------------------------------------------
-  # Purpose: Test if the observed country rankings match the hypothesized order:
-  #          Finland > Hungary > France > Czechia > Croatia > Spain
-  #          (where ">" means more negative impact of drying)
+  # Purpose: Test if the observed country rankings match the hypothesized partial order:
+  #          Finland = Hungary > Czechia = France > Croatia = Spain
+  #          (where ">" means stronger response to drying, i.e., more negative impact)
+  #          This is a partial order test where ties (Finland=Hungary, Czechia=France, Croatia=Spain) are allowed
   #
   # Method: Bootstrap + permutation test
   #         For each organism × hydro_var_root group:
-  #         1. Draw 1000 bootstrap samples from N(μ = trend_rel, σ = SE_rel)
+  #         1. Draw 999 bootstrap samples from N(μ = trend_rel_forrank, σ = SE_rel_forrank)
   #         2. Rank the bootstrap estimates across all countries
-  #         3. Compute Spearman's ρ between bootstrap ranks and hypothesized ranks
-  #         4. Generate null distribution by permuting the hypothesized ranks
-  #         5. Calculate p-value as proportion of null |ρ| ≥ observed |ρ|
+  #         3. Count how many of the hypothesized partial order constraints are satisfied
+  #         4. Generate null distribution by permuting the ranks
+  #         5. Calculate p-value as proportion of null iterations with >= satisfied constraints as observed
   #
   # Interpretation:
-  #   - observed_rho: Spearman's ρ between observed ranks and hypothesized order
-  #     +1 = perfect match, -1 = perfect opposite, 0 = no relationship
-  #   - p_perm: p-value (proportion of null correlations with |ρ| ≥ observed |ρ|)
-  #     < 0.05 indicates significant match to hypothesized order
-  #
-  # Notes:
-  #   - Uses Spearman's rank correlation (robust to non-linear relationships)
-  #   - Accounts for uncertainty in trend estimates via bootstrap resampling
-  #   - Tests significance via permutation (non-parametric)
+  #   - mean_satisfied_boot: Mean number of constraints satisfied in bootstrap samples
+  #   - mean_satisfied_null: Mean number of constraints satisfied in null (permuted) samples
+  #   - p_value: Proportion of null iterations where satisfied_null >= satisfied_boot
+  #     (Small p-value indicates observed data fits partial order better than chance)
   # =============================================================================
   
-  # Define hypothesized country order
-  # Finland is expected to have the most negative drying impacts (rank 1),
-  # Spain the least negative (rank 6)
-  hypothesized_ranks <- data.table(
-    country = c("Finland", "Hungary", "France", "Czechia", "Croatia", "Spain"),
-    drn_hypothesized_rank = 1:6  
-  )
+  # Define partial order (higher number = weaker response to drying)
+  # Finland and Hungary: strongest response (rank 1 - most negative impact)
+  # Czechia and France: intermediate response (rank 2)
+  # Croatia and Spain: weakest response (rank 3 - least negative impact)
+  country_order <- c(Spain = 3, Croatia = 3, Czechia = 2, France = 2, Finland = 1, Hungary = 1)
   
-  # Define bootstrap test function
-  cor_emtrends_rank_boot <- function(dt) {
-    dt_boot <- dt[, .( #Create all country x bootstrap combinations
-      trend_rel_forrank_boot = rnorm(999, 
-                                     mean = trend_rel_forrank, 
-                                     sd = SE_rel_forrank)),
-      by = .(country)] %>%
-      .[, boot_i := .SD[,.I], by=country] %>% #Assign bootstrap iteration IDs (1:n_boot repeated for each country)
-      .[, drn_trend_rank_boot := rank(trend_rel_forrank_boot), by=boot_i] %>%  # Rank within each bootstrap iteration
-      .[, drn_trend_rank_null := sample(drn_trend_rank_boot, replace=FALSE), by=boot_i] %>% # Create null by permuting ranks within each bootstrap iteration
-      merge(hypothesized_ranks, by='country')
-    
-    
-    dt_boot_cor <- dt_boot[, list( # Calculate correlations for each bootstrap iteration
-      cor_boot =  cor(drn_trend_rank_boot, drn_hypothesized_rank, method = "spearman"),
-      cor_null = cor(drn_trend_rank_null, drn_hypothesized_rank, method = "spearman")
-    ), by=boot_i] %>%
-      .[, list( #Summarize: mean correlation and p-value (proportion where boot > null)
-        mean_cor = mean(cor_boot),
-        p_perm = mean(abs(cor_boot)>abs(cor_null)) # Two-tailed: abs(boot) > abs(null)
-      )]
-    
-    return(dt_boot_cor)
+  # Generate all unique country pairs where first has weaker response than second (higher rank)
+  # This creates all implied constraints from the partial order
+  constraints <- combn(names(country_order), 2, simplify = FALSE)[
+    sapply(combn(names(country_order), 2, simplify = FALSE),
+           function(p) country_order[p[1]] > country_order[p[2]])
+  ]
+  
+  # Function to count how many partial order constraints are satisfied by a given ranking
+  # Args:
+  #   ranks_vec: Numeric vector of ranks for each country
+  #   countries: Character vector of country names (same order as ranks_vec)
+  # Returns:
+  #   Integer: Number of constraints from 'constraints' that are satisfied
+  count_satisfied <- function(ranks_vec, countries) {
+    ranks <- setNames(ranks_vec, countries)
+    satisfied <- 0
+    for (pair in constraints) {
+      c1 <- pair[1]
+      c2 <- pair[2]
+      if (ranks[[c1]] > ranks[[c2]]) {  # Higher rank = weaker response
+        satisfied <- satisfied + 1
+      }
+    }
+    return(satisfied)
   }
   
-  #Apply bootstrap test to each organism × hydro_var_root group
-  rank_test_boot <- emtrends_sub[, cor_emtrends_rank_boot(.SD),
+  # Bootstrap test for partial order adherence
+  # Performs bootstrap resampling of trend estimates and counts constraint satisfaction
+  # Args:
+  #   dt: data.table with columns: country, trend_rel_forrank, SE_rel_forrank
+  # Returns:
+  #   List with:
+  #     - mean_satisfied_boot: Mean constraints satisfied in bootstrap samples
+  #     - mean_satisfied_null: Mean constraints satisfied in null distribution
+  #     - p_value: p-value from permutation test
+  partial_order_boot <- function(dt) {
+    countries <- unique(dt$country)
+    n_boot <- 999
+    
+    dt_boot <- dt[, .(
+      trend_rel_forrank_boot = rnorm( #Draw n_boot random trend estimates from distribution
+        n_boot,
+        mean = trend_rel_forrank,
+        sd = SE_rel_forrank)),
+      by = .(country)] %>%
+      .[, boot_i := .SD[,.I], by = country] %>%
+      .[, drn_trend_rank_boot := rank(trend_rel_forrank_boot), by = boot_i] %>% #Compute rank for each draw of trend estimates
+      .[, satisfied_boot := count_satisfied(drn_trend_rank_boot, countries), by = boot_i] #Compute number of satisfied inequalities for each draw
+    
+    # Null: permute ranks within each bootstrap iteration to create distribution under H0
+    dt_boot_null <- dt_boot[, drn_trend_rank_null := sample(drn_trend_rank_boot, replace = FALSE), by = boot_i] %>% #Re-sample ranks by draw
+      .[, satisfied_null := count_satisfied(drn_trend_rank_null, countries), by = boot_i] #Computer number of statistied inequalities for each random draw
+    
+    # p-value: proportion of nulls with >= satisfied constraints as bootstrap
+    # (If hypothesis is correct, satisfied_boot should be high and rare in null)
+    dt_boot_cor <- dt_boot_null[, .(p_perm = mean(satisfied_null >= satisfied_boot)), by = boot_i]
+    
+    list(
+      mean_satisfied_boot = mean(dt_boot$satisfied_boot),
+      mean_satisfied_null = mean(dt_boot_null$satisfied_null),
+      p_value = mean(dt_boot_cor$p_perm)
+    )
+  }
+  
+  # Run the partial order test for each organism × hydro_var_root combination
+  # emtrends_sub: data.table containing the trend estimates and standard errors
+  rank_test_boot <- emtrends_sub[, partial_order_boot(.SD),
                                  by = .(organism, hydro_var_root)]
   
   # ----------------------------------------------------------------------------
@@ -10646,7 +10865,7 @@ test_country_emtrends <- function(emtrends_dt) {
 
 get_hydrowindow_multiorganism_varcomp_boxplot <- function(varcomp_dt,
                                                           best_intercept_dt,
-                                                          out_dir=figdir) {
+                                                          out_dir) {
   varcomp_sub <- merge(varcomp_dt, 
         best_intercept_dt[, .(organism, hydro_var, test_parabolic)], 
         by=c('organism', 'hydro_var', 'test_parabolic'),
@@ -10707,7 +10926,6 @@ get_hydrowindow_multiorganism_varcomp_boxplot <- function(varcomp_dt,
 
 
   return(varcomp_best_boxplot)
-       
 }
 
 
@@ -18283,6 +18501,8 @@ mosaic_mod_yr_diagplots <- function(in_ssn_mod_yr_diagplot_multiorganism,
     units='mm',
     dpi=600
   )
+  
+  return(diag_layout)
   
 }
 

@@ -1548,6 +1548,7 @@ temporal_analysis_targets_combined <- list(
       emtrends_dt = emtrends_multiorganism_best_richness$dt,
       varcomp_dt = varcomp_multiorganism_richness$dt,
       permutations_dt = hydrowindow_permutations_all_dt,
+      hydro_vars_dt = hydro_vars_dt,
       out_dir = figdir
     )
   )
