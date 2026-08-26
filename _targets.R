@@ -1562,7 +1562,8 @@ temporal_analysis_targets_combined <- list(
 
   tar_target(
     country_ranking_test_table,
-    test_country_emtrends(emtrends_dt=emtrends_multiorganism_best_richness$dt)
+    test_country_emtrends(emtrends_dt=emtrends_multiorganism_best_richness$dt,
+                          permutations_dt = hydrowindow_permutations_all_dt)
   )
   ,
   

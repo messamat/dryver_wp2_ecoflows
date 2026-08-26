@@ -10522,7 +10522,481 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt) {
 }
 
 #------ test_country_ranking_emtrends -----------------------------------------
-# emtrends_dt <- tar_read(emtrends_multiorganism_all_richness)$dt
+# emtrends_dt <- tar_read(emtrends_multiorganism_best_richness)$dt
+# permutations_dt <- tar_read(hydrowindow_permutations_all_dt)
+
+
+#' Test for country-level differences in trends
+#'
+#' Performs four complementary analyses to evaluate country-specific biodiversity
+#' responses to hydrological predictors. See @details for method descriptions.
+#'
+#' @param emtrends_dt A data.table containing hydrological trend estimates with columns:
+#'   - organism, hydro_var, test_parabolic, hydro_var_root, country, trend, SE,
+#'   - SE_rel, trend_rel, hydro_class, organism_class, organism_label, organism_sub, hydro_label
+#' @param permutations_dt A data.table with model permutation p-values (columns: organism, hydro_var, p_value_mod_perm)
+#'
+#' @return A list containing:
+#'   - heterogeneity_dt: Data.table with heterogeneity test results (Q, Qp, tau², I²)
+#'   - heterogeneity_plot: ggplot object visualizing heterogeneity
+#'   - kendallw_dt: Data.table with Kendall's W test results
+#'   - rank_test_dt: Data.table with partial order test results
+#'   - mean_estimate_rank_plot: ggplot object showing rank distributions by organism
+#'   - mean_estimate_rank_plot_overall: ggplot object showing rank distributions across all organisms
+test_country_emtrends <- function(emtrends_dt,     
+                                  permutations_dt) {
+  
+  # 1. HETEROGENEITY TEST: Random-effects meta-analysis
+  ##############################################################################
+  # Purpose: Test whether the estimated slopes (trend_rel) differ significantly
+  #          across countries for each organism × hydro_var (× test_parabolic group).
+  #
+  # Methods: Random-effects meta-analysis using REML (restricted maximum likelihood)
+  #         via metafor::rma(). The test evaluates if the between-country variance
+  #         (tau²) is significantly > 0.
+  #
+  # Interpretation:
+  #   - Qp < 0.05: Countries differ significantly in their response to the predictor
+  #   - I²: % of variance due to between-country heterogeneity (0-100%)
+  #         Low I² (<25%) = consistent across countries; High I² (>50%) = variable
+  #   - tau²: Estimated between-country variance (0 = no heterogeneity)
+  #
+  # Notes:
+  #   - Requires ≥ 2 countries per group (returns NA otherwise)
+  #   - Requires valid SE > 0 (returns NA otherwise)
+  #   - Uses REML estimation for tau² (more stable than ML for small samples)
+  
+  # Identify valid groups (with non-NA/positive SEs)
+  groups_to_keep <- emtrends_dt[!is.na(SE_rel) & SE_rel > 0,
+                                unique(.SD),
+                                .SDcols = c('organism', 'hydro_var', 'test_parabolic')]
+  
+  # Filter data to valid groups only
+  emtrends_clean <- emtrends_dt %>%
+    unique(by = c('organism', 'hydro_var', 'test_parabolic', 'country')) %>%
+    merge(groups_to_keep, by = c('organism', 'hydro_var', 'test_parabolic'), all.x = TRUE)
+  
+  # Define heterogeneity test function
+  test_heterogeneity_bydtgroup <- function(x) {
+    n <- as.integer(x[,.N])  # Number of countries in this group
+    
+    # Initialize default result with numeric NA to ensure type consistency
+    default_result <- list(
+      Q = NA_real_,       # Q-test statistic
+      Qp = NA_real_,      # Q-test p-value
+      tau2 = NA_real_,    # Between-country variance
+      I2 = NA_real_,      # I² statistic (% variance due to heterogeneity)
+      n_countries = n    # Number of countries
+    )
+    
+    # Skip groups with insufficient data
+    if (n < 2 || any(is.na(x$SE_rel)) || any(x$SE_rel <= 0)) {
+      return(default_result)
+    }
+    
+    # Fit random-effects meta-analysis model
+    m <- tryCatch({
+      metafor::rma(yi = trend_rel, vi = SE_rel^2, method = "REML", data = x)
+    }, error = function(e) {
+      return(default_result)  # Return NA if model fails to converge
+    })
+    
+    # Return model results if successful
+    if (!inherits(m, "try-error") && !is.null(m)) {
+      return(list(
+        Q = m$QE,          # Q-test statistic
+        Qp = m$QEp,        # P-value for heterogeneity test
+        tau2 = m$tau2,     # Estimated between-country variance
+        I2 = m$I2,         # I² statistic (percentage)
+        n_countries = n    # Number of countries
+      ))
+    } else {
+      return(default_result)
+    }
+  }
+  
+  # Apply heterogeneity test to each group
+  country_heterogeneity <- emtrends_dt[
+    , test_heterogeneity_bydtgroup(.SD),
+    by = .(organism, organism_sub, organism_class,
+           hydro_var, hydro_var_root, hydro_label, hydro_class,
+           test_parabolic)
+  ] %>%
+    .[, Qp_sig := Qp < 0.05]  # Add significance flag
+  
+  # Create visualization of heterogeneity results
+  heterogeneity_plot <- ggplot(country_heterogeneity, aes(x = organism_sub, y = hydro_label)) +
+    geom_point(aes(color = Qp_sig, size = I2)) +
+    labs(
+      x = 'Organism and Substrate',
+      y = 'Hydrological predictor',
+      color = 'Significant heterogeneity (Qp < 0.05)',
+      size = expression(I^2)
+    ) +
+    scale_color_manual(
+      values = c("FALSE" = "gray", "TRUE" = "red"),
+      name = 'Significant Q-test'
+    ) +
+    scale_size_continuous(name = expression(I^2)) +
+    facet_grid(hydro_class ~ organism_class,
+               scales = "free", space = "free", switch = 'both', shrink = TRUE) +
+    theme_minimal()
+  
+    # 2. RANK CONSISTENCY TEST: Kendall's W coefficient of concordance #########
+  ##############################################################################
+  # Purpose: Test whether country rankings are consistent across different
+  #          hydrological predictors (models) within each organism.
+  #
+  # Method: Kendall's W coefficient of concordance (vegan::kendall.global)
+  #         - Tests if there is significant agreement among rankings across models
+  #         - Uses 999 permutations and Holm p-value adjustment for multiple testing
+  #
+  # Interpretation:
+  #   - W ≈ 1: Perfect agreement in rankings across models
+  #   - W ≈ 0: No agreement (random rankings)
+  #   - p-value < 0.05: Rankings are significantly consistent across models
+  #
+  # Notes:
+  #   - Only applied to drying variables (excludes flow magnitude: 'oQ10', 'maxPQ')
+  #   - Only models with permutation p-value < 0.1 are included (filtered below)
+  #   - For variables where higher values indicate stronger drying effects (FstDrE, STcon),
+  #     trend signs are reversed to ensure consistent ranking direction
+  #     (Finland = most affected = rank 1, Spain = least affected = rank 6)
+  #   - For models with positive average trend, signs are reversed again so that:
+  #     * For macroinvertebrates: drying duration decreases richness → least affected has highest rank
+  #     * For fungi: drying duration increases richness → least affected has lowest rank
+  #   - Biofilm diatoms are excluded due to insufficient number of significant models
+  
+  # Select drying variables only
+  drying_vars <- setdiff(unique(emtrends_dt$hydro_var_root), c('oQ10', 'maxPQ'))
+  setnames(permutations_dt, 'p_value', 'p_value_mod_perm', skip_absent=T)
+  emtrends_sub <- emtrends_dt[hydro_var_root %in% drying_vars, ] %>%
+    merge(permutations_dt[, .(organism, hydro_var, p_value_mod_perm)],
+          by=c('organism', 'hydro_var')
+    ) %>%
+    .[p_value_mod_perm<0.1,]
+  
+  # Reverse signs for specific variables to ensure consistent direction
+  # FstDrE and STcon variables are reversed because higher values indicate
+  #       stronger drying effects (more negative impact), so we flip signs to make
+  #       Finland (most affected) rank lowest (1) and Spain (least affected) rank highest (6)
+  trends_to_reverse <- c('FstDrE', 'FstDrE_mean', 'STcon_directed', 'STcon_undirected')
+  
+  emtrends_sub[, `:=`(
+    trend_rel_forrank = fifelse(hydro_var_root %in% trends_to_reverse,
+                                -trend_rel, trend_rel),
+    SE_rel_forrank = fifelse(hydro_var_root %in% trends_to_reverse,
+                             -SE_rel, SE_rel)
+  )]
+  
+  # Then change the sign of the trend depending on the overall direction of the
+  # relationship of the model:
+  # for macroinvertebrates, drying duration decreases richness, so the least affected
+  # has the highest ranking.
+  # however, for fungi, drying duration increases richness, so the least affected
+  # country should be the one with the lowest (positive value).
+  # So, for those models (organism x hydro_var) with a positive average trend,
+  # reverse the trend_rel_forrank and SE_rel_forrank
+  emtrends_sub[, `:=`(
+    trend_rel_forrank_mean = mean(trend_rel_forrank)
+  ),  by=c('organism', 'hydro_var')]
+  
+  emtrends_sub[, `:=`(
+    trend_rel_forrank = -sign(trend_rel_forrank_mean)*trend_rel_forrank,
+    SE_rel_forrank = -sign(trend_rel_forrank_mean)*SE_rel_forrank
+  )]
+  
+  # Compute ranks within each organism × hydro_var group
+  emtrends_sub[, drn_trend_rank := rank(trend_rel_forrank),
+               by = .(organism, hydro_var)]
+  
+  emtrends_sub_meanrank <- emtrends_sub[
+    , list(mean_rank=mean(drn_trend_rank)),
+    by = .(organism_class, organism_label, country)]
+  
+  emtrends_sub <- emtrends_sub_meanrank[
+    emtrends_sub, on = .(organism_class, organism_label, country)
+  ]
+  
+  # Remove biofilm diatoms — too few significant models
+  emtrends_sub <- emtrends_sub[organism != 'dia_biof_nopools',]
+  
+  # Create ordered country factor within each facet group
+  emtrends_sub[, country_ordered :=
+                 reorder_within(
+                   country,
+                   mean_rank,
+                   interaction(organism_class, organism_label, drop = TRUE)
+                 )]
+  
+  emtrends_sub_meanrank[, country_ordered :=
+                          reorder_within(
+                            country,
+                            mean_rank,
+                            interaction(organism_class, organism_label, drop = TRUE)
+                          )]
+  
+  emtrends_globalrank <- emtrends_sub[, list(mean_rank=mean(drn_trend_rank)), 
+                                      by = country] %>%
+    .[, country := factor(country, levels=country[order(mean_rank)])]
+  
+  # Create visualization of rank distributions
+  color_vec <- emtrends_dt[!duplicated(country),
+                           setNames(color, country)]
+  
+  design <- "
+  ABC
+  #D# 
+  EF#
+  GH#
+  "
+  
+  mean_estimate_rank <- ggplot(emtrends_sub,
+                               aes(x = country_ordered, y = drn_trend_rank, color = country)) +
+    geom_jitter(alpha = 0.1, height = 0, width = 0.3) +
+    geom_violin(fill = NA) +
+    geom_point(
+      data = emtrends_sub_meanrank,
+      aes(x = country_ordered, y = mean_rank),
+      size = 3
+    ) +
+    scale_x_reordered() +
+    scale_y_continuous(
+      name = "Trend estimate ranking (1 = most affected, 6 = least affected)"
+    ) +
+    scale_color_manual(values=color_vec) +
+    theme_minimal() +
+    facet_manual(
+      vars(organism_class, organism_label),
+      design = design,
+      scales = "free_x",
+      strip = strip_nested()
+    )
+  
+  mean_estimate_rank_across_organisms <- ggplot(
+    data=emtrends_globalrank, 
+    aes(x = country, y=mean_rank)) +
+    geom_point(color='black', size=7) +
+    geom_jitter(data=emtrends_sub,
+                aes(y =drn_trend_rank, color = organism_class), 
+                alpha = 0.1, height = 0, width = 0.3) +
+    geom_violin(data=emtrends_sub,
+                aes(y=drn_trend_rank), 
+                color='black',
+                fill = NA) +
+    geom_line(data=emtrends_sub_meanrank, 
+              aes(color = organism_class, group = organism_label), 
+              size=1) +
+    scale_y_continuous(name = 'Trend estimate ranking (1 = most affected, 6 = least affected)') +
+    theme_minimal()
+  
+  # Compute Kendall's W for each organism
+  kendall_w_byorganism <- dcast(emtrends_sub,
+                                organism + country ~ hydro_var_root,
+                                value.var = 'drn_trend_rank') %>%
+    .[, {
+      k_test <- vegan::kendall.global(Y = .SD, nperm = 999, mult = 'holm')
+      # Convert list output to named vector for proper column creation
+      as.data.table(t(k_test$Concordance_analysis))
+    },
+    .SDcols = unique(emtrends_sub$hydro_var_root),
+    by = organism]
+  
+  # Compute Kendall's W across all models
+  kendall_w_byorganism <- dcast(emtrends_sub,
+                                country ~ hydro_var_root + organism,
+                                value.var = 'drn_trend_rank') %>%
+    .[, {
+      k_test <- vegan::kendall.global(Y = .SD, nperm = 999, mult = 'holm')
+      # Convert list output to named vector for proper column creation
+      as.data.table(t(k_test$Concordance_analysis))
+    },
+    .SDcols = setdiff(names(.), "country")]
+  
+
+    # 3. HYPOTHESIS TEST: Partial order test
+  ##############################################################################
+  # Purpose: Test if the observed country rankings match the hypothesized partial order:
+  #          Finland = Hungary > Czechia = France > Croatia = Spain
+  #          (where ">" means stronger response to drying, i.e., more negative impact)
+  #          This is a partial order test where ties (Finland=Hungary, Czechia=France, Croatia=Spain) are allowed
+  #
+  # Method: Bootstrap + permutation test
+  #         For each organism × hydro_class group:
+  #         1. Draw 999 bootstrap samples from N(μ = trend_rel_forrank, σ = SE_rel_forrank)
+  #         2. Rank the bootstrap estimates across all countries
+  #         3. Count the proportion of partial order constraints satisfied (12 total constraints)
+  #         4. Generate null distribution by permuting the ranks
+  #         5. Calculate p-value as proportion of null iterations with >= satisfied constraints as observed
+  #
+  # Interpretation:
+  #   - mean_satisfied_boot_proportion: Mean proportion of constraints satisfied in bootstrap samples
+  #   - mean_satisfied_null_proportion: Mean proportion of constraints satisfied in null (permuted) samples
+  #   - p_value: Proportion of null iterations where satisfied_null >= satisfied_boot
+  #     (Small p-value indicates observed data fits partial order better than chance)
+  #
+  # Notes:
+  #   - Constraints are generated from country_order where higher number = weaker response
+  #   - Uses constraint counting to test partial order (handles ties explicitly)
+
+  # Define partial order (higher number = weaker response to drying)
+  # Finland and Hungary: strongest response (rank 1 - most negative impact)
+  # Czechia and France: intermediate response (rank 2)
+  # Croatia and Spain: weakest response (rank 3 - least negative impact)
+  country_order <- c(Spain = 3, Croatia = 3, Czechia = 2, France = 2, Finland = 1, Hungary = 1)
+  
+  # Generate all unique country pairs where first has weaker response than second (higher rank)
+  # This creates all implied constraints from the partial order
+  constraints <- combn(names(country_order), 2, simplify = FALSE)[
+    sapply(combn(names(country_order), 2, simplify = FALSE),
+           function(p) country_order[p[1]] > country_order[p[2]])
+  ]
+  
+  # Function to count how many partial order constraints are satisfied by a given ranking
+  # Args:
+  #   ranks_vec: Numeric vector of ranks for each country
+  #   countries: Character vector of country names (same order as ranks_vec)
+  #   constraints: List of country pairs where first should have higher rank than second
+  # Returns:
+  #   Proportion: Fraction of constraints from 'constraints' that are satisfied
+  count_satisfied <- function(ranks_vec, countries, constraints) {
+    ranks <- setNames(ranks_vec, countries)
+    satisfied <- 0
+    for (pair in constraints) {
+      c1 <- pair[1]
+      c2 <- pair[2]
+      if (ranks[[c1]] > ranks[[c2]]) {  # Higher rank = weaker response
+        satisfied <- satisfied + 1
+      }
+    }
+    return(satisfied/length(constraints))
+  }
+  
+  # Bootstrap test for partial order adherence
+  # Performs bootstrap resampling of trend estimates and counts constraint satisfaction
+  # Args:
+  #   dt: data.table with columns: country, trend_rel_forrank, SE_rel_forrank
+  #   constraints: List of country pairs defining the partial order
+  #   n_boot: Number of bootstrap iterations (default = 999)
+  # Returns:
+  #   List with:
+  #     - boot: data.table of bootstrap samples with satisfied constraint proportions
+  #     - null: data.table of null samples with satisfied constraint proportions
+  #     - cor: data.table with p-values for each bootstrap iteration
+  partial_order_boot <- function(dt, constraints, n_boot=999) {
+    countries <- unique(dt$country)
+    
+    dt_boot <- dt[, .(
+      trend_rel_forrank_boot = rnorm( #Draw n_boot random trend estimates from distribution
+        n_boot,
+        mean = trend_rel_forrank,
+        sd = SE_rel_forrank)),
+      by = .(country)] %>%
+      .[, boot_i := .SD[,.I], by = country] %>%
+      .[, drn_trend_rank_boot := rank(trend_rel_forrank_boot), by = boot_i] %>% #Compute rank for each draw of trend estimates
+      .[, satisfied_boot_proportion := 
+          count_satisfied(drn_trend_rank_boot, countries, constraints), 
+        by = boot_i] #Compute proportion of satisfied inequalities for each draw
+    
+    # Null: permute ranks within each bootstrap iteration to create distribution under H0
+    dt_boot_null <- dt_boot[, drn_trend_rank_null := sample(drn_trend_rank_boot, replace = FALSE), by = boot_i] %>% #Re-sample ranks by draw
+      .[, satisfied_null_proportion := 
+          count_satisfied(drn_trend_rank_null, countries, constraints),
+        by = boot_i] #Compute proportion of satisfied inequalities for each random draw
+    
+    # p-value: proportion of nulls with >= satisfied constraints as bootstrap
+    # (If hypothesis is correct, satisfied_boot should be high and rare in null)
+    dt_boot_cor <- dt_boot_null[, .(p_perm = mean(satisfied_null_proportion  >= satisfied_boot_proportion )), by = boot_i]
+    
+    return(list(
+      boot = dt_boot,
+      null = dt_boot_null,
+      cor = dt_boot_cor
+    ))
+  }
+  
+  # Run the partial order test for each organism × hydro_class combination
+  # Note: Grouping by organism, organism_class, hydro_class (not hydro_var_root)
+  rank_test_boot <- emtrends_sub[
+    , {
+      res <- partial_order_boot(.SD, constraints=constraints, n_boot = 999)
+      list(
+        mean_satisfied_boot_proportion = mean(res$boot$satisfied_boot_proportion),
+        mean_satisfied_null_proportion = mean(res$null$satisfied_null_proportion),
+        p_value = mean(res$cor$p_perm),
+        dt_boot = list(res$boot)  # Wrap in list() to create a list column
+      )
+    },
+    by = .(organism, organism_class, hydro_class)
+  ]
+  
+  # Extract all bootstrap data.tables from the list column
+  all_boot <- rank_test_boot[
+    , .SD[, rbindlist(dt_boot)],
+    by = .(organism, hydro_class, organism_class)]
+  
+  ##############################################################################
+  # 4. RANK DISTRIBUTION ANALYSIS
+  # Purpose: Analyze the distribution of country rankings across bootstrap iterations
+  #          to identify dominant patterns and test their significance
+  
+  # After running bootstrap, extract all rankings as strings
+  get_ranking_string <- function(dt_boot, boot_i) {
+    ranks <- dt_boot[boot_i == boot_i, .(country, drn_trend_rank_boot)]
+    setorder(ranks, -drn_trend_rank_boot)  # Sort by rank (highest = weakest response)
+    ranking=paste(ranks$country, collapse = ">")
+  }
+  
+  # Get all bootstrap ranking strings
+  rank_strings <- all_boot[, get_ranking_string(.SD, boot_i), 
+                           by = .(organism, hydro_class, boot_i, organism_class)]
+  
+  # Count frequency of each unique ranking
+  rank_string_freq <- rank_strings[, .N, 
+                                   by = .(organism_class, hydro_class, V1)] %>%
+    .[, `:=`(N_tot= sum(N),
+             N_rel=N/sum(N)),
+      by=.(organism_class, hydro_class)]
+  
+  # Compute rank statistics and significance for each group
+  rank_stats <- all_boot[
+    , {
+      # 1. Compute OBSERVED rank statistics per country
+      obs <- .SD[, .(
+        mean_rank = mean(drn_trend_rank_boot),
+        mode_rank = {
+          tab <- table(drn_trend_rank_boot)
+          as.numeric(names(tab)[which.max(tab)])
+        },
+        median_rank = median(drn_trend_rank_boot)
+      ), by = country]
+      
+      # 2. Compute NULL rank statistics per country per iteration
+      null_stats <- .SD[, .(
+        mean_rank = mean(drn_trend_rank_null),
+        mode_rank = {
+          tab <- table(drn_trend_rank_null)
+          as.numeric(names(tab)[which.max(tab)])
+        }
+      ), by = .(country, boot_i)]
+      
+      obs
+    },
+    by = .(organism_class, hydro_class)
+  ]
+  
+  # Return all results
+  return(list(
+    heterogeneity_dt = country_heterogeneity,  # Heterogeneity test results
+    heterogeneity_plot = heterogeneity_plot,   # Heterogeneity visualization
+    kendallw_dt = kendall_w_byorganism,        # Kendall's W test results
+    rank_test_dt = rank_test_boot,             # Hypothesis test results
+    mean_estimate_rank_plot = mean_estimate_rank,  # Rank distribution visualization
+    mean_estimate_rank_plot_overall = mean_estimate_rank_across_organisms # Rank distribution visualization across all organisms
+  ))
+}
+
+
 
 #' Test for country-level differences in trends
 #'
@@ -10585,10 +11059,10 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt) {
 #'   4. Generates null distribution by permuting ranks within each bootstrap iteration
 #'   5. Calculates p-value as proportion of null correlations where |ρ_null| ≥ |ρ_obs|
 #'
-test_country_emtrends <- function(emtrends_dt) {
-  # ----------------------------------------------------------------------------
-  # Test for heterogeneity in slopes across countries
-  # ----------------------------------------------------------------------------
+test_country_emtrends <- function(emtrends_dt,     
+                                  permutations_dt) {
+  
+  # Test for heterogeneity in slopes across countries ##########################
   # Purpose: Test whether the estimated slopes (trend_rel) differ significantly
   #          across countries for each organism × hydro_var × test_parabolic group.
   #
@@ -10618,7 +11092,7 @@ test_country_emtrends <- function(emtrends_dt) {
     unique(by = c('organism', 'hydro_var', 'test_parabolic', 'country')) %>%
     merge(groups_to_keep, by = c('organism', 'hydro_var', 'test_parabolic'), all.x = TRUE)
   
-  # efine heterogeneity test function
+  # Define heterogeneity test function
   test_heterogeneity_bydtgroup <- function(x) {
     n <- as.integer(x[,.N])  # Number of countries in this group
     
@@ -10684,9 +11158,7 @@ test_country_emtrends <- function(emtrends_dt) {
                scales = "free", space = "free", switch = 'both', shrink = TRUE) +
     theme_minimal()
   
-  # ----------------------------------------------------------------------------
-  # Test for consistency in country trend ranking amont models
-  # ----------------------------------------------------------------------------
+  # Test for consistency in country trend ranking amont models ######################
   # Purpose: Test whether country rankings are consistent across different
   #          hydrological predictors (models) within each organism.
   #
@@ -10704,11 +11176,15 @@ test_country_emtrends <- function(emtrends_dt) {
   #   - For variables where higher values indicate stronger drying effects (FstDrE, STcon),
   #     trend signs are reversed to ensure consistent ranking direction
   #     (Finland = most negative effect = rank 1, Spain = least negative = rank 6)
-  # =============================================================================
-  
+
   # Select drying variables only
   drying_vars <- setdiff(unique(emtrends_dt$hydro_var_root), c('oQ10', 'maxPQ'))
-  emtrends_sub <- emtrends_dt[hydro_var_root %in% drying_vars, ]
+  setnames(permutations_dt, 'p_value', 'p_value_mod_perm', skip_absent=T)
+  emtrends_sub <- emtrends_dt[hydro_var_root %in% drying_vars, ] %>%
+    merge(permutations_dt[, .(organism, hydro_var, p_value_mod_perm)],
+                          by=c('organism', 'hydro_var')
+    ) %>%
+    .[p_value_mod_perm<0.1,]
   
   # Reverse signs for specific variables to ensure consistent direction
   # Note: FstDrE and STcon variables are reversed because higher values indicate
@@ -10723,21 +11199,113 @@ test_country_emtrends <- function(emtrends_dt) {
                              -SE_rel, SE_rel)
   )]
   
+  #Then change the sign of the trend depending on the overall direction of the
+  #relationship of the model:
+  # for macroinvertebrates, drying duration decreases richness, so the least affected
+  #has the highest ranking.
+  # however, for fungi, drying duration increases richness, so the least affected
+  # country should be the one with the lowest (positive value).
+  # So, for those models (organism x hydro_var) with a positive average trend,
+  # reverse the trend_rel_forrank and SE_rel_forrank
+  emtrends_sub[, `:=`(
+    trend_rel_forrank_mean = mean(trend_rel_forrank)
+  ),  by=c('organism', 'hydro_var')]
+  
+  emtrends_sub[, `:=`(
+    trend_rel_forrank = -sign(trend_rel_forrank_mean)*trend_rel_forrank,
+    SE_rel_forrank = -sign(trend_rel_forrank_mean)*SE_rel_forrank
+  )]
+  
+  
   # Compute ranks within each organism × hydro_var group
   emtrends_sub[, drn_trend_rank := rank(trend_rel_forrank),
-               by = .(organism, hydro_var)]
+               by = .(organism, hydro_var)] 
+  
+  emtrends_sub_meanrank <- emtrends_sub[
+    , list(mean_rank=mean(drn_trend_rank)),
+    by = .(organism_class, organism_label, country)]
+  
+  emtrends_sub <- emtrends_sub_meanrank[
+    emtrends_sub, on = .(organism_class, organism_label, country)
+  ]
+  
+  #Remove biofilm diatoms — too few significant models
+  emtrends_sub <- emtrends_sub[organism != 'dia_biof_nopools',]
+  
+  
+  # Create ordered country factor within each facet group
+  emtrends_sub[, country_ordered :=
+                 reorder_within(
+                   country,
+                   mean_rank,
+                   interaction(organism_class, organism_label, drop = TRUE)
+                 )]
+  
+  emtrends_sub_meanrank[, country_ordered :=
+                          reorder_within(
+                            country,
+                            mean_rank,
+                            interaction(organism_class, organism_label, drop = TRUE)
+                          )]
+  
+  emtrends_globalrank <- emtrends_sub[, list(mean_rank=mean(drn_trend_rank)), 
+                                      by = country] %>%
+    .[, country := factor(country, levels=country[order(mean_rank)])]
   
   # Create visualization of rank distributions
-  mean_estimate_rank <- ggplot(
-    emtrends_sub, aes(x = country, y = drn_trend_rank, color = country)) +
-    geom_jitter(alpha = 0.3, height = 0, width = 0.3) +
+  color_vec <- emtrends_dt[!duplicated(country),
+                           setNames(color, country)]
+  
+  design <- "ABC
+#D#
+EF#
+GH#
+"
+  
+  mean_estimate_rank <- ggplot(emtrends_sub,
+         aes(x = country_ordered, y = drn_trend_rank, color = country)) +
+    geom_jitter(alpha = 0.1, height = 0, width = 0.3) +
     geom_violin(fill = NA) +
-    scale_y_continuous(name = 'Trend estimate ranking (1 = lowest, 6 = highest)') +
+    geom_point(
+      data = emtrends_sub_meanrank,
+      aes(x = country_ordered, y = mean_rank),
+      size = 3
+    ) +
+    scale_x_reordered() +
+    scale_y_continuous(
+      name = "Trend estimate ranking (1 = most affected, 6 = least affected)"
+    ) +
+    scale_color_manual(name=NULL, values=color_vec) +
     theme_minimal() +
-    facet_wrap(organism_class ~ organism_label, scales = 'free', nrow = 4)
+    facet_manual(
+      vars(organism_class, organism_label),
+      design = design,
+      scales = "free_x",
+      strip = strip_nested()
+    )
+  
+  
+  mean_estimate_rank_across_organisms <- ggplot(
+    data=emtrends_globalrank, 
+    aes(x = country, y=mean_rank)) +
+    geom_point(color='black', size=7) +
+    # geom_jitter(data=emtrends_sub,
+    #             aes(y =drn_trend_rank, color = organism_class), 
+    #             alpha = 0.1, height = 0, width = 0.3) +
+    geom_violin(data=emtrends_sub,
+                aes(y=drn_trend_rank, fill=country),
+                alpha=0.3) +
+    geom_line(data=emtrends_sub_meanrank, 
+              aes(color = organism_class, group = organism_label), 
+              size=1) +
+    scale_fill_manual(name=NULL, values= color_vec) + 
+    scale_color_brewer(palette='Dark2') +
+    scale_y_continuous(name = 'Trend estimate ranking (1 = most affected, 6 = least affected)') +
+    theme_minimal()
+
   
   # Compute Kendall's W for each organism
-  kendall_w <- dcast(emtrends_sub,
+  kendall_w_byorganism <- dcast(emtrends_sub,
                      organism + country ~ hydro_var_root,
                      value.var = 'drn_trend_rank') %>%
     .[, {
@@ -10748,9 +11316,19 @@ test_country_emtrends <- function(emtrends_dt) {
     .SDcols = unique(emtrends_sub$hydro_var_root),
     by = organism]
   
-  # ----------------------------------------------------------------------------
-  # Test whether rankings match hypothesized order
-  # ----------------------------------------------------------------------------
+  # Compute Kendall's W across all models
+  kendall_w_overall<- dcast(emtrends_sub,
+                                country ~ hydro_var_root + organism,
+                                value.var = 'drn_trend_rank') %>%
+    .[, {
+      k_test <- vegan::kendall.global(Y = .SD, nperm = 999, mult = 'holm')
+      # Convert list output to named vector for proper column creation
+      as.data.table(t(k_test$Concordance_analysis))
+    },
+    .SDcols = setdiff(names(.), "country")]
+  
+  
+  # Test whether rankings match hypothesized order ##############################
   # Purpose: Test if the observed country rankings match the hypothesized partial order:
   #          Finland = Hungary > Czechia = France > Croatia = Spain
   #          (where ">" means stronger response to drying, i.e., more negative impact)
@@ -10769,8 +11347,7 @@ test_country_emtrends <- function(emtrends_dt) {
   #   - mean_satisfied_null: Mean number of constraints satisfied in null (permuted) samples
   #   - p_value: Proportion of null iterations where satisfied_null >= satisfied_boot
   #     (Small p-value indicates observed data fits partial order better than chance)
-  # =============================================================================
-  
+
   # Define partial order (higher number = weaker response to drying)
   # Finland and Hungary: strongest response (rank 1 - most negative impact)
   # Czechia and France: intermediate response (rank 2)
@@ -10790,7 +11367,7 @@ test_country_emtrends <- function(emtrends_dt) {
   #   countries: Character vector of country names (same order as ranks_vec)
   # Returns:
   #   Integer: Number of constraints from 'constraints' that are satisfied
-  count_satisfied <- function(ranks_vec, countries) {
+  count_satisfied <- function(ranks_vec, countries, constraints) {
     ranks <- setNames(ranks_vec, countries)
     satisfied <- 0
     for (pair in constraints) {
@@ -10800,7 +11377,7 @@ test_country_emtrends <- function(emtrends_dt) {
         satisfied <- satisfied + 1
       }
     }
-    return(satisfied)
+    return(satisfied/length(constraints))
   }
   
   # Bootstrap test for partial order adherence
@@ -10812,48 +11389,119 @@ test_country_emtrends <- function(emtrends_dt) {
   #     - mean_satisfied_boot: Mean constraints satisfied in bootstrap samples
   #     - mean_satisfied_null: Mean constraints satisfied in null distribution
   #     - p_value: p-value from permutation test
-  partial_order_boot <- function(dt) {
+  partial_order_boot <- function(dt, constraints, n_boot=999) {
     countries <- unique(dt$country)
-    n_boot <- 999
-    
+
     dt_boot <- dt[, .(
       trend_rel_forrank_boot = rnorm( #Draw n_boot random trend estimates from distribution
         n_boot,
         mean = trend_rel_forrank,
         sd = SE_rel_forrank)),
       by = .(country)] %>%
-      .[, boot_i := .SD[,.I], by = country] %>%
-      .[, drn_trend_rank_boot := rank(trend_rel_forrank_boot), by = boot_i] %>% #Compute rank for each draw of trend estimates
-      .[, satisfied_boot := count_satisfied(drn_trend_rank_boot, countries), by = boot_i] #Compute number of satisfied inequalities for each draw
+    .[, boot_i := .SD[,.I], by = country] %>%
+    .[, drn_trend_rank_boot := rank(trend_rel_forrank_boot), by = boot_i] %>% #Compute rank for each draw of trend estimates
+    .[, satisfied_boot_proportion := 
+        count_satisfied(drn_trend_rank_boot, countries, constraints), 
+      by = boot_i] #Compute number of satisfied inequalities for each draw
     
     # Null: permute ranks within each bootstrap iteration to create distribution under H0
     dt_boot_null <- dt_boot[, drn_trend_rank_null := sample(drn_trend_rank_boot, replace = FALSE), by = boot_i] %>% #Re-sample ranks by draw
-      .[, satisfied_null := count_satisfied(drn_trend_rank_null, countries), by = boot_i] #Computer number of statistied inequalities for each random draw
+      .[, satisfied_null_proportion := 
+          count_satisfied(drn_trend_rank_null, countries, constraints),
+        by = boot_i] #Computer number of satistied inequalities for each random draw
     
     # p-value: proportion of nulls with >= satisfied constraints as bootstrap
     # (If hypothesis is correct, satisfied_boot should be high and rare in null)
-    dt_boot_cor <- dt_boot_null[, .(p_perm = mean(satisfied_null >= satisfied_boot)), by = boot_i]
+    dt_boot_cor <- dt_boot_null[, .(p_perm = mean(satisfied_null_proportion  >= satisfied_boot_proportion )), by = boot_i]
     
-    list(
-      mean_satisfied_boot = mean(dt_boot$satisfied_boot),
-      mean_satisfied_null = mean(dt_boot_null$satisfied_null),
-      p_value = mean(dt_boot_cor$p_perm)
-    )
+    return(list(
+      boot = dt_boot,
+      null = dt_boot_null,
+      cor = dt_boot_cor
+    ))
   }
+  
   
   # Run the partial order test for each organism × hydro_var_root combination
   # emtrends_sub: data.table containing the trend estimates and standard errors
-  rank_test_boot <- emtrends_sub[, partial_order_boot(.SD),
-                                 by = .(organism, hydro_var_root)]
+  rank_test_boot <- emtrends_sub[
+    , {
+      res <- partial_order_boot(.SD, constraints=constraints, n_boot = 999)
+      list(
+        mean_satisfied_boot_proportion = mean(res$boot$satisfied_boot_proportion),
+        mean_satisfied_null_proportion = mean(res$null$satisfied_null_proportion),
+        p_value = mean(res$cor$p_perm),
+        dt_boot = list(res$boot)  # <-- Wrap in list() to create a list column
+      )
+    },
+    by = .(organism, organism_class, hydro_class)
+  ]
   
-  # ----------------------------------------------------------------------------
-  # Return all results --------------------------------------------------------
+  # Now access all dt_boot with:
+  all_boot <- rank_test_boot[
+    , .SD[, rbindlist(dt_boot)],
+    by = .(organism, hydro_var_root, organism_class, hydro_class)] 
+  
+  #-------------- Check whether there is a dominant ranking --------------------
+  # After running your bootstrap, extract all rankings as strings
+  get_ranking_string <- function(dt_boot, boot_i) {
+    ranks <- dt_boot[boot_i == boot_i, .(country, drn_trend_rank_boot)]
+    setorder(ranks, -drn_trend_rank_boot)  # Sort by rank (highest = weakest response)
+    ranking=paste(ranks$country, collapse = ">")
+  }
+  
+  # Get all bootstrap ranking strings
+  rank_strings <- all_boot[, get_ranking_string(.SD, boot_i), 
+                           by = .(organism, hydro_var_root, boot_i, organism_class, hydro_class)]
+
+  # Count frequency of each unique ranking
+  rank_string_freq <- rank_strings[, .N, 
+                                   by = .(organism_class, hydro_class, V1)] %>%
+    .[, `:=`(N_tot= sum(N),
+             N_rel=N/sum(N)),
+      by=.(organism_class, hydro_class)] 
+  
+  #-------------- Check whether the average and mode rank per country --------------------
+  # Compute rank statistics and significance for each group
+  rank_stats <- all_boot[
+    , {
+      
+      # 1. Compute OBSERVED rank statistics per country
+      obs <- .SD[, .(
+        mean_rank = mean(drn_trend_rank_boot),
+        mode_rank = {
+          tab <- table(drn_trend_rank_boot)
+          as.numeric(names(tab)[which.max(tab)])
+        },
+        median_rank = median(drn_trend_rank_boot)
+      ), by = country]
+      
+      # 2. Compute NULL rank statistics per country per iteration
+      null_stats <- .SD[, .(
+        mean_rank = mean(drn_trend_rank_null),
+        mode_rank = {
+          tab <- table(drn_trend_rank_null)
+          as.numeric(names(tab)[which.max(tab)])
+        }
+      ), by = .(country, boot_i)]
+      
+      obs
+    },
+    by = .(organism_class, hydro_class)
+  ]
+  #To be continued if needed
+  
+  
+  
+  # Returtest# Return all results --------------------------------------------------------
   return(list(
     heterogeneity_dt = country_heterogeneity,  # Heterogeneity test results
     heterogeneity_plot = heterogeneity_plot,   # Heterogeneity visualization
-    kendallw_dt = kendall_w,                   # Kendall's W test results
+    kendallw_dt_byorganism = kendall_w_byorganism,        # Kendall's W test results
+    kendallw_dt_overall = kendall_w_overall,        # Kendall's W test results
     rank_test_dt = rank_test_boot,             # Hypothesis test results
-    mean_estimate_rank_plot = mean_estimate_rank  # Rank distribution visualization
+    mean_estimate_rank_plot = mean_estimate_rank,  # Rank distribution visualization
+    mean_estimate_rank_plot_overall = mean_estimate_rank_across_organisms # Rank distribution visualization across all organisms
   ))
 }
 
