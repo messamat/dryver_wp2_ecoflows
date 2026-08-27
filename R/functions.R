@@ -1824,7 +1824,8 @@ plot_ssn_obs_pred <- function(in_mod_fit,
     #   values=c('#2b8cbe', '#feb24c')) +
     # facet_wrap(~country) +
     coord_fixed() +
-    theme_classic()
+    theme_classic() +
+    theme(legend.justification='top')
   
   return(predobs_plot)
 }
@@ -2338,6 +2339,30 @@ run_permutations_for_ssn_model <- function(fit_mod, ssn_obj, cov_name, n_perm = 
     model_type = model_class,
     cov_name = cov_name
   )
+}
+
+#------ assign_parallel_matrix_ids --------------------------------------------
+assign_parallel_matrix_ids <- function(m) {
+  n <- nrow(m)
+  # Create matrices of row/column indices
+  rows <- matrix(1:n, nrow = n, ncol = n, byrow = FALSE)
+  cols <- matrix(1:n, nrow = n, ncol = n, byrow = TRUE)
+  
+  # For each cell, get min/max indices
+  i <- pmin(rows, cols)  # Lower index
+  j <- pmax(rows, cols)  # Higher index
+  
+  # Assign IDs:
+  # - Diagonal: ID = row index (1 to n)
+  # - Off-diagonal: ID = n + position in upper triangle
+  id_matrix <- ifelse(rows == cols,
+                      rows,
+                      n + (i-1)*(2*n-i)/2 + (j-i))
+  
+  rownames(id_matrix) <- rownames(m)
+  colnames(id_matrix) <- colnames(m)
+  
+  return(id_matrix)
 }
 
 #---------------------------------- workflow functions ---------------------------------------------
@@ -10742,7 +10767,7 @@ test_country_emtrends <- function(emtrends_dt,
   
   
   # Compute ranks within each organism × hydro_var group
-  emtrends_sub[, drn_trend_rank := rank(trend_rel_forrank),
+  emtrends_sub[, drn_trend_rank := frank(trend_rel_forrank),
                by = .(organism, hydro_var)] 
   
   emtrends_sub_meanrank <- emtrends_sub[
@@ -10924,7 +10949,7 @@ GH#
       by = .(country, hydro_var_root)] %>%
       .[, boot_i := .SD[,.I], 
         by = .(country, hydro_var_root)] %>%
-      .[, drn_trend_rank_boot := rank(trend_rel_forrank_boot), 
+      .[, drn_trend_rank_boot := frank(trend_rel_forrank_boot), 
         by = .(boot_i, hydro_var_root)] %>% #Compute rank for each draw of trend estimates
       .[, satisfied_boot_proportion := 
           count_satisfied(drn_trend_rank_boot, countries, constraints), 
@@ -10971,8 +10996,9 @@ GH#
     by = .(organism, organism_class, organism_label, hydro_class)] 
   
 
-  #-------------- Check whether there is a dominant ranking --------------------
-  # After running your bootstrap, extract all rankings as strings
+  # Check whether there is a dominant ranking  #################################
+  
+  # After running the bootstrap, extract all rankings as strings
   get_ranking_string <- function(dt_boot, boot_i) {
     ranks <- dt_boot[boot_i == boot_i, .(country, drn_trend_rank_boot)]
     setorder(ranks, -drn_trend_rank_boot)  # Sort by rank (highest = weakest response)
@@ -10990,71 +11016,76 @@ GH#
              N_rel=N/sum(N)),
       by=.(organism_class, hydro_class)] 
   
-  #-------------- Check the average rank per country after boostrapping --------
+  # Check the average rank per country based on bootstrapping  #################
   # Calculate full rank statistics including null distributions
-  # Calculate observed stats
-  obs_stats <- all_boot[
-    , .(
-      mean_rank = mean(drn_trend_rank_boot),
-      sd_rank = sd(drn_trend_rank_boot),
-      mode_rank = {
-        tab <- table(drn_trend_rank_boot)
-        as.numeric(names(tab)[which.max(tab)])
-      },
-      median_rank = median(drn_trend_rank_boot)
-    ),
-    by = .(organism_class, hydro_var_root, country)
-  ]
+  get_boot_countryrank_stats <- function(boot_dt, group_cols) {
+    # Calculate observed stats
+    obs_stats <- boot_dt[
+      , .(
+        mean_rank = mean(drn_trend_rank_boot),
+        sd_rank = sd(drn_trend_rank_boot),
+        mode_rank = {
+          tab <- table(drn_trend_rank_boot)
+          as.numeric(names(tab)[which.max(tab)])
+        },
+        median_rank = median(drn_trend_rank_boot)
+      ),
+      by = c(group_cols, 'country')
+    ]
+    
+    # Calculate null stats
+    null_stats <- boot_dt[
+      , .(
+        mean_rank_null = mean(drn_trend_rank_null),
+        sd_rank_null = sd(drn_trend_rank_null)
+      ),
+      by = c(group_cols, 'country', 'boot_i')
+    ]
+    
+    # Aggregate null stats by country (across all bootstrap iterations)
+    null_stats_agg <- null_stats[
+      , .(
+        mean_rank_null = mean(mean_rank_null),
+        sd_rank_null = mean(sd_rank_null, na.rm=T)
+      ),
+      by = .(country)
+    ]
+    
+    # Merge observed and null stats
+    rank_stats_full <- merge(obs_stats, null_stats,
+                             by = c(group_cols, "country"),
+                             all = TRUE)
+    
+    return(rank_stats_full)
+    
+  }
   
-  # Calculate null stats
-  null_stats <- all_boot[
-    , .(
-      mean_rank_null = mean(drn_trend_rank_null),
-      sd_rank_null = sd(drn_trend_rank_null)
-    ),
-    by = .(organism_class, hydro_var_root, country, boot_i)
-  ]
+  rank_stats_byorganism <-  get_boot_countryrank_stats(
+    boot_dt=all_boot,
+    group_cols='organism_label'
+    ) 
   
-  # Aggregate null stats by country (across all bootstrap iterations)
-  null_stats_agg <- null_stats[
-    , .(
-      mean_rank_null = mean(mean_rank_null),
-      sd_rank_null = mean(sd_rank_null, na.rm=T)
-    ),
-    by = .(country)
-  ]
-  
-  # Merge observed and null stats
-  rank_stats_full <- merge(obs_stats, null_stats,
-                           by = c("organism_class",  "hydro_var_root", "country"),
-                           all = TRUE)
-  
-  
+
   #' Test pairwise significance of country ranks
   #'
   #' @param dt data.table with columns: country, drn_trend_rank_boot, drn_trend_rank_null, boot_i
   #' @param group_col Character vector of grouping variables (NULL for global test)
   #' @return data.table with pairwise comparisons and significance
   test_pairwise_ranks <- function(dt, group_col = NULL) {
-    # Compute observed stats
+    # Compute observed stats - one row per group × country
     if (is.null(group_col)) {
       obs_stats <- dt[, .(mean_rank = mean(drn_trend_rank_boot)), by = country]
       null_stats <- dt[, .(mean_rank_null = mean(drn_trend_rank_null)), by = .(country, boot_i)]
     } else {
-      obs_stats <- dt[, list(mean_rank = mean(drn_trend_rank_boot)), by = c(group_col, "country")]
-      null_stats <- dt[, list(mean_rank_null = mean(drn_trend_rank_null)), by = c(group_col, "country", "boot_i")]
+      obs_stats <- dt[, .(mean_rank = mean(drn_trend_rank_boot)), by = c(group_col, "country")]
+      null_stats <- dt[, .(mean_rank_null = mean(drn_trend_rank_null)), by = c(group_col, "country", "boot_i")]
     }
     
     # Generate all country pairs within each group
     if (is.null(group_col)) {
-      # Global case
       countries <- unique(obs_stats$country)
-      country_pairs <- data.table(
-        country1 = rep(countries, each = length(countries)),
-        country2 = rep(countries, times = length(countries))
-      )[country1 != country2]
+      country_pairs <- CJ(country1 = countries, country2 = countries)[country1 != country2]
     } else {
-      # Grouped case
       group_country <- obs_stats[, .(country), by = group_col]
       country_pairs <- group_country[
         , CJ(country1 = country, country2 = country)
@@ -11076,11 +11107,12 @@ GH#
           
           p_value <- mean(abs(null_diffs) >= abs(obs_diff), na.rm = TRUE)
           
-          list(
+          .(
+            obs_mean_c1 = obs_stats[country == c1, mean_rank],
+            obs_mean_c2 = obs_stats[country == c2, mean_rank],
             observed_diff = obs_diff,
             p_value = p_value,
-            significant = p_value < 0.05
-          )
+            significant = p_value < 0.05)
         },
         by = .(country1, country2)
       ]
@@ -11089,22 +11121,26 @@ GH#
         , {
           c1 <- country1
           c2 <- country2
-          group_val <- .BY[[group_col]]  # Properly access current group value
+          group_val <- get(group_col)
           
-          obs_diff <- obs_stats[.BY[[group_col]] == group_val & country == c1, mean_rank] -
-            obs_stats[.BY[[group_col]] == group_val & country == c2, mean_rank]
+          # Get obs_stats for this specific group and countries
+          obs_group <- obs_stats[get(group_col) == group_val]
+          obs_diff <- obs_group[country == c1, mean_rank] - obs_group[country == c2, mean_rank]
           
-          null_c1 <- null_stats[.BY[[group_col]] == group_val & country == c1, mean_rank_null]
-          null_c2 <- null_stats[.BY[[group_col]] == group_val & country == c2, mean_rank_null]
+          # Get null_stats for this specific group and countries
+          null_group <- null_stats[get(group_col) == group_val]
+          null_c1 <- null_group[country == c1, mean_rank_null]
+          null_c2 <- null_group[country == c2, mean_rank_null]
           null_diffs <- null_c1 - null_c2
           
           p_value <- mean(abs(null_diffs) >= abs(obs_diff), na.rm = TRUE)
           
-          list(
-            observed_diff = obs_diff,
-            p_value = p_value,
-            significant = p_value < 0.05
-          )
+          .(
+            obs_mean_c1 = obs_group[country == c1, mean_rank],
+            obs_mean_c2 = obs_group[country == c2, mean_rank],
+            observed_diff = obs_diff, 
+            p_value = p_value, 
+            significant = p_value < 0.05)
         },
         by = c(group_col, "country1", "country2")
       ]
@@ -11113,57 +11149,115 @@ GH#
     return(result)
   }
   
-  # Usage:
-  # Within each organism
-  pairwise_organism <- test_pairwise_ranks(all_boot, group_col = "organism_class")
+  # WIthin each organism
+  avg_ranking_sig_pairwise_organism <- test_pairwise_ranks(all_boot, group_col = "organism_label")
   
   # Across all organisms (global)
-  pairwise_global <- test_pairwise_ranks(all_boot, group_col = NULL)
+  avg_ranking_sig_pairwise_global <- test_pairwise_ranks(all_boot, group_col = NULL)
   
-  # Create mean_estimate_rank_boot plot ----------------------------
+  # For each facet, find the closest significant neighbor for each country
+  get_minimal_pairwise_sig <- function(pairwise_dt, group_col) {
+    sig_pairs <- pairwise_dt[significant==TRUE]   # Filter to significant pairs only
+
+    upairs <- sig_pairs[, {
+      dcast(.SD, country1~country2, value.var = 'observed_diff') %>%
+        as.matrix(rownames='country1') %>%
+        assign_parallel_matrix_ids(.) %>%
+        data.table( keep.rownames='country1') %>%
+        melt(id.var='country1', variable.name='country2', value.name='pair_i') %>%
+        .[country1 != country2,]  
+    }, by=group_col]
+    
+    sig_pairs <- merge(sig_pairs,  upairs, 
+                       by=c(group_col, 'country1', 'country2'))
+    
+    # For each country in each facet, find the CLOSEST significant pair (smallest rank difference)
+    minimal_pairs <- sig_pairs[observed_diff < 0,
+                               .SD[which.max(observed_diff),],
+                               by = c(group_col, 'country1')
+    ] %>%
+      unique(by=c(group_col, 'pair_i'))
+    
+    return(minimal_pairs)
+  }
+  
+  minimal_sig_pairs_organism <- get_minimal_pairwise_sig(
+    pairwise_dt = avg_ranking_sig_pairwise_organism,
+    group_col = 'organism_label') %>%
+    merge(
+      unique(rank_test_boot[, .(organism_class, organism_label)]),
+      by='organism_label'
+    ) %>%
+    .[, `:=`(seg_start = min(c(obs_mean_c1, obs_mean_c2)),
+             seg_end = max(c(obs_mean_c1, obs_mean_c2))), by=.I] %>%
+    .[, seg_order := frank(seg_start, ties.method = "min"), by = organism_label]
+    
+    
+  minimal_sig_pairs_global <- get_minimal_pairwise_sig(
+    pairwise_dt = avg_ranking_sig_pairwise_global,
+    group_col = NULL)  %>%
+    .[, `:=`(seg_start = min(c(obs_mean_c1, obs_mean_c2)),
+             seg_end = max(c(obs_mean_c1, obs_mean_c2))), by=.I] %>%
+    .[, seg_order := frank(seg_start, ties.method = "min")]
+
+  # Plot the average rank from bootstraping ####################################
   # Order countries by mean rank within each group
-  # Compute mean ranks from bootstrap for ordering
-  mean_rank_boot <- all_boot[
-    , .(mean_rank = mean(drn_trend_rank_boot)),
-    by = .(organism_class, organism_label, country)
-  ]
-  
-  
-  all_boot <- merge(all_boot,
-                    mean_rank_boot,
-                    by = c('organism_class', 'organism_label', 'country')
-  )
-  
+  all_boot_toplot <- merge(
+    all_boot,
+    avg_ranking_sig_pairwise_organism[, list(mean_rank = obs_mean_c1[1]), 
+                                      .(organism_label, country1)],
+    by.x = c('organism_label', 'country'),
+    by.y = c('organism_label', 'country1')
+  ) %>%
+    merge(
+      minimal_sig_pairs_organism[, .(organism_label, country1, country2, country_order)],
+      by.x = c('organism_label', 'country'),
+      by.y = c('organism_label', 'country1'),
+      all.x =T
+    )
   
   # Create ordered country factor within each facet group
-  all_boot[, country_ordered :=
+  all_boot_toplot[, `:=`(
+    country_ordered =
              reorder_within(
                country,
                mean_rank,
                interaction(organism_class, organism_label, drop = TRUE)
-             )]
-  
-  mean_rank_boot[, country_ordered :=
-                   reorder_within(
-                     country,
-                     mean_rank,
-                     interaction(organism_class, organism_label, drop = TRUE)
-                   )]
+             ),
+    country_ordered2 =
+      reorder_within(
+        country2,
+        mean_rank,
+        interaction(organism_class, organism_label, drop = TRUE)
+      )
+  )]
   
   # Get colors from original data
   color_vec <- emtrends_dt[!duplicated(country),
                            setNames(color, country)]
   
   mean_estimate_rank_boot <- ggplot(
-    all_boot,
+    all_boot_toplot,
     aes(x = country_ordered, y = drn_trend_rank_boot, color = country)
   ) +
     # geom_jitter(alpha = 0.1, height = 0, width = 0.3) +
-    geom_violin(fill = NA) +
+    geom_boxplot(fill = NA) +
     geom_point(
-      data = mean_rank_boot,
+      data = unique(all_boot_toplot, by=c('organism_label', 'country')),
       aes(x = country_ordered, y = mean_rank),
       size = 3
+    ) +
+    geom_segment(
+      data =unique(all_boot_toplot, by=c('organism_label', 'country')),
+      aes(
+        x = country_ordered,
+        xend = country_ordered2,
+        y = 6.2 + country_order*0.1,
+        yend = 6.2 + country_order*0.1
+      ),
+      color = "black",
+      size = 0.75,
+      inherit.aes = FALSE
     ) +
     scale_x_reordered() +
     scale_y_continuous(
@@ -11178,32 +11272,51 @@ GH#
       strip = strip_nested()
     )
   
-  # Create mean_estimate_rank_across_organisms_boot (combined plot)
+  # GLOBAL PLOT ---------------------------------------------------
+  
   # Compute global mean ranks from bootstrap
   global_mean_rank_boot <- all_boot[
     , .(mean_rank = mean(drn_trend_rank_boot)),
     by = country
-  ]
+  ] %>%
+    merge(
+      minimal_sig_pairs_global,
+      by.x = c('country'),
+      by.y = c('country1'),
+      all.x =T
+    )
   
   # Order countries globally by mean rank
   global_mean_rank_boot_ordered <- global_mean_rank_boot[
     , country := factor(country, levels = country[order(mean_rank)])
   ]
   
+  # Create mean_estimate_rank_across_organisms_boot (combined plot)
   mean_estimate_rank_across_organisms_boot <- ggplot(
     data = global_mean_rank_boot_ordered,
     aes(x = country, y = mean_rank)
   ) +
     geom_point(color = 'black', size = 7) +
-    geom_violin(
+    geom_boxplot(
       data = all_boot,
       aes(x = country, y = drn_trend_rank_boot, fill = country),
       alpha = 0.3
     ) +
     geom_line(
-      data = mean_rank_boot,
+      data = unique(all_boot_toplot, by=c('organism_label', 'country')),
       aes(color = organism_class, group = organism_label),
       size = 1
+    )  +
+    geom_segment(
+      aes(
+        x = country,
+        xend = country2,
+        y = 6.2 + seg_order*0.1,
+        yend = 6.2 + seg_order*0.1
+      ),
+      color = "black",
+      size = 0.75,
+      inherit.aes = FALSE
     ) +
     scale_fill_manual(name = NULL, values = color_vec) +
     scale_color_brewer(palette = 'Dark2') +
@@ -11211,89 +11324,8 @@ GH#
       name = 'Bootstrap trend estimate ranking (1 = most affected, 6 = least affected)'
     ) +
     theme_minimal()
-  
-  ##############################################################################
-  ################################################################################
-  
-  # # Compute pairwise significance at FACET LEVEL (organism_class × organism_label)
-  # 
-  # # Prepare for plotting (convert to numeric positions matching country_ordered)
-  # pairwise_facet_plot <- pairwise_facet[significant]
-  # pairwise_facet_plot <- pairwise_facet_plot[
-  #   , `:=`(
-  #     country_ordered1 = factor(country1, levels = unique(all_boot$country_ordered)),
-  #     country_ordered2 = factor(country2, levels = unique(all_boot$country_ordered))
-  #   )]
-  # 
-  # # =============================================================================
-  # # 2. Annotated FACETED PLOT
-  # # =============================================================================
-  # mean_estimate_rank_boot_annotated <- mean_estimate_rank_boot +
-  #   # Add horizontal lines for significant pairs
-  #   geom_segment(
-  #     data = pairwise_facet_plot,
-  #     aes(
-  #       x = as.numeric(country_ordered1),
-  #       xend = as.numeric(country_ordered2),
-  #       y = 6.2,
-  #       yend = 6.2
-  #     ),
-  #     color = "black",
-  #     size = 0.5,
-  #     inherit.aes = FALSE
-  #   ) +
-  #   # Add asterisks above the lines
-  #   geom_text(
-  #     data = pairwise_facet_plot,
-  #     aes(
-  #       x = (as.numeric(country_ordered1) + as.numeric(country_ordered2)) / 2,
-  #       y = 6.3,
-  #       label = "*"
-  #     ),
-  #     size = 3,
-  #     inherit.aes = FALSE
-  #   ) +
-  #   # Adjust y-axis to make room for annotations
-  #   coord_cartesian(ylim = c(1, 6.5))
-  # 
-  # # =============================================================================
-  # # 3. Annotated GLOBAL PLOT
-  # # =============================================================================
-  # pairwise_global_plot <- pairwise_global[significant]
-  # pairwise_global_plot <- pairwise_global_plot[
-  #   , country := factor(country, levels = global_mean_rank_boot_ordered$country)
-  # ]
-  # 
-  # mean_estimate_rank_across_organisms_boot_annotated <- mean_estimate_rank_across_organisms_boot +
-  #   # Add horizontal lines
-  #   geom_segment(
-  #     data = pairwise_global_plot,
-  #     aes(
-  #       x = as.numeric(factor(country1, levels = country)),
-  #       xend = as.numeric(factor(country2, levels = country)),
-  #       y = 6.2,
-  #       yend = 6.2
-  #     ),
-  #     color = "black",
-  #     size = 0.5,
-  #     inherit.aes = FALSE
-  #   ) +
-  #   # Add asterisks
-  #   geom_text(
-  #     data = pairwise_global_plot,
-  #     aes(
-  #       x = (as.numeric(factor(country1, levels = country)) +
-  #              as.numeric(factor(country2, levels = country))) / 2,
-  #       y = 6.3,
-  #       label = "*"
-  #     ),
-  #     size = 3,
-  #     inherit.aes = FALSE
-  #   ) +
-  #   coord_cartesian(ylim = c(1, 6.5))
-  # 
-  
-  
+
+
   # Returtest# Return all results --------------------------------------------------------
   return(list(
     heterogeneity_dt = country_heterogeneity,  # Heterogeneity test results
@@ -11302,7 +11334,9 @@ GH#
     kendallw_dt_overall = kendall_w_overall,        # Kendall's W test results
     rank_test_dt = rank_test_boot,             # Hypothesis test results
     mean_estimate_rank_plot = mean_estimate_rank,  # Rank distribution visualization
-    mean_estimate_rank_plot_overall = mean_estimate_rank_across_organisms # Rank distribution visualization across all organisms
+    mean_estimate_rank_plot_overall = mean_estimate_rank_across_organisms, # Rank distribution visualization across all organisms
+    mean_estimate_rank_boot_plot = mean_estimate_rank_boot,  # Rank distribution visualization based on bootstrapping
+    mean_estimate_rank_boot_plot_overall = mean_estimate_rank_across_organisms_boot # Rank distribution visualization across all organisms based on bootstrapping
   ))
 }
 
@@ -18827,6 +18861,7 @@ get_perf_table_modyr_multiorganism <- function(in_mod_list) {
 
 #------ diagnose_ssn_mod -----------------------------------------------------
 # in_mod_fit <- tar_read(ssn_mods_och_richness_yr)$ssn_mod_fit
+# in_perf_dt <- tar_read(ssn_mod_yr_perf_multiorganism)
 # write_plots=T
 # out_dir = figdir
 # response_var_label = 'Mean richness'
@@ -18856,6 +18891,7 @@ get_perf_table_modyr_multiorganism <- function(in_mod_list) {
 #'     \item \strong{varcomp_final}: Variance components for the final prediction model.
 #'   }
 plot_ssn_mod_diagplot <- function(in_mod_fit,
+                                  in_perf_dt,
                                   in_drn_dt,
                                   in_organism_dt,
                                   in_hydro_vars_dt,
@@ -18865,8 +18901,9 @@ plot_ssn_mod_diagplot <- function(in_mod_fit,
                                   out_dir) {
   
   response_var <- all.vars(in_mod_fit$formula)[[1]]
-  organism_label <- in_organism_dt[
-    organism==in_mod_fit$ssn.object$obs$organism[[1]],]$organism_label
+  organism_vec <- in_organism_dt[
+    organism==in_mod_fit$ssn.object$obs$organism[[1]],]
+  organism_label <- organism_vec$organism_label
   
   p_obs_pred <- plot_ssn_obs_pred(in_mod_fit, 
                                   in_drn_dt,
@@ -18877,6 +18914,9 @@ plot_ssn_mod_diagplot <- function(in_mod_fit,
                                       in_hydro_vars_dt,
                                       plot = TRUE,
                                       verbose = FALSE) 
+  
+
+  
   
   out_p <- ((p_emtrends$plot + ggtitle(organism_label) +
                theme(legend.position = 'none',
