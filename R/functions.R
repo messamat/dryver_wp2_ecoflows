@@ -1,5 +1,5 @@
 ################################################################################
-#---------------------------------- utility functions ----------------------------------------------
+#-------------------------- utility functions ----------------------------------
 #------ download_unzip ---------------------------------------
 #' Download and unzip a file from a URL to a specified directory.
 #'
@@ -220,6 +220,15 @@ zero_lomf <- function(x, first=TRUE) {
     }
   }
 }
+
+#------ create_dated_plot_path -------------------------------------------------
+create_dated_plot_path <- function(dir, title, format) {
+  file.path(
+    dir, 
+    paste0(title, "_", format(Sys.Date(), "%Y%m%d"), ".png")
+    )
+} 
+
 
 #------ mergDTlist -----------------------------------------
 #' Merge a list of data.tables, adding suffixes by source table name.
@@ -2365,10 +2374,7 @@ assign_parallel_matrix_ids <- function(m) {
   return(id_matrix)
 }
 
-#---------------------------------- workflow functions ---------------------------------------------
-# path_list = tar_read(bio_data_paths)
-# in_metadata_edna <- tar_read(metadata_edna)
-
+#-------------------------- preparatory workflow functions ---------------------
 #------ define_hydromod_paths --------------------------------------------------
 #in_hydromod_dir <- hydromod_present_dir
 
@@ -6364,6 +6370,7 @@ create_hydro_vars_dt <- function(in_hydro_vars_forssn) {
   return(dt)
 }
 
+#-------------------------- exploratory functions ------------------------------
 #------ plot_edna_biof_vs_sedi -------------------------------------------------
 # in_allvars_sites <- tar_read(allvars_sites)
 
@@ -8166,6 +8173,7 @@ plot_scatter_lm <-  function(in_allvars_sites,
 }
 
 
+#-------------------------- model the effects of antecedent drying -------------
 #------ quick_ssn ------
 # in_ssn_eu <- tar_read(ssn_eu)
 # 
@@ -8693,71 +8701,6 @@ get_hydrowindow_varcomp <- function(perf_dt, nrow_pag = 2, ncol_pag = 3) {
     dt=vc_dt,
     plots=vc_plot_list)
   )
-}
-
-#------ get_hydrowindow_emmeans --------------------------------------------------------
-# hydrowindown_perf_tables <- tar_read(hydrowindow_perf_tables_richness_fun_sedi_nopools)
-# best_dt <- hydrowindown_perf_tables$best
-# in_hydro_vars_dt <- tar_read(hydro_vars_dt)
-# in_drn_dt <- drn_dt
-
-#' Extract and plot marginal means (EMMeans) from best models
-#'
-#' Runs [get_ssn_emmeans()] for all predictors in the best models.
-#'
-#' @param best_dt A `data.table` of best models ($best) returned by [prepare_hydrowindow_perf_table()].
-#' @param in_hydro_vars_dt Metadata table with hydro variable names and labels.
-#'
-#' @return A `data.table` and plots of estimated marginal means across predictors.
-#' @note This approach is adequate even for models with quadratic terms
-#'  as long as they are explicitly included in the model with a I() or poly()
-#' @references [emmeans documentation](https://rvlenth.github.io/emmeans/articles/basics.html#depcovs)
-#' @export
-get_hydrowindow_emmeans <- function(best_dt, in_hydro_vars_dt, in_drn_dt, plot=T) {
-  
-  emmeans_dt_all <- lapply(best_dt$hydro_var, function(in_pred_var) {
-    in_mod <- best_dt[hydro_var == in_pred_var, mod][[1]]
-    if (in_pred_var == "null") in_pred_var <- all.vars(in_mod$formula)[2]
-    
-    pred_var_label <- ifelse(
-      in_pred_var == "null",
-      in_pred_var,
-      get_full_hydrolabel(in_hydro_vars_dt, in_pred_var)
-    )
-    
-    emmeans_row <- get_ssn_emmeans(in_mod=in_mod,
-                                   in_pred_var=in_pred_var, 
-                                   in_pred_var_label=pred_var_label,
-                                   interaction_var = "country", 
-                                   in_drn_dt = in_drn_dt,
-                                   plot = FALSE)$dt
-    
-    return(emmeans_row)
-  }) %>% rbindlist(use.names = TRUE, fill = TRUE)  %>%
-    setnames('pred_var_name', 'hydro_var') %>%
-    get_hydro_var_root(in_place=F) %>%
-    merge(in_hydro_vars_dt[!duplicated(hydro_var_root), 
-                           .(hydro_var_root, hydro_class)], 
-          by='hydro_var_root')
-  
-  if (plot) {
-    emmeans_plot <- get_ssn_emmeans(in_emm_dt = emmeans_dt_all, 
-                                    interaction_var='country', plot=T)$plot +
-      facet_wrap(~ hydro_class + str_wrap(pred_var_label, 30),
-                 ncol = 4,
-                 labeller = function (labels) {
-                   labels <- lapply(labels, as.character)
-                   list(do.call(paste, c(labels, list(sep = "\n"))))
-                 }, 
-                 scales='free')
-  } else {
-    emmeans_plot <- NULL
-  }
-
-  return(list(
-    dt=emmeans_dt_all,
-    plot=emmeans_plot
-  ))
 }
 
 #------ get_hydrowindow_emtrends -------------------------------------------------------
@@ -9582,6 +9525,235 @@ plot_hydrowindow_x_preds <- function(preds, best_dt) {
 }
 
 
+#------ run_all_ssn_permutations ---------------------------------------------------
+# perf_dt = tar_read(hydrowindow_perf_tables_richness_fun_biof_nopools)
+# n_perm = 500
+# n_cores = 10
+# out_dir = file.path(resdir, "permutation_results")
+# save_individual = FALSE
+
+#' Run permutation tests for all Models in parallel
+#'
+#' Processes all models in parallel.
+#' Each worker handles one complete model (all permutations).
+#'
+#' @param best_dt Data.table of best models
+#' @param n_perm Number of permutations per model (default: 500)
+#' @param out_dir Output directory
+#' @param n_cores Number of cores (default: detectCores() - 1)
+#' @param save_individual Save individual permutation results?
+run_all_ssn_permutations <- function(perf_dt, n_perm = 500, out_dir = "permutation_results",
+                                     n_cores = parallel::detectCores() - 1,
+                                     save_individual = TRUE) {
+  
+  # Setup
+  if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+  models_to_test <- perf_dt[hydro_var != "null", ]
+  
+  # Prepare tasks
+  tasks <- lapply(1:nrow(models_to_test), function(i) {
+    row <- models_to_test[i,]
+    fit_mod <- row[, mod][[1]]
+    
+    list(
+      row_idx = i,
+      fit_mod = fit_mod,
+      ssn_obj = fit_mod$ssn.object, 
+      hydro_var = row$hydro_var,
+      organism = row$organism,
+      hydro_label = as.character(row$hydro_label),
+      window_d = as.character(row$window_d),
+      test_parabolic = row$test_parabolic,
+      n_perm = n_perm,
+      out_dir = out_dir,
+      fit_status = row$fit_status,
+      save_individual = save_individual
+    )
+  })
+  
+  # Set up parallel cluster
+  cl <- parallel::makeCluster(n_cores)
+  parallel::clusterExport(cl, c("run_permutations_for_ssn_model", "get_covariate_name",
+                                "get_known_covariance_params"),
+                          envir = environment())
+  parallel::clusterEvalQ(cl, {
+    library(data.table)
+    library(magrittr)
+    library(qs2)
+    library(SSN2)
+    library(spmodel)
+  })
+  
+  message(paste("Starting permutation tests for", length(tasks),
+                "models using", n_cores, "cores"))
+  
+  # Process in parallel
+  results <- parallel::parLapply(cl, tasks, function(task) {
+    cov_name <- tryCatch({
+      get_covariate_name(task$fit_mod, task$hydro_var)
+    }, error = function(e) task$hydro_var)
+    
+    perm_result <- run_permutations_for_ssn_model(
+      fit_mod = task$fit_mod,
+      ssn_obj = task$ssn_obj,
+      cov_name = cov_name,
+      n_perm = task$n_perm,
+      progress = FALSE
+    )
+    
+    if (task$fit_status != 'ok') {
+      out_mod_summary <- list(
+        row_idx = task$row_idx,
+        organism = task$organism,
+        hydro_var = task$hydro_var,
+        hydro_label = task$hydro_label,
+        test_parabolic = task$test_parabolic,
+        fit_status = task$fit_status,
+        window_d = task$window_d
+      )
+      return(out_mod_summary)
+    }
+    
+    if (task$save_individual) {
+      qs2::qs_save(perm_result,
+                   file = file.path(
+                     task$out_dir,
+                     paste0(task$organism, "_", task$hydro_var, "_perm.qs")))
+    }
+    
+    # Print completion message for each model
+    message(paste("Completed:", task$organism, "-", task$hydro_var))
+    
+    # Return summary
+    perm_aics <- perm_result$permutation_results$AIC
+    valid_aics <- perm_aics[!is.na(perm_aics)]
+    
+    out_mod_summary <- list(
+      row_idx = task$row_idx,
+      organism = task$organism,
+      hydro_var = task$hydro_var,
+      hydro_label = task$hydro_label,
+      test_parabolic = task$test_parabolic,
+      original_AIC = perm_result$original_AIC,
+      mean_perm_AIC = if (length(valid_aics) > 0) mean(valid_aics, na.rm = TRUE) else NA,
+      sd_perm_AIC = if (length(valid_aics) > 0) sd(valid_aics, na.rm = TRUE) else NA,
+      p_value = perm_result$p_value,
+      n_successful = perm_result$n_successful,
+      n_permutations = perm_result$n_permutations,
+      window_d = task$window_d
+    )
+    return(out_mod_summary)
+  })
+  
+  parallel::stopCluster(cl)
+  
+  # Combine results
+  all_results <- rbindlist(results, fill = T, use.names = T)
+  setorder(all_results, organism, hydro_var)
+  
+  # Save summary
+  #qs2::qs_save(all_results, file.path(out_dir, "permutation_summary.qs"))
+  message(paste("All done. Results saved to", out_dir))
+  
+  return(all_results)
+}
+
+#------ get_hydrowindow_emmeans --------------------------------------------------------
+# hydrowindown_perf_tables <- tar_read(hydrowindow_perf_tables_richness_bac_sedi_nopools)
+# best_dt <- hydrowindown_perf_tables$best
+# permutations_dt <- tar_read(hydrowindow_permutations_all_dt)
+# in_hydro_vars_dt <- tar_read(hydro_vars_dt)
+# in_drn_dt <- drn_dt
+
+#' Extract and plot marginal means (EMMeans) from best models
+#'
+#' Runs [get_ssn_emmeans()] for all predictors in the best models.
+#'
+#' @param best_dt A `data.table` of best models ($best) returned by [prepare_hydrowindow_perf_table()].
+#' @param in_hydro_vars_dt Metadata table with hydro variable names and labels.
+#'
+#' @return A `data.table` and plots of estimated marginal means across predictors.
+#' @note This approach is adequate even for models with quadratic terms
+#'  as long as they are explicitly included in the model with a I() or poly()
+#' @references [emmeans documentation](https://rvlenth.github.io/emmeans/articles/basics.html#depcovs)
+#' @export
+get_hydrowindow_emmeans <- function(best_dt, 
+                                    permutations_dt,
+                                    in_hydro_vars_dt, 
+                                    in_drn_dt,
+                                    plot=T) {
+  
+  id_cols<- c('organism', 'hydro_var', 'hydro_label', 'window_d', 'test_parabolic')
+  permutations_dt_sub<- merge(best_dt[,id_cols, with=F], permutations_dt, by=id_cols)
+  
+  
+  emmeans_dt_all <- lapply(best_dt$hydro_var, function(in_pred_var) {
+    in_mod <- best_dt[hydro_var == in_pred_var, mod][[1]]
+    if (in_pred_var == "null") in_pred_var <- all.vars(in_mod$formula)[2]
+    
+    pred_var_label <- ifelse(
+      in_pred_var == "null",
+      in_pred_var,
+      get_full_hydrolabel(in_hydro_vars_dt,
+                          gsub('_scaled', '', in_pred_var))
+    )
+    
+    emmeans_row <- get_ssn_emmeans(in_mod=in_mod,
+                                   in_pred_var=in_pred_var, 
+                                   in_pred_var_label=pred_var_label,
+                                   interaction_var = "country", 
+                                   in_drn_dt = in_drn_dt,
+                                   plot = FALSE)$dt
+    
+    return(emmeans_row)
+  }) %>% rbindlist(use.names = TRUE, fill = TRUE)  %>%
+    setnames('pred_var_name', 'hydro_var') %>%
+    get_hydro_var_root(in_place=F) %>%
+    merge(in_hydro_vars_dt[!duplicated(hydro_var_root), 
+                           .(hydro_var_root, hydro_class)], 
+          by='hydro_var_root') %>%
+    merge(permutations_dt_sub, by=c('hydro_var'))
+  
+  
+  if (plot) {
+    emmeans_dt_all[, permut_sig := 
+                     fifelse(p_value < 0.1, 
+                             'Significant model', 
+                             'Non-significant model')]
+    
+    max_resp <- max(emmeans_dt_all$emmean)
+    emmeans_dt_all[, asymp.UCL := min(c(max_resp*1.5, asymp.UCL)), by=.I]
+    
+    
+    emmeans_plot <- get_ssn_emmeans(in_emm_dt = emmeans_dt_all, 
+                                    interaction_var='country', plot=T)$plot +
+      geom_rect(data=unique(emmeans_dt_all, by=c('hydro_class', 'pred_var_label')),
+                aes(xmin=-Inf, xmax=Inf, ymin=-Inf, ymax=Inf, alpha=permut_sig),
+                fill='white') + 
+      labs(x='Modeled hydrological covariate (z-standardized value)') +
+      coord_cartesian(ylim=c(0, NA)) +
+      scale_alpha_manual(name='Model significance',
+                         values = c('Significant model' = 0,
+                                    'Non-significant model' = 0.75),
+                         ) +
+      theme(legend.key = element_rect(fill = "lightgrey", color=NA)) +
+      facet_wrap(~ hydro_class + str_wrap(pred_var_label, 30),
+                 ncol = 4,
+                 labeller = function (labels) {
+                   labels <- lapply(labels, as.character)
+                   list(do.call(paste, c(labels, list(sep = "\n"))))
+                 }, 
+                 scales='free')
+  } else {
+    emmeans_plot <- NULL
+  }
+  
+  return(list(
+    dt=emmeans_dt_all,
+    plot=emmeans_plot
+  ))
+}
+
 #------ save_ssn_div_hydrowindow_plots ------------------------------------
 # in_organism = 'miv_nopools_ept'
 # in_response_var = 'invsimpson'
@@ -9955,139 +10127,6 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
   
 }
 
-#------ run_all_ssn_permutations ---------------------------------------------------
-# perf_dt = tar_read(hydrowindow_perf_tables_richness_fun_biof_nopools)
-# n_perm = 500
-# n_cores = 10
-# out_dir = file.path(resdir, "permutation_results")
-# save_individual = FALSE
-
-#' Run permutation tests for all Models in parallel
-#'
-#' Processes all models in parallel.
-#' Each worker handles one complete model (all permutations).
-#'
-#' @param best_dt Data.table of best models
-#' @param n_perm Number of permutations per model (default: 500)
-#' @param out_dir Output directory
-#' @param n_cores Number of cores (default: detectCores() - 1)
-#' @param save_individual Save individual permutation results?
-run_all_ssn_permutations <- function(perf_dt, n_perm = 500, out_dir = "permutation_results",
-                                     n_cores = parallel::detectCores() - 1,
-                                     save_individual = TRUE) {
-  
-  # Setup
-  if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
-  models_to_test <- perf_dt[hydro_var != "null", ]
-  
-  # Prepare tasks
-  tasks <- lapply(1:nrow(models_to_test), function(i) {
-    row <- models_to_test[i,]
-    fit_mod <- row[, mod][[1]]
-    
-    list(
-      row_idx = i,
-      fit_mod = fit_mod,
-      ssn_obj = fit_mod$ssn.object, 
-      hydro_var = row$hydro_var,
-      organism = row$organism,
-      hydro_label = as.character(row$hydro_label),
-      window_d = as.character(row$window_d),
-      test_parabolic = row$test_parabolic,
-      n_perm = n_perm,
-      out_dir = out_dir,
-      fit_status = row$fit_status,
-      save_individual = save_individual
-    )
-  })
-  
-  # Set up parallel cluster
-  cl <- parallel::makeCluster(n_cores)
-  parallel::clusterExport(cl, c("run_permutations_for_ssn_model", "get_covariate_name",
-                                "get_known_covariance_params"),
-                          envir = environment())
-  parallel::clusterEvalQ(cl, {
-    library(data.table)
-    library(magrittr)
-    library(qs2)
-    library(SSN2)
-    library(spmodel)
-  })
-  
-  message(paste("Starting permutation tests for", length(tasks),
-                "models using", n_cores, "cores"))
-  
-  # Process in parallel
-  results <- parallel::parLapply(cl, tasks, function(task) {
-    cov_name <- tryCatch({
-      get_covariate_name(task$fit_mod, task$hydro_var)
-    }, error = function(e) task$hydro_var)
-    
-    perm_result <- run_permutations_for_ssn_model(
-      fit_mod = task$fit_mod,
-      ssn_obj = task$ssn_obj,
-      cov_name = cov_name,
-      n_perm = task$n_perm,
-      progress = FALSE
-    )
-    
-    if (task$fit_status != 'ok') {
-      out_mod_summary <- list(
-        row_idx = task$row_idx,
-        organism = task$organism,
-        hydro_var = task$hydro_var,
-        hydro_label = task$hydro_label,
-        test_parabolic = task$test_parabolic,
-        fit_status = task$fit_status,
-        window_d = task$window_d
-      )
-      return(out_mod_summary)
-    }
-    
-    if (task$save_individual) {
-      qs2::qs_save(perm_result,
-                   file = file.path(
-                     task$out_dir,
-                     paste0(task$organism, "_", task$hydro_var, "_perm.qs")))
-    }
-    
-    # Print completion message for each model
-    message(paste("Completed:", task$organism, "-", task$hydro_var))
-    
-    # Return summary
-    perm_aics <- perm_result$permutation_results$AIC
-    valid_aics <- perm_aics[!is.na(perm_aics)]
-    
-    out_mod_summary <- list(
-      row_idx = task$row_idx,
-      organism = task$organism,
-      hydro_var = task$hydro_var,
-      hydro_label = task$hydro_label,
-      test_parabolic = task$test_parabolic,
-      original_AIC = perm_result$original_AIC,
-      mean_perm_AIC = if (length(valid_aics) > 0) mean(valid_aics, na.rm = TRUE) else NA,
-      sd_perm_AIC = if (length(valid_aics) > 0) sd(valid_aics, na.rm = TRUE) else NA,
-      p_value = perm_result$p_value,
-      n_successful = perm_result$n_successful,
-      n_permutations = perm_result$n_permutations,
-      window_d = task$window_d
-    )
-    return(out_mod_summary)
-  })
-  
-  parallel::stopCluster(cl)
-  
-  # Combine results
-  all_results <- rbindlist(results, fill = T, use.names = T)
-  setorder(all_results, organism, hydro_var)
-  
-  # Save summary
-  #qs2::qs_save(all_results, file.path(out_dir, "permutation_summary.qs"))
-  message(paste("All done. Results saved to", out_dir))
-  
-  return(all_results)
-}
-
 #------ get_hydrowindown_multiorganism_summary ----------------------------------------
 # emtrends_dt = tar_read(emtrends_multiorganism_best_richness)$dt
 # varcomp_dt = tar_read(varcomp_multiorganism_richness)$dt
@@ -10208,14 +10247,30 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
           .default = organism_sub
         )]
   
+  #Create a data.table listing the variables used in the selected annual models (for CC projections)
+  selected_summary_mod_vars <- rbindlist(list(
+    list(organism='miv_nopools', hydro_var_root=c("DurD", "FreD")), #hydro_var=c("DurD365past_scaled", "FreD365past_scaled")),
+    list(organism='miv_nopools_ept', hydro_var_root=c("DurD")), #hydro_var=c("DurD365past_scaled")),
+    list(organism='miv_nopools_och', hydro_var_root=c("DurD")), #hydro_var=c("DurD365past_scaled")),
+    list(organism='dia_biof_nopools', hydro_var_root=c("PDurD")), #hydro_var=c("PDurD365past_scaled")),
+    list(organism='fun_sedi_nopools', hydro_var_root=c("DurD", "DurD_CV")) #hydro_var=c("DurD365past_scaled", "DurD_CV10yrpast_scaled"))
+  )) %>%
+    merge(unique(hydro_vars_dt[, .(hydro_var_root, hydro_label, hydro_class)]),
+          by='hydro_var_root') %>%
+    merge(unique(varcomp_emtrends_merge[
+      , .(organism, organism_sub, organism_class)]),
+      by='organism')
+  
+  
   #Make a summary plot of trends metric x organism -----------------------------
   emtrends_plot <- ggplot(varcomp_emtrends_merge, 
                          aes(x=organism_sub, y=str_wrap(hydro_label, 30))) +
     geom_point(aes(color=category, size=marginal_fixedR2, shape=permut_sig), 
                stroke = 1) +
-    geom_point(data=varcomp_emtrends_merge[test_parabolic==TRUE 
-                                           & permut_sig == 'Significant model',], 
-               color='white', size=0.5) +
+    # geom_point(data=varcomp_emtrends_merge[test_parabolic==TRUE 
+    #                                        & permut_sig == 'Significant model',], 
+    #            color='white', size=01) +
+    # geom_point(data=selected_summary_mod_vars, shape=1, size=8, stroke=1.5, color='#525252') +
     labs(x='Organism group', y='Hydrological predictor') +
     scale_shape_manual(
       name='Model significance',
@@ -10224,9 +10279,9 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
     scale_color_manual(
       name='Estimated effect across DRNs',
       values=c(  
-        '#053061', '#4393c3', '#92c5de',
+        '#b2182b', '#d6604d', '#f4a582',
         '#f7f7f7', '#bababa',  '#878787',
-        '#f4a582',  '#d6604d', '#b2182b')) +
+        '#92c5de', '#4393c3', '#053061')) +
     scale_radius(name='Marginal Explained Variance (%)',
                  limits=range(varcomp_emtrends_merge$marginal_fixedR2),
                  breaks = c(0.01, 0.05, 0.1, 0.16), 
@@ -10284,7 +10339,7 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
       name = str_wrap('Mean trend sign', 15),
       limits=c(-0.75, 0.75),
       breaks = c(-0.75, -0.50, -0.33, 0, 0.33, 0.50, 0.75),
-      colors = c('#053061', '#4393c3', '#92c5de','white', 'white', 'white',  '#d6604d','#b2182b', '#b2182b')
+      colors = c('#b2182b', '#b2182b','#d6604d' ,'white', 'white', 'white','white', '#4393c3', '#053061', '#053061')
     ) +
     scale_radius(name='Mean MEV (%)',
                  limits=range(varcomp_emtrends_merge$marginal_fixedR2),
@@ -10332,21 +10387,6 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
   
 
   #Make a plot of chosen time windows ------------------------------------------
-  
-  #Create a data.table listing the variables used in the selected annual models (for CC projections)
-  selected_summary_mod_vars <- rbindlist(list(
-    list(organism='miv_nopools', hydro_var_root=c("DurD", "FreD")), #hydro_var=c("DurD365past_scaled", "FreD365past_scaled")),
-    list(organism='miv_nopools_ept', hydro_var_root=c("DurD")), #hydro_var=c("DurD365past_scaled")),
-    list(organism='miv_nopools_och', hydro_var_root=c("DurD")), #hydro_var=c("DurD365past_scaled")),
-    list(organism='dia_biof_nopools', hydro_var_root=c("PDurD")), #hydro_var=c("PDurD365past_scaled")),
-    list(organism='fun_sedi_nopools', hydro_var_root=c("DurD", "DurD_CV")) #hydro_var=c("DurD365past_scaled", "DurD_CV10yrpast_scaled"))
-  )) %>%
-    merge(unique(hydro_vars_dt[, .(hydro_var_root, hydro_label, hydro_class)]),
-          by='hydro_var_root') %>%
-    merge(unique(varcomp_emtrends_merge[
-      , .(organism, organism_sub, organism_class)]),
-      by='organism')
-    
   time_plot <- ggplot(varcomp_emtrends_merge, 
                          aes(x=organism_sub, y=str_wrap(hydro_label, 30))) +
     geom_text(aes(color=permut_sig, alpha=window_d_ratio, label=window_d_format), 
@@ -10358,7 +10398,7 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
       values=c('#b2182b', '#2166ac')
     ) +
     scale_alpha_binned(
-      name='Temporal window length', 
+      name='Temporal window length (months)', 
       range=c(0.3, 1),
       breaks=seq(0, 1, 0.25),
       labels=c('Shortest', '',  'Intermediate','', 'Longest')
@@ -10434,9 +10474,10 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
 
 #------ test_biof_vs_sedi_emtrends ---------------------------------------------
 # emtrends_dt <- tar_read(emtrends_multiorganism_all_richness)$dt
+# out_dir <- figdir
 
-
-test_biof_vs_sedi_emtrends <- function(emtrends_dt) {
+test_biof_vs_sedi_emtrends <- function(emtrends_dt,
+                                       out_dir) {
   dry_vars <- setdiff(unique(emtrends_dt$hydro_var_root), c('maxPQ', 'oQ10'))
   
   #Substract data to only keep microbes, variables related to drying
@@ -10513,8 +10554,12 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt) {
       data=dt_to_display, 
       aes(label=str_wrap(gsub('_', ' ', gsub('past_scaled', '', hydro_var)), 10)),
       max.overlaps=nrow(dt_to_display)*2) +
-    scale_alpha_manual(values=c(0.2, 1)) +
-    scale_color_manual(values=c('blue', 'red')) +
+    scale_alpha_manual(
+      name = str_wrap("Significance of trend difference between sediment and biofilm", 25),
+      values=c(0.2, 1)) +
+    scale_color_manual(
+      name = str_wrap("Average (across countries) sign of trends for sediment models", 25),
+      values=c('blue', 'red')) +
     scale_y_log10(name=expression(I^2),
                   limits=c(0.01, 100),
                   breaks=c(0.1, 1, 10, 100), 
@@ -10540,6 +10585,19 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt) {
   # PDurD increases richness less for sediments than bacteria
   # FreD mixed
   
+  ggsave(
+    filename = create_dated_plot_path(
+      dir=out_dir, 
+      title='emtrends_difftest_biof_vs_sedi',
+      format='.png'),
+    plot =  substrate_metatrenddiff_plot,
+    width = 6,
+    height = 8,
+    units='in',
+    dpi=600
+  )
+  
+  
   return(list(
     dt=meta_results,
     plot=substrate_metatrenddiff_plot
@@ -10549,6 +10607,7 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt) {
 #------ test_country_ranking_emtrends -----------------------------------------
 # emtrends_dt <- tar_read(emtrends_multiorganism_best_richness)$dt
 # permutations_dt <- tar_read(hydrowindow_permutations_all_dt)
+# out_dir <- figdir
 
 #' Test for country-level differences in trends
 #'
@@ -10612,7 +10671,8 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt) {
 #'   5. Calculates p-value as proportion of null correlations where |ρ_null| ≥ |ρ_obs|
 #'
 test_country_emtrends <- function(emtrends_dt,     
-                                  permutations_dt) {
+                                  permutations_dt,
+                                  out_dir) {
   
   # Test for heterogeneity in slopes across countries ##########################
   # Purpose: Test whether the estimated slopes (trend_rel) differ significantly
@@ -10742,7 +10802,8 @@ test_country_emtrends <- function(emtrends_dt,
   # Note: FstDrE and STcon variables are reversed because higher values indicate
   #       stronger drying effects (more negative impact), so we flip signs to make
   #       Finland (most affected) rank lowest (1) and Spain (least affected) rank highest (6)
-  trends_to_reverse <- c('FstDrE', 'FstDrE_mean', 'STcon_directed', 'STcon_undirected')
+  trends_to_reverse <- c('sd6', 'FstDrE', 'FstDrE_mean',
+                         'STcon_directed', 'STcon_undirected')
   
   emtrends_sub[, `:=`(
     trend_rel_forrank = fifelse(hydro_var_root %in% trends_to_reverse,
@@ -10764,7 +10825,7 @@ test_country_emtrends <- function(emtrends_dt,
   emtrends_sub[, `:=`(
     trend_rel_forrank = -sign(trend_rel_forrank_mean)*trend_rel_forrank
   )]
-  
+
   
   # Compute ranks within each organism × hydro_var group
   emtrends_sub[, drn_trend_rank := frank(trend_rel_forrank),
@@ -10901,7 +10962,7 @@ GH#
   # Finland and Hungary: strongest response (rank 1 - most negative impact)
   # Czechia and France: intermediate response (rank 2)
   # Croatia and Spain: weakest response (rank 3 - least negative impact)
-  country_order <- c(Spain = 3, Croatia = 3, Czechia = 2, France = 2, Finland = 1, Hungary = 1)
+  country_order <- c(Spain = 4, Croatia = 3, Czechia = 2, France = 2, Finland = 1, Hungary = 1)
   
   # Generate all unique country pairs where first has weaker response than second (higher rank)
   # This creates all implied constraints from the partial order
@@ -11007,14 +11068,25 @@ GH#
   
   # Get all bootstrap ranking strings
   rank_strings <- all_boot[, get_ranking_string(.SD, boot_i), 
-                           by = .(organism, boot_i, organism_class, hydro_class)]
+                           by = .(organism, boot_i, organism_class, 
+                                  hydro_var_root, hydro_class)]
 
-  # Count frequency of each unique ranking
-  rank_string_freq <- rank_strings[, .N, 
-                                   by = .(organism_class, hydro_class, V1)] %>%
+  # Count frequency of each unique ranking by organism class
+  rank_string_freq_byorg <- rank_strings[, .N, 
+                                   by = .(organism_class, V1)] %>%
     .[, `:=`(N_tot= sum(N),
              N_rel=N/sum(N)),
-      by=.(organism_class, hydro_class)] 
+      by=.(organism_class)] 
+  
+  rank_string_top3_byorg <- rank_string_freq_byorg[, .SD[1:3,], by=organism_class]
+  
+  # Count frequency of each unique ranking overall
+  rank_string_freq_overall <- rank_strings[, .N, 
+                                   by = .(V1)] %>%
+    .[, `:=`(N_tot= sum(N),
+             N_rel=N/sum(N))] 
+  
+  rank_string_top3_overall <- rank_string_freq_overall[, .SD[1:3,]]
   
   # Check the average rank per country based on bootstrapping  #################
   # Calculate full rank statistics including null distributions
@@ -11236,19 +11308,21 @@ GH#
   color_vec <- emtrends_dt[!duplicated(country),
                            setNames(color, country)]
   
+  u_boot_toplot <- unique(all_boot_toplot, by=c('organism_label', 'country')) 
+  
   mean_estimate_rank_boot <- ggplot(
-    all_boot_toplot,
+    all_boot_toplot[!is.na(country_ordered),],
     aes(x = country_ordered, y = drn_trend_rank_boot, color = country)
   ) +
     # geom_jitter(alpha = 0.1, height = 0, width = 0.3) +
     geom_boxplot(fill = NA) +
     geom_point(
-      data = unique(all_boot_toplot, by=c('organism_label', 'country')),
+      data = u_boot_toplot,
       aes(x = country_ordered, y = mean_rank),
       size = 3
     ) +
     geom_segment(
-      data =unique(all_boot_toplot, by=c('organism_label', 'country')),
+      data = u_boot_toplot[!is.na(country2)],
       aes(
         x = country_ordered,
         xend = country_ordered2,
@@ -11256,12 +11330,12 @@ GH#
         yend = 6.2 + country_order*0.1
       ),
       color = "black",
-      size = 0.75,
+      size = 0.5,
       inherit.aes = FALSE
     ) +
     scale_x_reordered() +
     scale_y_continuous(
-      name = "Bootstrap trend estimate ranking (1 = most affected, 6 = least affected)"
+      name =  str_wrap('Estimated ranking in trends: most to least (1-6) affected', 31)
     ) +
     scale_color_manual(name = NULL, values = color_vec) +
     theme_minimal() +
@@ -11269,10 +11343,16 @@ GH#
       vars(organism_class, organism_label),
       design = design,
       scales = "free_x",
-      strip = strip_nested()
-    )
+      strip = strip_nested(),
+    ) +
+    theme(
+      text = element_text(size=12),
+      axis.text = element_text(size=12),
+      legend.position = 'none',
+      axis.title.x = element_blank()
+      )
   
-  # GLOBAL PLOT ---------------------------------------------------
+  # Global plot ---------------------------------------------------
   
   # Compute global mean ranks from bootstrap
   global_mean_rank_boot <- all_boot[
@@ -11300,14 +11380,16 @@ GH#
     geom_boxplot(
       data = all_boot,
       aes(x = country, y = drn_trend_rank_boot, fill = country),
-      alpha = 0.3
+      alpha = 0.6
     ) +
     geom_line(
       data = unique(all_boot_toplot, by=c('organism_label', 'country')),
       aes(color = organism_class, group = organism_label),
-      size = 1
+      size = 0.8,
+      alpha = 0.7
     )  +
     geom_segment(
+      data = global_mean_rank_boot_ordered[!is.na(country2),],
       aes(
         x = country,
         xend = country2,
@@ -11315,18 +11397,48 @@ GH#
         yend = 6.2 + seg_order*0.1
       ),
       color = "black",
-      size = 0.75,
+      size = 0.6,
       inherit.aes = FALSE
     ) +
-    scale_fill_manual(name = NULL, values = color_vec) +
+    scale_fill_manual(name = NULL, values = color_vec, guide='none') +
     scale_color_brewer(palette = 'Dark2') +
     scale_y_continuous(
-      name = 'Bootstrap trend estimate ranking (1 = most affected, 6 = least affected)'
+      name = str_wrap('Estimated ranking in trends: most to least (1-6) affected', 31)
     ) +
-    theme_minimal()
+    theme_minimal() +
+    theme(
+      text = element_text(size=12),
+      axis.text = element_text(size=12),
+      axis.title.x = element_blank()
+    )
 
+  # Write plots ----------------------------------------------------------------
+  ggsave(
+    filename = create_dated_plot_path(
+      dir=out_dir, 
+      title='hydrowindow_emtrends_heterogeneity',
+      format='.png'),
+    plot = heterogeneity_plot,
+    width = 10, height = 8, units='in', dpi=600)
+  
+  ggsave(
+    filename = create_dated_plot_path(
+      dir=out_dir, 
+      title='hydrowindow_emtrends_ranking_byorganism_boot',
+      format='.png'),
+    plot = mean_estimate_rank_boot,
+    width = 12, height = 10, units='in', dpi=600)
+  
+  ggsave(
+    filename = create_dated_plot_path(
+      dir=out_dir, 
+      title='hydrowindow_emtrends_overall_boot',
+      format='.png'),
+    plot = mean_estimate_rank_across_organisms_boot,
+    width = 8, height = 8, units='in', dpi=600)
 
-  # Returtest# Return all results --------------------------------------------------------
+  
+  # Return all results --------------------------------------------------------
   return(list(
     heterogeneity_dt = country_heterogeneity,  # Heterogeneity test results
     heterogeneity_plot = heterogeneity_plot,   # Heterogeneity visualization
@@ -11412,6 +11524,7 @@ get_hydrowindow_multiorganism_varcomp_boxplot <- function(varcomp_dt,
 }
 
 
+#-------------------------- model mean annual richness -------------------------
 #------ model_miv_richness_yr -----------------------------------------------------------
 # in_allvars_summarized <- tar_read(allvars_summarized)
 # in_ssn_eu_summarized <- tar_read(ssn_eu_summarized)
@@ -18860,7 +18973,7 @@ get_perf_table_modyr_multiorganism <- function(in_mod_list) {
 }
 
 #------ diagnose_ssn_mod -----------------------------------------------------
-# in_mod_fit <- tar_read(ssn_mods_och_richness_yr)$ssn_mod_fit
+# in_mod_fit <- tar_read(ssn_mods_fun_sedi_richness_yr)$ssn_mod_fit
 # in_perf_dt <- tar_read(ssn_mod_yr_perf_multiorganism)
 # write_plots=T
 # out_dir = figdir
@@ -18907,25 +19020,91 @@ plot_ssn_mod_diagplot <- function(in_mod_fit,
   
   p_obs_pred <- plot_ssn_obs_pred(in_mod_fit, 
                                   in_drn_dt,
-                                  response_var_label)
+                                  response_var_label) +
+    theme(text=element_text(size=12))
   
   p_emtrends <- plot_formula_emtrends(in_mod_fit,
                                       in_drn_dt,
                                       in_hydro_vars_dt,
                                       plot = TRUE,
-                                      verbose = FALSE) 
+                                      verbose = FALSE)$plot +
+    theme(text=element_text(size=12))
   
+  #Plot varcomp
+  varcomp_labels <- c(
+    "Remaining variance (nugget)",
+    "Spatially dependent variance - euclidean",
+    "Spatially dependent variance - taildown",
+    "Spatially dependent variance - tailup",
+    "Random intercept - country",
+    "Fixed effects pseudo-R2"
+  )
+  
+  org_format <- gsub('_nopools', '', organism_vec$organism)
+  if (grepl('miv', org_format)) {
+    org_format <-  tail(str_split_1(org_format, '_'), 1)
+  } 
 
+  sel_name <- paste0(
+   org_format,
+    '_',
+    tail(str_split_1(response_var, '_'), 1)
+  )
+  
+  varcomp_dt <- in_perf_dt[organism==sel_name,] %>%
+    melt(id.vars=c('organism'), 
+         measure.vars = grep('varcomp_.*', names(.), value=T),
+         variable.name = 'varcomp', value.name='proportion') %>%
+    merge(
+      data.table(
+        varcomp = c('varcomp_nugget', 'varcomp_euclid_de',
+                      'varcomp_taildown_de', 'varcomp_tailup_de',
+                      'varcomp_country_only', 'varcomp_hydroenv_covariates'),
+        varcomp_label = factor(varcomp_labels,
+                               levels = varcomp_labels,
+                               ordered = TRUE),
+        varcomp_color = c("lightgrey","#b2df8a","#a6cee3",
+                          "#1f78b4","#f1b6da","#feb24c")
+      ),
+      by = "varcomp"
+    ) %>%
+    .[proportion > 0.005]
   
   
-  out_p <- ((p_emtrends$plot + ggtitle(organism_label) +
+  p_varcomp <- ggplot(varcomp_dt, 
+                   aes(x = 1, y = proportion, fill = varcomp_label)) +
+    geom_bar(stat = "identity", 
+             position = "stack",
+             alpha = 0.75) +
+    geom_text(aes(label = round(100 * proportion)),
+              position = position_stack(vjust = 0.5),
+              size = 3, colour = "#555555") +
+    scale_fill_manual(name = "Variance components",
+                      values = varcomp_dt[
+                        order(varcomp_label), unique(varcomp_color)]) +
+    scale_y_continuous("Percentage of variance", 
+                       breaks = c(0,0.5,1), 
+                       labels = scales::label_percent()) +
+    coord_cartesian(expand = FALSE) + 
+    theme_bw() +
+    theme(legend.background = element_blank(),
+          axis.title.x = element_blank(),
+          axis.text.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          text=element_text(size=12))
+  
+  
+  #Assemble plot
+  out_p <- ((p_emtrends + ggtitle(organism_label) +
                theme(legend.position = 'none',
                      plot.title.position = 'plot') 
-             | p_obs_pred)) +
-    plot_layout(guides = "collect") +
-    plot_annotation(tag_levels = 'a')
-  
-  
+             | p_obs_pred
+             | p_varcomp)) +
+    plot_layout(guides = "collect",
+                design = c('
+                           AAAABBBBBC
+                           AAAABBBBBC')) +
+    plot_annotation(tag_levels = 'a') 
   
   if (write_plots) {
     ggsave(
@@ -18952,41 +19131,46 @@ mosaic_mod_yr_diagplots <- function(in_ssn_mod_yr_diagplot_multiorganism,
 
   layout <- c(
     "
-    AABBB#####
-    AABBB#####  
-    AABBB#####
-    CCDDDEEFFF
-    CCDDDEEFFF
-    CCDDDEEFFF
-    GGHHHIIJJJ
-    GGHHHIIJJJ
-    GGHHHIIJJJ
+    AAAABBBBBBC###########
+    AAAABBBBBBC###########
+    AAAABBBBBBC###########
+    DDDDEEEEEEGHHHHIIIIIIJ
+    DDDDEEEEEEGHHHHIIIIIIJ
+    DDDDEEEEEEGHHHHIIIIIIJ
+    KKKKLLLLLLMNNNNOOOOOOP
+    KKKKLLLLLLMNNNNOOOOOOP
+    KKKKLLLLLLMNNNNOOOOOOP
     "
   )
-
+  
   diag_layout <- (in_ssn_mod_yr_diagplot_multiorganism$miv_richness[[1]] +
       in_ssn_mod_yr_diagplot_multiorganism$miv_richness[[2]] +
+        in_ssn_mod_yr_diagplot_multiorganism$miv_richness[[3]] +
     in_ssn_mod_yr_diagplot_multiorganism$ept_richness[[1]] +
        in_ssn_mod_yr_diagplot_multiorganism$ept_richness[[2]] +
+      in_ssn_mod_yr_diagplot_multiorganism$ept_richness[[3]] +
     in_ssn_mod_yr_diagplot_multiorganism$och_richness[[1]] +
        in_ssn_mod_yr_diagplot_multiorganism$och_richness[[2]] +
+      in_ssn_mod_yr_diagplot_multiorganism$och_richness[[3]] +
     in_ssn_mod_yr_diagplot_multiorganism$dia_sedi_richness[[1]] +
        in_ssn_mod_yr_diagplot_multiorganism$dia_sedi_richness[[2]] +
+      in_ssn_mod_yr_diagplot_multiorganism$dia_sedi_richness[[3]] +
     in_ssn_mod_yr_diagplot_multiorganism$fun_sedi_richness[[1]] +
-       in_ssn_mod_yr_diagplot_multiorganism$fun_sedi_richness[[2]]) +
+       in_ssn_mod_yr_diagplot_multiorganism$fun_sedi_richness[[2]] +
+    in_ssn_mod_yr_diagplot_multiorganism$fun_sedi_richness[[3]]) +
     plot_layout(design = layout, 
                 guides = "collect",
                 axis_titles = "collect") +
     plot_annotation(tag_levels = 'a')
-
+  
   ggsave(
     filename = file.path(
       out_dir, 
       paste0('multiorganism_mean_richness_mod_',
              format(Sys.Date(), "%Y%m%d"), '.pdf')),
     plot = diag_layout,
-    width = 380,
-    height = 300,
+    width = 400,
+    height = 200,
     units='mm',
     dpi=600
   )
@@ -18995,6 +19179,7 @@ mosaic_mod_yr_diagplots <- function(in_ssn_mod_yr_diagplot_multiorganism,
   
 }
 
+#-------------------------- project future mean annual richness ----------------
 #------ predict_ssn_mod -------------------------------------------------------
 # in_ssn_mod_fit = tar_read(ssn_mods_dia_sedi_richness_yr)$ssn_mod_fit
 # in_ssn_mod_fit <- tar_read(ssn_mods_bac_sedi_invsimpson_yr)$ssn_mod_fit

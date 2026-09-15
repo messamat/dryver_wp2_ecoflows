@@ -4,7 +4,7 @@ setwd(rootdir)
 
 source('R/packages.R')
 source("R/functions.R")
-source("R/SpaTemp_function_Mathis_edit.R")
+source("R/SpaTemp_function_M_edit.R")
 # if (!file.exists("bin/03_diversity_metrics.R")) {
 #   download.file(url = "https://github.com/LysandreJ/dryver/blob/main/Script/03_diversity_metrics.R",
 #                 destfil = file.path("bin", "03_diversity_metrics.R")
@@ -1248,14 +1248,6 @@ temporal_analysis_targets_mapped <- tar_map(
   )
   ,
   
-  tar_target(
-    hydrowindow_emmeans_best,
-    get_hydrowindow_emmeans( 
-      best_dt = hydrowindow_perf_tables$best,
-      in_hydro_vars_dt = hydro_vars_dt,
-      in_drn_dt = drn_dt)
-  )
-  ,
   
   tar_target(
     hydrowindow_emtrends_best,
@@ -1321,11 +1313,11 @@ temporal_analysis_targets_mapped <- tar_map(
     ssn_div_hydrowindow_plots_paths,
     save_ssn_div_hydrowindow_plots(
       hydrowindow_perf_tables,
-      plot_varcomp = hydrowindow_varcomp_all,
-      plot_obs_preds = hydrowindow_obs_preds_plot,
-      plot_x_preds = hydrowindow_x_preds_plot,
-      plot_emmeans = hydrowindow_emmeans_best,
-      plot_emtrends = hydrowindow_emtrends_best,
+      plot_varcomp = NULL, #hydrowindow_varcomp_all,
+      plot_obs_preds = NULL, #hydrowindow_obs_preds_plot,
+      plot_x_preds = NULL, #hydrowindow_x_preds_plot,
+      plot_emmeans = NULL, #hydrowindow_emmeans_best,
+      plot_emtrends = NULL, #hydrowindow_emtrends_best,
       in_organism = in_organism,
       in_response_var = in_response_var,
       out_dir = figdir)
@@ -1341,7 +1333,19 @@ temporal_analysis_targets_mapped <- tar_map(
         out_dir = file.path(resdir, "permutation_results")
       )
     }
+  ),
+  
+  tar_target(
+    hydrowindow_emmeans_best,
+    if (in_response_var=='richness') {
+    get_hydrowindow_emmeans( 
+      best_dt = hydrowindow_perf_tables$best,
+      permutations_dt = ssn_div_hydrowindow_permutations,
+      in_hydro_vars_dt = hydro_vars_dt,
+      in_drn_dt = drn_dt)
+    }
   )
+  
 )
 
 
@@ -1556,14 +1560,16 @@ temporal_analysis_targets_combined <- list(
 
   tar_target(
     biof_vs_sedi_emtrends_rma_table,
-    test_biof_vs_sedi_emtrends(emtrends_dt=emtrends_multiorganism_all_richness$dt)
+    test_biof_vs_sedi_emtrends(emtrends_dt=emtrends_multiorganism_all_richness$dt,
+                               out_dir=figdir)
   )
   ,
 
   tar_target(
     country_ranking_test_table,
     test_country_emtrends(emtrends_dt=emtrends_multiorganism_best_richness$dt,
-                          permutations_dt = hydrowindow_permutations_all_dt)
+                          permutations_dt = hydrowindow_permutations_all_dt,
+                          out_dir = figdir)
   )
   ,
   
@@ -1793,6 +1799,7 @@ annual_analysis_targets <- list(
       )
       
       plot_ssn_mod_diagplot(in_mod_fit = ssn_mod_yr_fit_multiorganism[[mod_name]],
+                            in_perf_dt = ssn_mod_yr_perf_multiorganism,
                             in_drn_dt = drn_dt,
                             in_organism_dt = organism_dt,
                             in_hydro_vars_dt = hydro_vars_dt,
