@@ -1,0 +1,30 @@
+Package: DryRiverBioEurope
+Title: Supporting code for Contrasted biodiversity responses to drying in European rivers under climate change
+Version: 1.0
+Authors@R: 
+    Authors@R: person("Anonymous", "Last", email = "name@example.com", role = "aut")
+Description: Climate change is reshaping river flow regimes, expanding the
+    spatial and temporal extent of river drying worldwide. Yet we lack quantitative
+    predictions of how these hydrological shifts will impact freshwater biodiversity.
+    Here we couple novel hydrological modeling with large-scale standardized
+    biodiversity sampling to forecast drying-induced changes in local taxonomic
+    diversity for multiple organism groups across six European river networks. 
+    We sampled aquatic macroinvertebrate, diatom, bacteria, and fungal communities
+    up to six times over one year across 20-26 reaches in each of the Genal (Spain),
+    Butižnica (Croatia), Velička (Czechia), Bükkösdi-víz (Hungary), Albarine (France),
+    and Lepsämänjoki (Finland) river networks. These river networks represent a gradient 
+    of climatic conditions, biogeographic regions, and drying regimes. Sensitivity to
+    drying duration, frequency, onset timing, and hydrological network connectivity
+    differed among organism groups but remained consistent within groups over a 2700-km
+    latitudinal gradient. Long-term hydrology better explained local biodiversity than
+    short-term flow conditions, with biogeographical context modulating impacts. Under
+    a high-emissions scenario, changes in drying patterns are projected to result in a
+    decline of macroinvertebrate and diatom richness by an average of 14% and 11%, 
+    respectively, from 1991-2020 to 2071-2100, while fungal richness may increase by 
+    35% — reshaping ecosystem structure and function. These findings underscore the 
+    urgency of integrating flow protection into climate adaptation planning to sustain 
+    resilient river ecosystems.
+License: use_gpl3_license()
+Config/roxygen2/version: 8.1.0
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)

@@ -3521,10 +3521,8 @@ comp_richrepl_inner <- function(dt, spcols, beta_div_coef, quant) {
 #'   and turnover/nestedness metrics depending on `level`.
 #'
 #' @details
-#' - Local level: computes site-level richness, Shannon, Simpson, and 
-#'   temporal beta-diversity.
-#' - Regional level: uses `HierAnodiv` to partition gamma diversity 
-#'   into spatial and temporal beta components.
+#' - Local level: computes site-level richness, Shannon, Simpson, and temporal beta-diversity.
+#' - Regional level: uses `HierAnodiv` to partition gamma diversity into spatial and temporal beta components.
 #'
 #' @export
 calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
