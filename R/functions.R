@@ -8,6 +8,7 @@
 #' @param download_mode Mode for download.file (default 'wb' for binary).
 #' @param out_zip Optional: Path for the downloaded zip file.
 #' @return Output directory.
+#' @export
 download_unzip <- function(url, out_dir, download_mode='wb', out_zip=NULL) {
   # if (!dir.exists(out_dir)) {
   #   dir.create(out_dir)
@@ -41,6 +42,7 @@ download_unzip <- function(url, out_dir, download_mode='wb', out_zip=NULL) {
 #' @param seasons_by_day Logical: Are seasons defined by days.
 #' @param minimal Logical: Return minimal result (default FALSE).
 #' @return Data.frame with hydrological year, days, and seasons.
+#' @export
 hsaHydroYearSeasons <- function(dates, month = 9, day_of_the_year = TRUE, 
                                 seasons = list("SummerFall" = 5:10, "WinterSpring" = c(11:12, 1:4)),
                                 seasons_by_day = FALSE, minimal = FALSE) {
@@ -106,6 +108,7 @@ hsaHydroYearSeasons <- function(dates, month = 9, day_of_the_year = TRUE,
 #'  - is the year complete (i.e. is there at least 'n' (365) days)?
 #'  - is there less than 'na.th' (proportion) missing values in 
 #'    the year?
+#' @export
 hsaValidHydroYear <- function(hy, x = NULL, n = 365, na.th = 0.005) {
   # only full year
   rle_res <- rle(hy)
@@ -133,7 +136,7 @@ hsaValidHydroYear <- function(hy, x = NULL, n = 365, na.th = 0.005) {
 #' @param dates Vector of dates.
 #' @param selected_sims Optional: which simulation layers to select.
 #' @return List: formatted data and date info.
-#' 
+#' @export
 get_nc_var_present <- function(nc, varname, reachID, dates, selected_sims=NULL) {
   nc_data <- ncvar_get(nc, varname)
   
@@ -222,10 +225,21 @@ zero_lomf <- function(x, first=TRUE) {
 }
 
 #------ create_dated_plot_path -------------------------------------------------
-create_dated_plot_path <- function(dir, title, format) {
+#' Create a dated plot file path
+#'
+#' Constructs a full file path for saving a plot with the current date embedded in the filename.
+#'
+#' @param dir character. The directory where the plot file will be saved.
+#' @param title character. The base title for the plot, which will be used as part of the filename.
+#' @param format character. The file format extension (e.g., "png", "pdf"). 
+#'
+#' @return character. A full file path constructed as `dir/title_YYYYMMDD.png`, where the date
+#'   corresponds to the system date at the time of function execution.
+#'   @export
+create_dated_plot_path <- function(dir, title, format='png') {
   file.path(
     dir, 
-    paste0(title, "_", format(Sys.Date(), "%Y%m%d"), ".png")
+    paste0(title, "_", format(Sys.Date(), "%Y%m%d"), ".", format)
     )
 } 
 
@@ -239,6 +253,8 @@ create_dated_plot_path <- function(dir, title, format) {
 #' @param sort Logical: Sort merged table.
 #' @param set_suffix Logical: Add suffix by name.
 #' @return Merged data.table.
+#' 
+#' @export
 mergeDTlist <- function(dt_list, by = NULL, all = TRUE, sort = FALSE,
                         set_suffix=TRUE) {
   
@@ -270,6 +286,8 @@ mergeDTlist <- function(dt_list, by = NULL, all = TRUE, sort = FALSE,
 #' @param out_points_path Path for output points file.
 #' @param columns_to_include Optional: columns to include in output.
 #' @return Path to output points file.
+#' 
+#' @export
 create_sitepoints_raw <- function(in_dt, lon_col, lat_col, out_points_path,
                                   columns_to_include=NULL) {
   #Create point feature class from formatted site data
@@ -285,6 +303,33 @@ create_sitepoints_raw <- function(in_dt, lon_col, lat_col, out_points_path,
 }
 
 #------ preformat_intermittence_stats ------------------------------------------
+#' Preformat intermittence statistics
+#'
+#' Computes and formats intermittence-related statistics for a data.table containing flow data.
+#' This function identifies dry periods, calculates their durations, and computes the time elapsed
+#' since the last no-flow day for each row.
+#'
+#' @param dt data.table. Input data.table containing at least the following columns:
+#'   - `isflowing`: Logical or numeric indicator of flow status (1 = flowing, 0 = no flow).
+#'   - `reach_id`: Identifier for the river reach or segment.
+#'   - `date`: Date column used for temporal calculations.
+#'
+#' @return data.table. The input data.table with additional columns:
+#'   - `noflow_period`: Integer identifier for each contiguous dry period (NA for flowing periods).
+#'   - `noflow_period_dur`: Duration (in rows) of each dry period (only for no-flow rows).
+#'   - `last_noflowdate`: Date of the last no-flow day for each reach.
+#'   - `PrdD`: Time difference (in days) between the current date and the last no-flow date.
+#'
+#' @examples
+#' dt <- data.table(
+#'   reach_id = c(1, 1, 1, 2, 2),
+#'   date = as.Date(c("2023-01-01", "2023-01-02", "2023-01-03", "2023-01-01", "2023-01-02")),
+#'   isflowing = c(1, 0, 1, 0, 1)
+#' )
+#' preformat_intermittence_stats(dt)
+#'
+#' @importFrom data.table data.table rleid
+#' @export
 preformat_intermittence_stats <- function(dt) {
   dt[!is.na(isflowing),
      `:=`(noflow_period = rleid(isflowing==0), #Compute dry periods
@@ -312,6 +357,7 @@ preformat_intermittence_stats <- function(dt) {
 #' @details If nine 0s and one 1, then 0s are given 0 and 1 is given 0.9
 #' @source #https://stats.stackexchange.com/questions/585291/is-there-an-equivalent-to-an-ecdf-with-a-sign
 #' https://math.stackexchange.com/questions/1807120/why-arent-cdfs-left-continuous/1807136#1807136
+#' @export
 compute_ecdf_lookup <- function(in_dt, ecdf_column, grouping_columns, 
                                 na.rm=TRUE) {
   # Filter out NAs in the specified ECDF column if na.rm is TRUE
@@ -342,6 +388,7 @@ compute_ecdf_lookup <- function(in_dt, ecdf_column, grouping_columns,
 #' @param na.rm Logical: remove NAs.
 #' @return Merged data.table with ECDF columns.
 #' 
+#' @export
 compute_ecdf_multimerge <- function(in_dt, ecdf_columns, grouping_columns, 
                                     keep_column, na.rm=TRUE) {
   ecdf_lookup_list <- lapply(ecdf_columns, function(in_ecdf_column) {
@@ -362,6 +409,29 @@ compute_ecdf_multimerge <- function(in_dt, ecdf_columns, grouping_columns,
 }
 
 #------ identify_drywet6mo   ------------------------------------------------
+#' Identify dry and wet 6-month periods
+#'
+#' Determines the driest 6-month period (centered on a specific Julian day) and classifies
+#' all other periods as wet, based on the interannual average of dry days within rolling
+#' 6-month windows.
+#'
+#' @param in_dt data.table. Input data.table containing flow and Julian day information.
+#' @param flow_col character. Name of the column indicating flow status (default: 'isflowing').
+#'   Expected to contain binary values (1 = flowing, 0 = no flow).
+#' @param jday_col character. Name of the column containing Julian day values (default: 'doy').
+#'
+#' @return data.table. The input data.table with an additional column:
+#'   - `dry_6mo`: Logical indicator (TRUE for days within the driest 6-month period,
+#'     FALSE otherwise). 
+#'
+#' @details
+#' The function first pads the input data with 3 months of NA values at both ends to avoid
+#' edge effects. It then calculates a rolling sum of dry days (where `flow_col == 0`) over a
+#' 183-day window (6 months) centered on each day. The Julian day with the highest average
+#' number of dry days across all years is identified as the center of the driest 6-month period.
+#' All other days are classified as part of the wet period.
+#' 
+#' @export
 identify_drywet6mo <- function(in_dt, flow_col='isflowing', jday_col = 'doy') {
   
   #Add 3 months before and after record to avoid having NAs on the edges
@@ -405,6 +475,33 @@ identify_drywet6mo <- function(in_dt, flow_col='isflowing', jday_col = 'doy') {
 }
 
 #------ compute_sd6 ------------------------------------------------------------
+#' Compute rolling Sd6 index
+#'
+#' Calculates the Sd6 intermittence index over a rolling time window for each reach.
+#' Sd6 is defined as 1 minus the ratio of the mean number of dry months in the wet period to
+#' the mean number of dry months in the dry period, computed over a specified number of years.
+#'
+#' @param dt data.table. Input data.table containing flow and temporal information.
+#'   Must include columns: `reach_id`, `date`, `noflow_period`, and `isflowing`.
+#' @param time_window_yr integer. Number of years for the rolling window over which to compute Sd6.
+#'
+#' @return data.table. A data.table with columns:
+#'   - `reach_id`: Identifier for the river reach.
+#'   - `year`: Year of the observation.
+#'   - `sd6_[time_window_yr]yrpast`: Rolling Sd6 value computed over the specified time window.
+#'     Returns 1 if no dry months are observed in either period or if calculations are invalid.
+#'
+#' @details
+#' The function first classifies each day as part of either a dry or wet 6-month period using
+#' `identify_drywet6mo`. It then aggregates to the monthly level, where a month is classified as dry
+#' if more than 50 percent of its days fall within the dry 6-month period. For each year and reach,
+#' the function counts the number of months with no-flow in both dry and wet periods.
+#' The Sd6 index is then computed as 1 minus the ratio of the mean number of dry months in the wet period
+#' to the mean number of dry months in the dry period, over a rolling window of `time_window_yr` years.
+#' @seealso
+#' \code{\link{identify_drywet6mo}} for dry/wet period classification,
+#' 
+#' @export
 compute_rolling_sd6 <- function(dt, time_window_yr) {
   #Identify contiguous six months with the most zero-flow days for computing Sd6
   daily_classified <- dt[, identify_drywet6mo(.SD), by = reach_id]
@@ -462,6 +559,8 @@ compute_rolling_sd6 <- function(dt, time_window_yr) {
 #' @param in_sites_dt Sites data.table.
 #' @param scale Scale for computation: 'all', 'drn', or 'site'.
 #' @return List of statistics by scale.
+#' 
+#' @export
 compute_hydrostats_intermittence <- function(in_hydromod_dt,
                                              in_sites_dt,
                                              scale = 'all') {
@@ -735,10 +834,45 @@ compute_hydrostats_intermittence <- function(in_hydromod_dt,
 }
 
 #------ compute_hydrostats_q ---------------------------------------------------
-#' Compute hydrological statistics for discharge.
+#' Compute flow magnitude statistics
 #'
-#' @param in_hydromod_dt Hydrological time series data.table.
-#' @return Data.table with discharge statistics.
+#' Calculates a set of rolling hydrological statistics for simulated streamflow data,
+#' including mean flow over multiple time windows, flow percentiles, and proportions of days
+#' below/above threshold percentiles.
+#'
+#' @param in_hydromod_dt data.table. Input data.table containing hydrological model output.
+#'   Must include columns: `reach_id`, `date`, `doy` (day of year), and `qsim` (simulated flow).
+#'   Defaults to `hydromod_dt_sites` if not provided.
+#'
+#' @return data.table. The input data.table with additional columns for:
+#'   - Rolling mean flow: `meanQ[10,30,60,90,120,180,365,1825,3650]past`
+#'   - Flow percentile: `Pqsim` (percentile of each flow value relative to the full flow duration curve)
+#'   - Proportion of days below 10th percentile: `uQ90_[10,30,60,90,120,180,365]past`
+#'   - Proportion of days above 90th percentile: `oQ10_[10,30,60,90,120,180,365]past`
+#'   - Maximum flow percentile in rolling windows: `maxPQ_[3,10,30,60,90,120,180]past`
+#'   - Percentiles of mean flow within past time windows (grouped by day of year for shorter windows,
+#'     or by reach for longer windows)
+#'
+#' @details
+#' The function first orders the data by `reach_id` and `date`. It then computes:
+#' 1. Rolling mean flow over 9 different time windows (10 to 3650 days)
+#' 2. Flow percentiles relative to the entire flow duration curve (FDC) for each reach
+#' 3. Proportion of days below the 10th percentile (uQ90) and above the 90th percentile (oQ10)
+#'    over 7 time windows (10 to 365 days)
+#' 4. Maximum flow percentile over 8 time windows (3 to 365 days)
+#' 5. Percentiles of mean flow within past time windows, computed either by day of year (for windows
+#'    up to 180 days) or for the entire record (for windows of 365 days or more)
+#'
+#' @examples
+#' hydromod_dt <- data.table(
+#'   reach_id = rep(1001, 365 * 10),
+#'   date = seq(as.Date("2014-01-01"), as.Date("2023-12-31"), by = "day"),
+#'   doy = rep(1:365, 10),
+#'   qsim = rnorm(3650, mean = 100, sd = 20)
+#' )
+#' compute_hydrostats_q(hydromod_dt)
+#' 
+#' @export
 compute_hydrostats_q <- function(in_hydromod_dt = hydromod_dt_sites) {
   
   setorderv(in_hydromod_dt, c('reach_id','date'))
@@ -831,9 +965,43 @@ compute_hydrostats_q <- function(in_hydromod_dt = hydromod_dt_sites) {
 #   wp1_data_gouv_dir,
 #   "projections",
 #   "Albarine_flowstate_projection_gfdl-esm4_ssp370_1985-2014_spatially-distributed.nc")
-
 # in_drn_dt <- drn_dt
 
+#' Import hydrological model data from GCM projections
+#'
+#' Imports and combines reference and projected hydrological data from NetCDF files,
+#' including metadata extraction and formatting for downstream analysis.
+#'
+#' @param hydroproj_path character. File path to the projected hydrological NetCDF file.
+#'   The filename is expected to follow a specific naming convention containing metadata
+#'   (e.g., catchment, variable name, time period, GCM, scenario, date range).
+#' @param hydroref_path character. File path to the reference hydrological NetCDF file.
+#' @param in_drn_dt data.table. Data.table containing drainage basin information with columns:
+#'   - `catchment`: Name of the catchment
+#'   - `country`: Country associated with the catchment
+#'
+#' @return list. A list containing two elements:
+#'   - `metadata_dt`: data.table with extracted metadata from the filename, including:
+#'     `catchment`, `varname`, `time_period`, `gcm`, `scenario`, `date_range`, `file_end`, `country`, and `path`.
+#'   - `hydro_dt`: data.table combining reference and projected hydrological data with columns:
+#'     `reach_id`, `date`, `isflowing` (renamed from `flowstate`), and `qsim` (renamed from `discharge`).
+#'
+#' @details
+#' The function first extracts metadata from the projected file's name by splitting the basename
+#' on underscores. It then reads both the reference and projected NetCDF files to obtain:
+#' - Reach IDs
+#' - Dates (converted from NetCDF format to R Date objects)
+#' - The specified hydrological variable (e.g., flow state or discharge)
+#'
+#' The reference and projected datasets are combined by:
+#' - Taking all reference data before the minimum date in the projected data
+#' - Taking all projected data after the maximum date in the reference data
+#' This ensures no overlap between the two periods.
+#'
+#' Special handling is applied for the "Lepsamanjoki" catchment, which is renamed to
+#' "Lepsamaanjoki" for consistency.
+#'
+#' @export
 import_hydromod_gcm <- function(hydroproj_path, hydroref_path, in_drn_dt) {
   #Decompose name
   metadata_dt <- str_split(basename(hydroproj_path), '_')[[1]] %>%
@@ -900,6 +1068,7 @@ import_hydromod_gcm <- function(hydroproj_path, hydroref_path, in_drn_dt) {
 #' @references
 #' Based on: \url{https://gis.stackexchange.com/questions/313721/automatically-get-an-adequate-projection-system-based-on-a-bounding-box}
 #'
+#' @export
 dist_proj <- function(x) {
   bb <- sf::st_bbox(x)
   paste0("+proj=tpeqd +lat_1=",
@@ -939,6 +1108,7 @@ dist_proj <- function(x) {
 #' Uses a heuristic: filtering duplicates with `duplicated(values(.)[, sites_idcol])`.
 #' This may drop unintended points if IDs are not unique.
 #' 
+#' @export
 snap_points_inner <- function(in_pts,
                               in_target,
                               sites_idcol,
@@ -989,6 +1159,8 @@ snap_points_inner <- function(in_pts,
 #' - The name `length` shadows the base R function `length()`. This is not an error,
 #'   but may cause confusion.
 #' - Original author: Miguel Porto, from https://github.com/miguel-porto/fix-streams
+#' 
+#'  @export
 split_sp_line <- function(line, n, length, debug = F) {
   if (debug) plot(line)
   coo <- sp::coordinates(line)
@@ -1086,6 +1258,8 @@ split_sp_line <- function(line, n, length, debug = F) {
 #' corrected <- fix_confluences_inner(rios, step=10)
 #' rgdal::writeOGR(corrected, "streams_corrected.shp", "streams_corrected", "ESRI Shapefile")
 #' }
+#' 
+#'  @export
 fix_confluences_inner <- function(shp, from = "FROM_NODE", to = "TO_NODE", 
                                   step = 10, fields_to_keep=NULL) {
   # step is the desired length (in map units) by which the river sinks are adjusted (separated) downstream.
@@ -1234,6 +1408,7 @@ fix_confluences_inner <- function(shp, from = "FROM_NODE", to = "TO_NODE",
 #' Relies on `Hmisc::rcorr`, which may return `NA` values for correlations with
 #' insufficient data.
 #' 
+#' @export
 compute_cor_matrix_inner <- function(in_dt, group_vars = NULL,
                                      x_cols, y_cols = NULL,
                                      correlation_type = "spearman",
@@ -1288,6 +1463,7 @@ compute_cor_matrix_inner <- function(in_dt, group_vars = NULL,
 #' @param country_col Character. Country column name.
 #' @return data.table. Copy of input with NAs filled hierarchically.
 #' 
+#' @export
 fill_nas_hierarchical <- function(dt, cols_to_fill, site_col, country_col) {
   
   # Create a copy to avoid modifying the original data.table in place
@@ -1327,6 +1503,8 @@ fill_nas_hierarchical <- function(dt, cols_to_fill, site_col, country_col) {
 #' @param in_cols_to_ordinate Character vector. Columns to include in ordination.
 #' @param num_pca_axes Integer. Number of principal axes to keep (default 4).
 #' @return List. Contains PCA object, scores as data.table, and transformed data.
+#' 
+#' @export
 trans_pca <- function(in_dt, in_cols_to_ordinate, num_pca_axes = 4) {
   dt_copy <- copy(in_dt)
   
@@ -1376,6 +1554,7 @@ trans_pca <- function(in_dt, in_cols_to_ordinate, num_pca_axes = 4) {
 #' @param num_pca_axes Integer. Number of principal components to keep.
 #' @return List. Includes PCA object, transformed data, scores, and plot (if available).
 #'
+#' @export
 trans_pca_wrapper <- function(in_dt, in_cols_to_ordinate, id_cols, 
                               group_cols = NULL, num_pca_axes = 4) {
   if (is.null(group_cols)) {
@@ -1412,7 +1591,34 @@ trans_pca_wrapper <- function(in_dt, in_cols_to_ordinate, id_cols,
   }
 }
 #------ scale_ssn_predictors ---------------------------------------------------
-# Scale predictor data (mean of 0 and SD of 1)
+#' Scale predictors
+#'
+#' Standardizes (z-score normalization) predictors in both observed and projected data
+#' using scaling parameters derived from the observed data.
+#'
+#' @param in_ssn list. A list containing data with two named elements:
+#'   - `obs`: A spatial data frame (sf object) containing observed predictors
+#'   - `preds`: A list containing projected predictors (e.g., `preds_proj`)
+#' @param in_vars character. Vector of variable names to be scaled. Only variables present in
+#'   both `in_ssn$obs` and `in_vars` will be processed.
+#' @param scale_ssn_preds logical. If TRUE, applies the same scaling to projected predictors.
+#'   Default is TRUE.
+#'
+#' @return list. The input list `in_ssn` with:
+#'   - `obs`: Original observed data with additional scaled columns (suffix `_z`) for each variable in `in_vars`.
+#'   - `preds`: If `scale_ssn_preds` is TRUE, projected data with scaled columns (suffix `_z`)
+#'     for each variable in `in_vars` that exists in `preds$preds_proj`.
+#'
+#' @details
+#' The function performs z-score standardization 
+#' (subtracting the mean and dividing by the standard deviation)
+#' on the specified variables. The scaling parameters (mean and standard deviation)
+#' are computed from the observed data and then applied to both observed and
+#' projected data to ensure consistency.
+#'
+#' The scaled columns are named with a `_z` suffix, and the original columns remain unchanged.
+#' 
+#' @export
 scale_ssn_predictors <- function(in_ssn, in_vars, scale_ssn_preds) {
   #Scale obs and preds
   vars_in_obs <- intersect(in_vars, names(in_ssn$obs))
@@ -1448,6 +1654,24 @@ scale_ssn_predictors <- function(in_ssn, in_vars, scale_ssn_preds) {
   return(in_ssn)
 }
 #------ get_hydro_var_root -----------------------------------------------------
+#' Extract hydrological variable type from its name
+#'
+#' Processes a data.table to extract the "root" name of hydrological variables  
+#' and window duration from column names containing time window information.
+#'
+#' @param dt data.table. Input data.table containing a column named `hydro_var` with variable names
+#'   that may include time window suffixes (e.g., "meanQ30past", "uQ10_180past", "var_m30_scaled").
+#' @param in_place logical. If TRUE (default), modifies the input data.table by reference.
+#'   If FALSE, returns a modified copy without altering the original.
+#'
+#' @return If `in_place` is TRUE, returns the modified data.table invisibly (by reference).
+#'   If `in_place` is FALSE, returns a new data.table with two additional columns:
+#'   - `hydro_var_root`: Character vector of variable names with all time window suffixes and
+#'     scaling indicators removed (e.g., "meanQ30past" becomes "meanQ").
+#'   - `window_d`: Factor vector of extracted window durations (e.g., "30" from "meanQ30past").
+#'     Levels are ordered by unique numeric values. 
+#'
+#' @export
 get_hydro_var_root <- function(dt, in_place=TRUE) {
   if (!in_place) {
     dt <- copy(dt)
@@ -1465,6 +1689,26 @@ get_hydro_var_root <- function(dt, in_place=TRUE) {
 }
 
 #------ get_full_hydrolabel ----------------------------------------------------
+#' Get full hydrological variable label
+#'
+#' Generates a human-readable label for hydrological variables based on their names and
+#' a reference data.table containing variable metadata.
+#'
+#' @param in_hydro_vars_dt data.table. Reference data.table containing hydrological variable
+#'   metadata with columns:
+#'   - `hydro_var`: Variable names (e.g., "meanQ30past")
+#'   - `hydro_var_root`: Root variable names without window suffixes (e.g., "meanQ")
+#'   - `hydro_label`: Human-readable base labels (e.g., "Mean discharge")
+#'   - `window_d`: Window duration for time-based variables
+#' @param in_hydro_var character. The hydrological variable name to convert to a full label.
+#'   May include suffixes like "_30past", "_z", "_sqrt", "_log10", or "_samp".
+#'
+#' @return character. A human-readable label for the input variable. For variables with window
+#'   information, the label includes the window duration and time unit (days or years).
+#'   For transformed variables (e.g., scaled, log), the transformation suffix is removed before
+#'   label generation. Special cases like "basin_area_km2" and "meanQ3650past" have predefined labels.
+#'
+#' @export
 get_full_hydrolabel <- function(in_hydro_vars_dt,
                                 in_hydro_var) {
   # print(in_hydro_var)
@@ -1502,14 +1746,59 @@ get_full_hydrolabel <- function(in_hydro_vars_dt,
 }
 
 #------ get_ssn_emmeans -------------------------------------------------------
+#' Compute estimated marginal means for SSN models
+#'
+#' Calculates estimated marginal means (EMMs) for a given predictor variable across levels
+#' of an interaction variable, with optional plotting functionality.
+#'
+#' @param in_mod model. A fitted SSN model object containing:
+#'   - `ssn.object`: List with `obs` data.frame containing the predictor variable
+#'   - `formula`: Model formula to extract the response variable
+#' @param in_pred_var character. Name of the predictor variable for which to compute EMMs.
+#' @param interaction_var character. Name of the categorical variable to condition the EMMs on.
+#' @param in_drn_dt data.table. Data.table containing drainage basin metadata with at least:
+#'   - `country`: Country names
+#'   - Other columns to merge with the EMM results
+#' @param in_pred_var_label character. Optional label for the predictor variable axis.
+#'   If provided and `label_pred_var` is TRUE, this will be used as the x-axis label.
+#' @param in_emm_dt data.table. Optional pre-computed EMM data.table. If provided, this will
+#'   be used instead of computing new EMMs. Must contain columns: `pred_var`, `interaction_var`,
+#'   `emmean`, `asymp.LCL`, `asymp.UCL`, and `response_var`.
+#' @param plot logical. If TRUE (default), generates a ggplot of the EMMs with confidence ribbons.
+#' @param label_pred_var logical. If TRUE (default) and `in_pred_var_label` is provided,
+#'   uses the custom label for the x-axis.
+#'
+#' @return list. A list containing:
+#'   - `dt`: data.table with EMM results including columns:
+#'     `pred_var`, `interaction_var`, `emmean`, `asymp.LCL`, `asymp.UCL`, `response_var`,
+#'     and additional metadata from `in_drn_dt`
+#'   - `plot`: ggplot object if `plot=TRUE`, otherwise NULL
+#'
+#' @details
+#' The function computes estimated marginal means (EMMs) for a predictor variable across levels
+#' of an interaction variable. If `in_emm_dt` is not provided, it:
+#' 1. Extracts the observation data from the model's ssn.object
+#' 2. Creates a sequence of 50 values spanning the range of the predictor variable
+#' 3. Computes EMMs at these values for each level of the interaction variable
+#' 4. Merges with drainage basin metadata
+#' 5. Orders countries in a specific sequence (Finland, France, Hungary, Czechia, Croatia, Spain)
+#'
+#' The resulting plot shows:
+#' - Lines for each level of the interaction variable
+#' - Confidence ribbons (default 95% CIs)
+#' - Customizable axis labels
+#'
+#' @export
 get_ssn_emmeans <- function(in_mod, 
                             in_pred_var, interaction_var, 
                             in_drn_dt,
                             in_pred_var_label=NULL,
                             in_emm_dt=NULL, plot=T, label_pred_var=T) {
-  
+  # If no pre-computed EMM data is provided, calculate it from the model
   if (is.null(in_emm_dt)) {
-    in_ssn <- in_mod$ssn.object
+    in_ssn <- in_mod$ssn.object # Extract observation data from model object
+    
+    # Create sequence of predictor values spanning its range
     newdat <- list(
       seq(min(in_ssn$obs[[in_pred_var]], na.rm = TRUE),
           max(in_ssn$obs[[in_pred_var]], na.rm = TRUE),
@@ -1517,9 +1806,11 @@ get_ssn_emmeans <- function(in_mod,
     )
     names(newdat) <- in_pred_var
     
+    # Get response variable name from model formula
     response_var <- all.vars(in_mod$formula)[[1]]
     
-    #Marginal means plot
+    #Marginal means plot -----
+    # Compute estimated marginal means
     emm_dt <- emmeans(in_mod, 
                       data=in_mod$ssn.object$obs, 
                       specs= as.formula(paste0('~', in_pred_var, '|', interaction_var)),
@@ -1527,23 +1818,30 @@ get_ssn_emmeans <- function(in_mod,
                       type = "response") %>%
       data.frame %>%
       setDT %>%
+      # Merge with max predictor value by interaction group
       merge(as.data.table(in_ssn$obs)[, list(max_pred_var = max(get(in_pred_var))),
                                       by=interaction_var], by=interaction_var) %>%
+      # Filter to only include points within observed range
       .[get(in_pred_var) < max_pred_var] %>%
+      # Add response variable and predictor name columns
       .[, `:=`(response_var=response_var,
                pred_var_name = in_pred_var)] %>%
+      # Merge with drainage basin metadata
       merge(in_drn_dt, by='country')  %>%
+      # Set country as ordered factor with specific levels
       .[, country := factor(
         country,
         levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain" ),
         ordered=T)
       ] %>%
-      setnames(in_pred_var, 'pred_var')
+      setnames(in_pred_var, 'pred_var') # Rename predictor variable to consistent name
     
+    # Add custom label if provided
     if (!is.null(in_pred_var_label)) {
       emm_dt[, pred_var_label := in_pred_var_label]
     }
     
+  # If pre-computed EMM data is provided, use it directly
   } else if (is.data.table(in_emm_dt) && 
              all(c('pred_var', interaction_var, 'emmean')  %in% names(in_emm_dt))
   ){
@@ -1551,11 +1849,14 @@ get_ssn_emmeans <- function(in_mod,
     response_var <- emm_dt[1, response_var]
   }
   
+  # Standardize column names for probability and rate variables
   setnames(emm_dt, c('prob', 'rate'), rep('emmean', 2), skip_absent=TRUE)
   
+  # Extract color mapping for each interaction level
   color_vec <- emm_dt[!duplicated(get(interaction_var)),
                       setNames(color, get(interaction_var))]
   
+  # Generate plot if requested
   if (plot) {
     emm_plot <- emm_dt %>%
       ggplot(aes(x=pred_var, fill=get(interaction_var))) +
@@ -1577,6 +1878,7 @@ get_ssn_emmeans <- function(in_mod,
     emm_plot <- NULL
   }
   
+  # Return both data and plot
   return(list(
     dt=emm_dt,
     plot=emm_plot
@@ -1584,39 +1886,85 @@ get_ssn_emmeans <- function(in_mod,
 }
 
 #------ get_ssn_emtrends ------------------------------------------------------
+#' Compute estimated marginal trends for SSN models
+#'
+#' Calculates estimated marginal trends (EM trends) for a given predictor variable across levels
+#' of an interaction variable, with optional plotting functionality.
+#'
+#' @param in_mod model. A fitted SSN model object containing:
+#'   - `ssn.object`: List with `obs` data.frame containing the predictor variable
+#'   - `formula`: Model formula to extract the response variable
+#' @param in_pred_var character. Name of the predictor variable for which to compute EM trends.
+#' @param in_pred_var_label character. Label for the predictor variable (currently not used in plotting).
+#' @param interaction_var character. Name of the categorical variable to condition the EM trends on.
+#' @param in_drn_dt data.table. Data.table containing drainage basin metadata with at least:
+#'   - `country`: Country names
+#'   - Other columns to merge with the EM trends results
+#' @param in_emtrends_dt data.table. Optional pre-computed EM trends data.table. If provided,
+#'   this will be used instead of computing new EM trends.
+#' @param plot logical. If TRUE (default), generates a ggplot of the EM trends with confidence intervals.
+#'
+#' @return list. A list containing:
+#'   - `dt`: data.table with EM trends results including columns:
+#'     `interaction_var`, `trend`, `p_value`, `response_var`, and additional metadata
+#'     from `in_drn_dt`
+#'   - `plot`: ggplot object if `plot=TRUE`, otherwise NULL
+#'
+#' @details
+#' The function computes estimated marginal trends (EM trends) for a predictor variable across levels
+#' of an interaction variable. If `in_emtrends_dt` is not provided, it:
+#' 1. Extracts the response variable name from the model formula
+#' 2. Computes EM trends for the predictor variable by levels of the interaction variable
+#' 3. Extracts p-values from the trend tests
+#' 4. Merges with drainage basin metadata
+#' 5. Orders countries in a specific sequence (Finland, France, Hungary, Czechia, Croatia, Spain)
+#'
+#' The resulting plot shows:
+#' - Points with error bars representing the trend estimates and confidence intervals
+#' - A horizontal reference line at y=0
+#' - Customizable axis labels
+#'
+#' @export
 get_ssn_emtrends <- function(in_mod, in_pred_var, 
                              in_pred_var_label,
                              interaction_var,
                              in_drn_dt,
-                             in_emtrends_dt=NULL, plot=T) {
+                             in_emtrends_dt=NULL, 
+                             plot=T) {
+  # If no pre-computed EM trends data is provided, calculate it from the model
   if (is.null(in_emtrends_dt)) {
+    # Get response variable name from model formula
     response_var <- all.vars(in_mod$formula)[[1]]
-    
+    # Compute estimated marginal trends
     emtrends_out <- emtrends(object = in_mod, 
                             specs = as.formula(paste('~', interaction_var)), 
                             var = in_pred_var,
                             data=in_mod$ssn.object$obs) 
     
+    # Convert to data.table and add metadata
     emtrends_dt <- as.data.frame(emtrends_out) %>%
       setDT %>%
       .[, `:=`(response_var=response_var,
-               pred_var_name = in_pred_var)]  %>%
-      merge(in_drn_dt, by='country') %>%
-      .[, country := factor(
+               pred_var_name = in_pred_var)]  %>% # Add response variable and predictor name columns
+      merge(in_drn_dt, by='country') %>% # Merge with drainage basin metadata
+      .[, country := factor( # Set country as ordered factor with specific levels
         country,
         levels = c("Finland", "France",  "Hungary", "Czechia", "Croatia", "Spain" ),
         ordered=T)
       ] 
     
+    # Add p-values from trend tests
     emtrends_dt$p_value <- as.data.frame(test(emtrends_out))$p.value
-    
+    # Standardize trend column name
     setnames(emtrends_dt, paste0(in_pred_var, '.trend') , 'trend')
     
+  # If pre-computed EM trends data is provided, use it directly
   }  else if (is.data.table(in_emtrends_dt)) {
     emtrends_dt <- in_emtrends_dt
     response_var <- emtrends_dt[1, response_var]
   }
   
+  # Determine confidence interval column names
   if (all(c('lcl_capped', 'ucl_capped') %in% names(emtrends_dt))) {
     p_rangemin <- 'lcl_capped'
     p_rangemax <- 'ucl_capped'
@@ -1625,9 +1973,11 @@ get_ssn_emtrends <- function(in_mod, in_pred_var,
     p_rangemax <- 'asymp.UCL'
   }
   
+  # Extract color mapping for each interaction level
   color_vec <- emtrends_dt[!duplicated(get(interaction_var)),
                            setNames(color, get(interaction_var))]
   
+  # Generate plot if requested
   if (plot) {
     emtrends_plot <- ggplot(emtrends_dt, aes(x = get(interaction_var), 
                                              y = trend)) +
@@ -1646,6 +1996,7 @@ get_ssn_emtrends <- function(in_mod, in_pred_var,
     emtrends_plot <- NULL
   }
   
+  # Return both data and plot
   return(list(
     dt = emtrends_dt,
     plot = emtrends_plot
@@ -1653,24 +2004,43 @@ get_ssn_emtrends <- function(in_mod, in_pred_var,
 }
 
 #------ check_resid_corr -------------------------------------------------------
-#Check correlation of residuals with other variables
+#' Check residuals correlation with candidate predictors
+#'
+#' Creates diagnostic plots and computes correlation statistics to evaluate the relationship
+#' between model residuals and candidate predictor variables.
+#'
+#' @param in_ssn_mod model. A fitted model object for which to check residual correlations.
+#' @param in_idcol character. Name of the identifier column (default: 'site') used to group
+#'   observations in the residual analysis.
+#' @param in_response_var character. Name of the response variable in the model.
+#' @param in_candidates character. Vector of candidate predictor variable names to check
+#'   for correlation with model residuals.
+#'
+#' @return ggplot. A faceted scatterplot showing the relationship between each candidate predictor
+#'   and model residuals, with a linear trend line for each country.
+#'
+#' @export
 check_resid_corr <- function(in_ssn_mod, in_idcol='site', 
                              in_response_var, in_candidates) {
+  # Augment model with response residuals
   augment_dt <- augment(in_ssn_mod, 
                         drop=FALSE, type.residuals="response") %>%
     st_drop_geometry %>%
     as.data.table
   
+  # Reshape to long format for faceting by candidate variables
   augment_melt <- melt(augment_dt, 
                        id.vars=c(in_idcol, in_response_var, 'country', '.resid'),
                        measure.vars = in_candidates) 
   
+  #Create faceted scatterplot of residuals vs. each candidate predictor
   resid_corr_plot <- ggplot(augment_melt, 
                             aes(x=value, y=`.resid`, color=country)) +
     geom_point() +
     geom_smooth(method='lm',se=FALSE) +
     facet_wrap(~variable, scales='free_x')
   
+  # Compute Spearman correlations between residuals and each predictor
   check_avg_corr <- augment_melt[, spearman(`.resid`, value), 
                                  by=.(country, variable)] %>%
     .[, list(
@@ -1682,7 +2052,24 @@ check_resid_corr <- function(in_ssn_mod, in_idcol='site',
   
   return(resid_corr_plot)
 }
+
 #------ get_link_function ------------------------------------------------------
+#' Get inverse link function for a given family
+#'
+#' Returns the appropriate inverse link function for a specified statistical family,
+#' commonly used in generalized linear models (GLMs).
+#'
+#' @param fam character. The name of the statistical family (e.g., "gaussian", "poisson", "binomial").
+#'   The matching is case-insensitive.
+#'
+#' @return function. The inverse link function corresponding to the specified family.
+#'   For example:
+#'   - "gaussian" or "identity" returns the identity function
+#'   - "poisson" returns the exponential function
+#'   - "binomial" returns the inverse logit function (plogis)
+#'   - "gamma" returns the reciprocal function
+#'
+#' @export
 get_inverse_link_function <- function(fam) {
   inv_link <- switch(
     tolower(fam),
@@ -1731,6 +2118,20 @@ get_inverse_link_function <- function(fam) {
 # greek=T
 # format_ssn_glm_equation(in_mod_fit, greek = TRUE)
 
+#' Format SSN regression model equation
+#'
+#' Creates a human-readable mathematical equation from a fitted model object,
+#' with support for Greek letter notation and proper formatting of mathematical symbols.
+#'
+#' @param in_mod_fit model. A fitted model object of class lm, glm, ssn_lm, ssn_glm, lme, or merMod.
+#' @param greek logical. If TRUE (default), uses Greek letters (β) for coefficients.
+#'   If FALSE, uses Latin letters (b) for coefficients.
+#'
+#' @return character. A formatted equation string representing the model, or NULL if the input
+#'   is not a recognized model type. For non-identity link functions, the equation shows the
+#'   link function applied to the response variable.
+#'
+#' @export
 format_ssn_glm_equation <- function(in_mod_fit, greek = TRUE) {
   if (!inherits(in_mod_fit, c('lm','glm','ssn_lm', 'ssn_glm', 'lme', 'merMod'))) {
     return(NULL)
@@ -1799,6 +2200,23 @@ format_ssn_glm_equation <- function(in_mod_fit, greek = TRUE) {
 }
 
 #------ plot_ssn_obs_pred ------------------------------------------------------
+#' Plot observed vs. predicted values for SSN models
+#'
+#' Creates a scatterplot comparing observed and predicted values from a fitted SSN model,
+#' with points colored by country and shaped by stream type.
+#'
+#' @param in_mod_fit model. A fitted model object containing:
+#'   - `formula`: Model formula to extract the response variable
+#'   - Other standard model components for augmentation
+#' @param in_drn_dt data.table. Data.table containing drainage basin metadata with at least:
+#'   - `country`: Country names
+#'   - `stream_type`: Stream type classification (expected to have values that map to
+#'     "Perennial" and "Non-perennial" in the legend)
+#' @param response_var_label character. Label for the response variable to use in axis titles.
+#'
+#' @return ggplot. A scatterplot of observed vs. predicted values 
+#'
+#' @export
 plot_ssn_obs_pred <- function(in_mod_fit, 
                               in_drn_dt,
                               response_var_label) {
@@ -1846,6 +2264,38 @@ plot_ssn_obs_pred <- function(in_mod_fit,
 # plot=T
 # verbose=T
 
+#' Plot estimated marginal trends from formula
+#'
+#' Computes and visualizes estimated marginal trends (EM trends) for each term 
+#' in a model formula, handling both continuous predictors and interaction terms.
+#'
+#' @param in_mod_fit model. A fitted model object (typically from ssn models) containing:
+#'   - `formula`: Model formula
+#'   - `ssn.object`: List with `obs` data.frame containing the predictor variables
+#' @param in_drn_dt data.table. Data.table containing drainage basin metadata with at least:
+#'   - `country`: Country names
+#'   - Other columns that may be used for grouping and coloring in the plot
+#' @param in_hydro_vars_dt data.table. Reference data.table containing hydrological variable metadata
+#'   with columns: `hydro_var`, `hydro_var_root`, `hydro_label`, and `window_d`.
+#' @param plot logical. If TRUE (default), generates a summary plot of the EM trends.
+#' @param verbose logical. If TRUE (default), prints messages about processing progress and skipped terms.
+#'
+#' @return list. A list containing:
+#'   - `dt`: data.table with EM trends results for all terms, including columns:
+#'     `trend`, confidence intervals, `p_value`, `response_var`, `pred_var_name`,
+#'     `source_term`, `predictor`, `spec_factor`, and `pred_var_label`
+#'   - `plot`: ggplot object if `plot=TRUE`, otherwise NULL
+#'   - `skipped`: list of terms that were skipped with reasons
+#'
+#' @details
+#' The function processes each term in the model formula to:
+#' 1. Identify continuous predictors and factor variables
+#' 2. Compute EM trends for each continuous predictor
+#' 3. Handle interaction terms by conditioning on factor variables
+#' 4. Format variable names using `get_full_hydrolabel`
+#' 5. Create a summary plot showing trend estimates with confidence intervals
+#' 
+#' @export
 plot_formula_emtrends <- function(in_mod_fit,
                                   in_drn_dt,
                                   in_hydro_vars_dt,
@@ -2060,7 +2510,6 @@ plot_formula_emtrends <- function(in_mod_fit,
   ))
 }
 
-################################################################################
 #------ get_covariate_name -----------------------------------------------------
 #' Identify target covariate
 #'
@@ -2073,6 +2522,8 @@ plot_formula_emtrends <- function(in_mod_fit,
 #' @return Character string of the exact covariate name in the model
 #' @examples
 #' get_covariate_name(fit_mod, "DurD") # Returns "DurD180past_scaled"
+#' 
+#' @export
 get_covariate_name <- function(fit_mod, hydro_var) {
   form <- formula(fit_mod)
   all_terms <- all.vars(form)
@@ -2121,6 +2572,8 @@ get_covariate_name <- function(fit_mod, hydro_var) {
 #' fit <- ssn_lm(y ~ x1 + x2, ssn.object = my_ssn, tailup_type = "linear")
 #' cov_params <- get_known_covariance_params(fit)
 #' }
+#' 
+#' @export
 get_known_covariance_params <- function(fit_mod) {
   mod_params <- fit_mod$coefficients$params_object
   
@@ -2218,6 +2671,8 @@ get_known_covariance_params <- function(fit_mod) {
 #' result <- run_permutations_for_ssn_model(fit_mod, ssn_obj, "DurD180past_scaled", n_perm = 500)
 #' print(paste("p-value:", result$p_value))
 #' }
+#' 
+#' @export
 run_permutations_for_ssn_model <- function(fit_mod, ssn_obj, cov_name, n_perm = 500,
                                            cov_params = NULL, progress = TRUE) {
   
@@ -2351,6 +2806,20 @@ run_permutations_for_ssn_model <- function(fit_mod, ssn_obj, cov_name, n_perm = 
 }
 
 #------ assign_parallel_matrix_ids --------------------------------------------
+#' Assign parallel matrix IDs
+#'
+#' Creates a matrix of unique IDs for a square matrix where diagonal elements are assigned
+#' their row indices and off-diagonal elements are assigned sequential IDs based on their
+#' position in the upper triangle of the matrix.
+#'
+#' @param m matrix. A square matrix for which to generate IDs.
+#'
+#' @return matrix. A matrix of the same dimensions as `m` with unique integer IDs assigned as follows:
+#'   - Diagonal elements: ID equals the row index (1 to n)
+#'   - Off-diagonal elements: IDs are assigned sequentially based on position in the upper triangle
+#'     of the matrix, starting from n+1
+#'
+#' @export
 assign_parallel_matrix_ids <- function(m) {
   n <- nrow(m)
   # Create matrices of row/column indices
@@ -2374,7 +2843,9 @@ assign_parallel_matrix_ids <- function(m) {
   return(id_matrix)
 }
 
+################################################################################
 #-------------------------- preparatory workflow functions ---------------------
+################################################################################
 #------ define_hydromod_paths --------------------------------------------------
 #in_hydromod_dir <- hydromod_present_dir
 
@@ -2389,6 +2860,7 @@ assign_parallel_matrix_ids <- function(m) {
 #' @return A `data.table` with country, catchment, best simulation number,
 #'   and standardized file paths for each catchment.
 #'   
+#' @export   
 define_hydromod_paths <- function(in_hydromod_dir) {
   hydro_drn_paths_dt <- data.table(
     country = c("Croatia", "Czechia", "Finland", "France",  "Hungary", "Spain"),
@@ -2442,6 +2914,8 @@ define_hydromod_paths <- function(in_hydromod_dir) {
 #'   hydrological conditioning. HydroSHEDS is used instead.
 #' @note Site areas are currently based on **visual matches** — this may
 #'   introduce subjectivity. Consider automating extraction via snapping.
+#'   
+#' @export
 get_genal_drainage_area <- function(in_flowdir_path, outdir) {
   out_upa_path <- file.path(outdir, 'genal_hydrosheds90m_upa.tif')
   
@@ -2497,7 +2971,8 @@ get_genal_drainage_area <- function(in_flowdir_path, outdir) {
 #' @details
 #' - Dates are converted from days since 1950-01-01 (NetCDF convention).
 #' - Relies on an external helper function `get_nc_var_present()` 
-#'   
+#'
+#' @export
 get_drn_hydromod <- function(hydromod_path, varname, selected_sims=NULL) {
   nc <- nc_open(hydromod_path) # open netcdf file
   reachID <- ncvar_get(nc, "reachID") # get list of reaches IDs
@@ -2538,6 +3013,7 @@ get_drn_hydromod <- function(hydromod_path, varname, selected_sims=NULL) {
 #'   are heuristic and could bias results.
 #' - Uses campaign/site-specific manual corrections (e.g., GEN04 altitude).
 #'
+#' @export
 read_envdt <- function(in_env_data_path_annika, 
                        in_env_data_path_common) {
   env_dt_annika <- fread(in_env_data_path_annika)
@@ -2782,21 +3258,44 @@ read_envdt <- function(in_env_data_path_annika,
 
 #' Read and clean biodiversity datasets
 #'
-#' Imports multiple biodiversity datasets (diatoms, fungi, macroinvertebrates, 
-#' bacteria) and harmonizes formats, dates, site/campaign IDs, and metadata.
+#' Imports multiple biodiversity datasets (diatoms, fungi, macroinvertebrates, bacteria)
+#' and harmonizes formats, dates, site/campaign IDs, and metadata.
 #'
-#' @param path_list Named list of file paths. Names should correspond to organism types.
-#' @param in_metadata_edna Data.table of eDNA metadata (sample type, site info).
-#' @param include_bacteria Logical. If `FALSE`, bacterial datasets are dropped. Default = TRUE.
+#' @param path_list Named list of file paths. Names should correspond to organism types
+#'   (e.g., "dia_sedi" for diatoms in sediment, "fun_biof" for fungi in biofilm).
+#' @param in_metadata_edna data.table. Metadata containing eDNA sample information with columns:
+#'   - `running_id`: Sample identifier
+#'   - `sample_type`: Type of sample (e.g., "sediment", "biofilm")
+#'   - `habitat`: Habitat type (e.g., "pool", "run")
+#'   - `date`: Sampling date
+#'   - `country`: Country name
+#' @param in_miv_full_dt data.table. Macroinvertebrate dataset with taxonomic information.
+#'   Must contain column `Genus / Higher taxonomic group`.
+#' @param include_bacteria logical. If `FALSE`, bacteria are excluded from the output.
+#'   Default is TRUE.
 #'
-#' @return A named list of cleaned `data.table`s, one per organism group.
+#' @return A named list of cleaned `data.table`s, one per organism group. The list includes:
+#'   - Original datasets with standardized naming and formatting
+#'   - `_nopools` versions of datasets with pool samples removed
+#'   - `miv_nopools_ept` and `miv_nopools_och` datasets with macroinvertebrates split by
+#'     taxonomic groups (EPT: Ephemeroptera, Plecoptera, Trichoptera; OCH: Odonata, Coleoptera,
+#'     Heteroptera)
 #'
 #' @details
-#' - Fills missing sampling dates from eDNA metadata.
-#' - Splits running IDs into site + campaign when needed.
-#' - Removes pool samples (keeps separate `_nopools` tables).
-#' - Corrects a few known typos in dates (e.g., fungi 2012 → 2021).
-#'
+#' The function performs the following cleaning steps:
+#' 1. Reads all input files and assigns organism type
+#' 2. Standardizes  "Czech Republic" to "Czechia"
+#' 3. Converts date strings to Date objects
+#' 4. Creates `running_id` from site and campaign when needed
+#' 5. Removes specific taxa (Hydrachnidae, Nematoda, Nematomorpha) from macroinvertebrate datasets
+#' 6. Splits macroinvertebrates into EPT and OCH taxonomic groups
+#' 7. Fills missing sampling dates from eDNA metadata
+#' 8. Corrects known date errors (e.g., fungi 2012 → 2021)
+#' 9. Adds site and campaign information to bacterial datasets
+#' 10. Removes pool samples (creates `_nopools` versions of datasets)
+#' 11. Optionally excludes bacterial datasets
+#' 
+#' @export
 read_biodt <- function(path_list, in_metadata_edna, 
                        in_miv_full_dt, include_bacteria=T) {
   #Read and name all data tables
@@ -2810,10 +3309,12 @@ read_biodt <- function(path_list, in_metadata_edna,
       out_dt[country == 'Czech Republic', country := 'Czechia']
     }
     
+    # Convert date strings to Date objects
     if (is.character(out_dt$date)) {
       out_dt[, date := as.Date(date, '%d.%m.%Y')]
     }
     
+    # Create running_id from site and campaign when available
     if (all(c('site', 'campaign') %in% names(out_dt))) {
       out_dt[, running_id := paste0(site, '_', campaign)]
     }
@@ -3025,6 +3526,7 @@ comp_richrepl_inner <- function(dt, spcols, beta_div_coef, quant) {
 #' - Regional level: uses `HierAnodiv` to partition gamma diversity 
 #'   into spatial and temporal beta components.
 #'
+#' @export
 calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
   #Get metadata columns (all except species data)
   metacols_sub <- names(in_biodt)[names(in_biodt) %in% in_metacols]
@@ -3221,6 +3723,8 @@ calc_spdiv <- function(in_biodt, in_metacols, level = 'local') {
 #' @note
 #' - Excludes macroinvertebrate subsets (flying/nonflying pools).
 #' - Relies on consistent naming across `in_sprich` and `in_envdt`.
+#' 
+#' @export
 plot_sprich <- function(in_sprich, in_envdt) {
   
   sprich_hydroobs <- merge(
@@ -3295,6 +3799,8 @@ plot_sprich <- function(in_sprich, in_envdt) {
 #'
 #' @return A named character vector of file paths to the subset network GeoPackages,
 #'   named by `country`.
+#'   
+#' @export
 subset_network <- function(in_hydromod_paths_dt, out_dir, overwrite=FALSE) {
   if (!dir.exists(out_dir)) {
     dir.create(out_dir)
@@ -3345,6 +3851,7 @@ subset_network <- function(in_hydromod_paths_dt, out_dir, overwrite=FALSE) {
 #' @param return_path Logical; if TRUE, return file path instead of sf object.
 #'
 #' @return Cleaned river network as an `sf` object or file path (if `return_path=TRUE`).
+#' 
 #' @export
 clean_network <- function(rivnet_path, idcol, 
                           node_clustering_dist,
@@ -3551,6 +4058,7 @@ clean_network <- function(rivnet_path, idcol,
 #' @param rivnet `sf` object of the river network.
 #'
 #' @return A manually corrected `sf` object.
+#' 
 #' @export
 manual_clean_croatia <- function(in_net) {
   # NOTE: Hard-coded UID values here are dataset-specific.
@@ -3600,6 +4108,8 @@ get_startpoint <- function(line) st_coordinates(line)[1, ]
 #'
 #' @return `sf` object with geometries reversed as needed.
 #' @keywords internal
+#' 
+#' @export
 direct_network_inner <- function(segment, in_network, idcol, visited = NULL) {
   # #Reverse upstream segments recursively
   # visited <- NULL
@@ -3639,19 +4149,6 @@ direct_network_inner <- function(segment, in_network, idcol, visited = NULL) {
 }
 
 
-
-#' Direct entire river network
-#'
-#' Orients all river segments in a network to flow downstream, beginning from a
-#' specified outlet segment. The function assumes the network has a single outlet
-#' (a dangling segment at the river mouth).
-#'
-#' @param net `sf` object of river segments.
-#' @param outlet_id Integer; ID of the outlet segment (`UID`).
-#'
-#' @return `sf` object with all segments oriented downstream.
-#' @export
-
 # outlet_uid_list <- list(Croatia = 458,
 #                         Czech = 4,
 #                         Finland = 682,
@@ -3667,6 +4164,17 @@ direct_network_inner <- function(segment, in_network, idcol, visited = NULL) {
 # outdir = file.path(resdir, 'gis')
 # save_gpkg = TRUE
 
+#' Direct entire river network
+#'
+#' Orients all river segments in a network to flow downstream, beginning from a
+#' specified outlet segment. The function assumes the network has a single outlet
+#' (a dangling segment at the river mouth).
+#'
+#' @param net `sf` object of river segments.
+#' @param outlet_id Integer; ID of the outlet segment (`UID`).
+#'
+#' @return `sf` object with all segments oriented downstream.
+#' @export
 direct_network <- function(rivnet_path, idcol,
                            outletid, outdir=NULL, 
                            save_gpkg=FALSE) {
@@ -3749,6 +4257,8 @@ direct_network <- function(rivnet_path, idcol,
 #' @param out_path A character string specifying the full path for the output file.
 #'     If provided, `outdir` is ignored.
 #' @return A character string with the file path to the newly created fixed network shapefile.
+#' 
+#' @export
 fix_complex_confluences <- function(rivnet_path, max_node_shift = 5,
                                     outdir=NULL, out_path=NULL) {
   # Read input network
@@ -3808,6 +4318,8 @@ fix_complex_confluences <- function(rivnet_path, max_node_shift = 5,
 #'     with unassigned Strahler orders at each iteration. Defaults to `FALSE`.
 #' @return A data.table containing the stream network with computed Strahler 
 #'     orders and other topological information.
+#'     
+#' @export
 assign_strahler_order <- function(in_rivnet, idcol, verbose = F) {
   if (is.character(in_rivnet)) {
     rivnet <- st_read(in_rivnet)
@@ -3986,6 +4498,8 @@ remove_pseudonodes <- function(in_net, equal_cols = FALSE,
 #' @param country A character string specifying the country. This is used for a series of hard-coded manual corrections for specific countries.
 #' @param in_ext A character string specifying the file extension for the output file (e.g., 'gpkg').
 #' @return A character string with the file path to the newly created and corrected network shapefile.
+#' 
+#' @export
 reassign_netids <- function(rivnet_path, strahler_dt, 
                             in_reaches_hydromod_dt,
                             in_reaches_attri_dt,
@@ -4407,6 +4921,40 @@ reassign_netids <- function(rivnet_path, strahler_dt,
 # in_hydromod_drn <- tar_read_raw((paste0('hydromod_hist_dt_', in_country, '_', varname)))
 # in_network_idcol = 'cat_cor'
 
+#' Impute hydrological model data for unmodeled network reaches
+#'
+#' Imputes hydrological data (flow status or discharge) for river network reaches
+#' that were not explicitly modeled by using data from the largest upstream segment.
+#'
+#' @param in_network_path character. Path to the river network shapefile or vector file.
+#' @param varname character. The variable name to impute, either 'isflowing' (flow status)
+#'   or 'qsim' (simulated discharge).
+#' @param in_hydromod_drn list. A list containing hydrological model data with two elements:
+#'   - `data_all`: data.table with columns `reach_id`, `date`, and the variable to impute
+#'     (`isflowing` or `qsim`). May also contain topological columns like `to_reach_hydromod`
+#'     and `upstream_area_net`.
+#'   - `dates_format`: data.table with date formatting information including columns:
+#'     `date`, `month`, `hy`, `doy`
+#' @param in_network_idcol character. The column name in the network shapefile that contains
+#'   the reach identifiers. Default is 'cat_cor'.
+#'
+#' @return data.table. A combined data.table containing:
+#'   - The original modeled data
+#'   - Imputed data for unmodeled reaches
+#'   - Additional date formatting columns (`month`, `hy`, `doy`)
+#'
+#' @details
+#' The function handles two types of variables differently:
+#'
+#' For `isflowing` (flow status):
+#' - For each unmodeled reach, finds the largest upstream reach that was modeled
+#' - Imputes the flow status from this upstream reach
+#'
+#' For `qsim` (discharge):
+#' - For each unmodeled reach, sums the discharge from all upstream reaches
+#'   that were modeled and share the same date
+#'
+#' @export
 impute_hydromod <- function(in_network_path,
                             varname,
                             in_hydromod_drn,
@@ -4495,6 +5043,8 @@ impute_hydromod <- function(in_network_path,
 #' @param in_network_idcol A character string specifying the name of the column 
 #'     in the network that serves as a unique identifier for reaches. Defaults to 'cat'.
 #' @return A list or data.table containing the computed hydrological statistics.
+#' 
+#' @export
 compute_hydrostats_drn <- function(in_network_path,
                                    in_sites_dt,
                                    varname,
@@ -4571,6 +5121,8 @@ compute_hydrostats_drn <- function(in_network_path,
 #' @param in_bio_dt A list of data.tables, where each data.table contains 
 #'     biological data and a 'date' column.
 #' @return The `hydrostats` object, filtered to the date range of the biological data.
+#' 
+#' @export
 subset_hydrostats <- function(hydrostats, in_bio_dt) {
   unique_sampling_dates <- lapply(in_bio_dt, function(org_dt) {
     org_dt[, .(date)]
@@ -4602,6 +5154,8 @@ subset_hydrostats <- function(hydrostats, in_bio_dt) {
 #' @param in_env_dt A data.table containing environmental data with site information.
 #' @param in_country A character string specifying the country. Used to apply specific formatting rules.
 #' @return A data.table with cleaned and formatted site information, including site ID, coordinates, and reach ID.
+#' 
+#' @export
 format_site_dt <- function(in_path, in_env_dt, in_country) {
   sites_dt <- fread(in_path) %>%
     setnames(tolower(names(.))) %>%
@@ -4690,6 +5244,8 @@ format_site_dt <- function(in_path, in_env_dt, in_country) {
 #' @param overwrite A logical value. If `TRUE`, existing files will be overwritten. Defaults to `FALSE`.
 #' @return A named vector of character strings, where names are countries and 
 #'     values are the paths to the created GeoPackage files.
+#'     
+#' @export
 create_sites_gpkg <- function(in_hydromod_paths_dt,
                               in_sites_dt,
                               out_dir, 
@@ -4775,6 +5331,8 @@ create_sites_gpkg <- function(in_hydromod_paths_dt,
 #'     in the network to match with the sites. Defaults to 'cat'.
 #' @param overwrite A logical value. If `TRUE`, existing files will be overwritten. Defaults to `FALSE`.
 #' @return A character string with the path to the newly created snapped sites file.
+#' 
+#' @export
 snap_river_sites <- function(in_sites_path, 
                              in_network_path,
                              out_snapped_sites_path=NULL, 
@@ -4889,6 +5447,8 @@ snap_river_sites <- function(in_sites_path,
 #' @param overwrite A logical value. If `TRUE`, existing files will be overwritten. Defaults to `TRUE`.
 #' @return A named list of character strings, where names are countries and 
 #'      values are the paths to the created AMBER points GeoPackage files.
+#'      
+#' @export
 subset_amber <- function(amber_path, in_hydromod_paths_dt, out_dir,
                          overwrite = T) {
   amber_dt <- fread(amber_path)
@@ -4953,6 +5513,8 @@ subset_amber <- function(amber_path, in_hydromod_paths_dt, out_dir,
 #'     for distance calculations. Defaults to `TRUE`.
 #' @param overwrite A logical value. If `TRUE`, existing files will be overwritten. Defaults to `FALSE`.
 #' @return A character string with the path to the newly created snapped sites file.
+#' 
+#' @export
 snap_barrier_sites <- function(in_sites_path, 
                                in_network_path,
                                in_sites_idcol,
@@ -5014,6 +5576,8 @@ snap_barrier_sites <- function(in_sites_path,
 #' @param in_net_shp_path A character string specifying the path to the network shapefile.
 #' @return A list containing the sites status matrix, network structure matrix, 
 #'     river distance matrix, and a reference intermittence data.table.
+#'     
+#' @export
 prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
   net <- in_net_shp_path
   
@@ -5120,7 +5684,8 @@ prepare_data_for_STcon <- function(in_hydromod_drn, in_net_shp_path) {
 #' @param verbose A logical value. If `TRUE`, prints progress messages. Defaults to `FALSE`.
 #' @param ... Additional arguments to be passed to the `compute_stcon` function.
 #' @return A nested list of STcon results, organized by simulation and date.
-
+#' 
+#' @export
 compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL, 
                                   in_dates, window, output,
                                   direction, routing_mode, weighting, rounding_factor,
@@ -5236,6 +5801,8 @@ compute_STcon_rolling <- function(in_preformatted_data, ref = F, in_nsim = NULL,
 #'    Required if `standardize_STcon` is `TRUE`.
 #' @return A list containing a long-format data table of STcon values (`STcon_dt`) 
 #'    and a list of STcon matrices (`STcon_mat`).
+#'    
+#' @export
 postprocess_STcon <- function(in_STcon, in_net_shp_path,
                               standardize_STcon = FALSE, in_STcon_ref = NULL) {
   
@@ -5326,6 +5893,8 @@ postprocess_STcon <- function(in_STcon, in_net_shp_path,
 #'     the STcon values are inverted for plotting (e.g., lower STcon corresponds to a darker color). 
 #'     Defaults to `TRUE`.
 #' @return A `ggplot` object representing the plot.
+#' 
+#' @export
 plot_STcon <- function(in_STcon_list, in_date, in_window=10, 
                        in_net_shp_path, reverse_weighted_stcon = TRUE) {
   
@@ -5368,32 +5937,40 @@ plot_STcon <- function(in_STcon_list, in_date, in_window=10,
 
 #' Calculate distance to nearest active site
 #'
-#' This function calculates the distance to the nearest active site based on 
-#' spatiotemporal graph networks. 
+#' Computes the distance to the nearest active site based on spatiotemporal graph networks.
+#' The function quantifies connectivity distances where each cell value represents a feature
+#' defining connectivity "on" or "off".
 #'
-#' The initial use for this function is to quantify the distance to the nearest
-#' perennial site, but it does not necessarily need to quantify water presence.
-#' Each cell value must represent a feature defining connectivity "on" or "off" 
-#' and that can be transmitted to build meaningful links in a spatiotemporal 
-#' graph.
+#' @param sites_status_matrix matrix. A matrix representing the status of each site (active/inactive).
+#'   The matrix should have:
+#'   - Columns: One for each site
+#'   - Rows: One for each monitored time step (e.g., day)
+#'   - Values: 1 for active/wet, 0 for inactive/dry
+#'   - Warning: No other columns should be included (e.g., date, other IDs)
+#' @param network_structure matrix. A square adjacency matrix representing connections among sites:
+#'   - For a given site (row), each adjacent connected site (column) is given a value of 1, others 0
+#'   - Must have the same number of rows and columns as there are columns in `sites_status_matrix`
+#' @param routing_mode character. The direction for graph connectivity when directed:
+#'   - "in": Routing from upstream (default for river networks)
+#'   - "out": Routing from downstream
+#'   - "all": Consider all connections regardless of direction
+#' @param raw_dist_matrix matrix. A distance matrix representing distances between sites.
+#'   Can be any type of distance (Euclidean, environmental, topographic, etc.) between pairs of sites.
+#'   Must have the same dimensions as `network_structure`.
+#' @param in_net_shp_path character or sf object. Path to the river network shapefile or an sf object
+#'   containing the network data with columns:
+#'   - `from`: From node identifier
+#'   - `to`: To node identifier
+#'   - `to_cat_shp`: Downstream connection identifier (NA for outlets)
+#'   - `UID`: Unique identifier for each site
 #'
-#' Requires: assertthat, data.table, igraph, magrittr, purrr
-#'
-#' @param sites_status_matrix A matrix representing the status of the site (wet/dry, 
-#' active/inactive). 
-#' The dataset should have columns for each site and rows for each monitored day.
-#' Warning: no other columns should be included (e.g., date, other IDs)
-#' @param network_structure A square matrix representing the basic connections among 
-#' sites (adjacency matrix): for a given site (row), each adjacent connected 
-#' site (column) is given a value of 1, all others 0. Must have the same number
-#' of rows and columns as there are columns in sites_status_matrix.
-#' @param routing_mode The direction for graph connectivity when directed, 
-#' can be "in" (routing from upstream if directed), "out" (routing from 
-#' downstream if directed), or "all". See ?igraph or ?igraph::closeness
-#' for a better understanding. 
-#' @param dist_matrix A distance matrix representing the distances between sites.
-#' Can be any type of distance (euclidean, environmental, topographic, ...) 
-#' between pairs of sites
+#' @return data.table. A data.table with columns:
+#'   - `date`: Date of the observation
+#'   - `ID`: Site identifier (integer)
+#'   - `Fdist`: Distance to the nearest active site
+#'   - `UID`: Unique identifier for each site
+#'   
+#' @export
 compute_Fdist <- function(sites_status_matrix, 
                           network_structure, 
                           routing_mode, 
@@ -5471,6 +6048,8 @@ compute_Fdist <- function(sites_status_matrix,
 #' @param in_Fdist_dt A data.table containing Fdist values, with 'date' and 'UID' columns.
 #' @param in_sites_dt A data.table of site information, used to filter for relevant UIDs.
 #' @return A data.table with new columns for the rolling mean and max Fdist values.
+#' 
+#' @export
 compute_Fdist_rolling <- function(in_Fdist_dt, in_sites_dt) {
   
   # define rolling window sizes in days
@@ -5519,6 +6098,51 @@ compute_Fdist_rolling <- function(in_Fdist_dt, in_sites_dt) {
 # min_date = as.Date('1990-01-01')
 # STcon_window=10
 
+#' Compute connectivity metrics for projected hydrological data
+#'
+#' Calculates spatial-temporal connectivity (STcon) and functional distance (Fdist) metrics
+#' for a given hydrological projection, using both directed and undirected network approaches.
+#'
+#' @param hydroproj_path character. Path to the projected hydrological data NetCDF file.
+#' @param hydroref_path character. Path to the reference hydrological data NetCDF file.
+#' @param in_drn_dt data.table. Drainage basin metadata with at least:
+#'   - `catchment`: Catchment identifier
+#'   - `country`: Country name
+#' @param network_ssnready_shp_list list. Named list of river network shapefiles (sf objects)
+#'   indexed by country names.
+#' @param subset_sites logical. If TRUE, results are subset to only include sites from `in_sites_dt`.
+#' @param in_sites_dt data.table. Site information with at least:
+#'   - `reach_id`: River reach identifier
+#'   - `site`: Site identifier
+#' @param STcon_window integer. Time window (in days) for computing rolling STcon metrics.
+#'   Default is 365 (1 year).
+#' @param min_date Date. Minimum date to consider in the analysis. Default is 1990-01-01.
+#'
+#' @return data.table. A combined data.table with connectivity metrics including:
+#'   - `STcon_directed_mean_yr`: Directed spatial-temporal connectivity (mean per year)
+#'   - `STcon_undirected_mean_yr`: Undirected spatial-temporal connectivity (mean per year)
+#'   - `Fdist_undmean_yr`: Functional distance (mean per year)
+#'   - Metadata columns: `UID`, `site`, `cat`, `date`, `year`, `country`, `gcm`, `scenario`
+#'
+#' @details
+#' The function performs the following steps:
+#' 1. Imports and formats hydrological projection data using `import_hydromod_gcm`
+#' 2. Prepares data for connectivity analysis using `prepare_data_for_STcon`
+#' 3. Computes directed STcon metrics for each year using a rolling window approach
+#' 4. Post-processes the directed STcon results
+#' 5. Optionally subsets results to specific sites
+#' 6. Computes undirected STcon metrics similarly
+#' 7. Computes functional distance (Fdist) metrics
+#' 8. Combines all metrics into a single output data.table
+#'
+#' The STcon metrics are computed using:
+#' - Directed connectivity: considers flow direction in the network
+#' - Undirected connectivity: ignores flow direction
+#'
+#' The Fdist metric represents the functional distance between sites based on their
+#' hydrological status and network structure.
+#'
+#' @export
 compute_connectivity_proj <- function(hydroproj_path, hydroref_path, in_drn_dt,
                                       network_ssnready_shp_list,
                                       subset_sites, in_sites_dt, 
@@ -5660,6 +6284,8 @@ compute_connectivity_proj <- function(hydroproj_path, hydroref_path, in_drn_dt,
 #' @param in_site_snapped_gpkg_list A list of paths to snapped site geopackage files.
 #' @param in_country A character string specifying the country to compile data for.
 #' @return A data.table containing all merged hydrological and connectivity metrics.
+#' 
+#' @export
 compile_hydrocon_sites_country <- function(in_hydrostats_sub_comb, 
                                            in_STcon_directed,
                                            in_STcon_undirected, 
@@ -5740,6 +6366,7 @@ compile_hydrocon_sites_country <- function(in_hydrostats_sub_comb,
 #'    connectivity data, typically the output of `compile_hydrocon_sites_country`.
 #' @return A data.table with a single row per site, containing summarized statistics.
 #' 
+#' @export
 summarize_sites_hydrocon <- function(in_hydrocon_compiled
                                      #, date_range
 ) {
@@ -5809,6 +6436,8 @@ summarize_sites_hydrocon <- function(in_hydrocon_compiled
 #' @param in_samp_date_range A vector of two dates defining the specific sampling period.
 #' @param in_country A character string specifying the country for which to summarize data.
 #' @return A data.table containing summarized hydrological statistics for each river reach.
+#' 
+#' @export
 summarize_network_hydrostats <- function(
     in_hydromod,
     in_all_date_range,
@@ -5865,6 +6494,8 @@ summarize_network_hydrostats <- function(
 #' @param in_env_dt A data.table containing raw environmental data with a 'state_of_flow' column.
 #' @return A list containing two summarized data tables 
 #'     (all flows, and only flowing sites) and a ggplot object of the boxplot.
+#' 
+#' @export
 summarize_env <- function(in_env_dt,
                           in_genal_upa) {
   # dynamic_vars <- c(
@@ -5936,15 +6567,21 @@ summarize_env <- function(in_env_dt,
 
 #------ summarize_drn_hydroproj_stats ------------------------------------------------
 # ** 4 simulated variables:
-#   * Discharge [m3/s]: Spatially distributed discharges at the reach level simulated at daily time step (outputs of the hydrological model JAMS-J2000)
-# * Baseflow (groundwater contribution to the discharge) [m3/s]: Spatially distributed baseflows at the reach level simulated at daily time step (outputs of the hydrological model JAMS-J2000)
-# * State of flow (binary variable: 0=dry, 1=flowing): Spatially distributed state of flow at the reach level simulated at daily time step (outputs of the flow intermittence random forest model)
-# * Other hydroclimatic variables (temperature [°C], precipitation [mm], rainfall [mm], snowfall [mm], potential evapotranspiration [mm], actual evapotranspiration [mm], vegetation interception [mm], snow water equivalent [mm], saturation of the soil layer [0-1], saturation of the grounwater layer [0-1]): Spatially aggregated variables at the catchment scale simulated at daily time step (outputs of the hydrological model JAMS-J2000)
+# * Discharge [m3/s]: Spatially distributed discharges at the reach level 
+#   simulated at daily time step (outputs of the hydrological model JAMS-J2000)
+# * Baseflow (groundwater contribution to the discharge) [m3/s]: Spatially 
+#   distributed baseflows at the reach level simulated at daily time step (outputs
+#   of the hydrological model JAMS-J2000)
+# * State of flow (binary variable: 0=dry, 1=flowing): Spatially distributed state
+#   of flow at the reach level simulated at daily time step (outputs of the flow intermittence random forest model)
+# * Other hydroclimatic variables (temperature [°C], precipitation [mm], rainfall 
+#   [mm], snowfall [mm], potential evapotranspiration [mm], actual evapotranspiration [mm], vegetation interception [mm], snow water equivalent [mm], saturation of the soil layer [0-1], saturation of the grounwater layer [0-1]): Spatially aggregated variables at the catchment scale simulated at daily time step (outputs of the hydrological model JAMS-J2000)
 # 
 # ** Characteristics of the projection simulations:
 #   * 3 SSP scenarios: SSP1-2.6, SSP3-7.0, SSP5-8.5
 # * Global Climate Models: gfdl-esm4, ipsl-cm6a-lr, mpi-esm1-2-hr, mri-esm2-0, ukesm1-0-ll
-# * The analogue downscaling method produced 20-members ensembles for each combination of GCMs and SSP scenarios for the 6 studied catchments. As the uncertainty related to the downscaling method is rather negligeable, only the 10th member at the center of the distribution is given in this dataset (see Mimeau et al. 2024).
+# * The analogue downscaling method produced 20-members ensembles for each 
+#   combination of GCMs and SSP scenarios for the 6 studied catchments. As the uncertainty related to the downscaling method is rather negligeable, only the 10th member at the center of the distribution is given in this dataset (see Mimeau et al. 2024).
 # * Reference period: 1985-2014 (data for the reference period are only given for SSP3-7.0)
 # * Projection period: 2015-2100
 # * JAMS-J2000 spatially distributed hydrological model: j2k_Guadiaro
@@ -5983,13 +6620,42 @@ summarize_env <- function(in_env_dt,
 # min_date = as.Date('1990-01-01')
 # include_metadata = FALSE
 
-#' @title Summarize drainage basin hydrological projection stats
-#' @description This function processes a NetCDF file containing hydrological 
-#' projection data. It extracts metadata, reads flow state data, and computes a 
-#' yearly summary of flow duration.
-#' @param hydroproj_path A character string specifying the path to the NetCDF file.
-#' @return A data.table containing summarized flow state statistics by year
-#'  for each reach, along with associated metadata.
+#' Summarize hydrological projection statistics
+#'
+#' Computes annual hydrological statistics from projected hydrological data, including
+#' discharge metrics for flow data and intermittence metrics for flow state data.
+#'
+#' @param hydroproj_path character. Path to the projected hydrological data NetCDF file.
+#' @param hydroref_path character. Path to the reference hydrological data NetCDF file.
+#' @param subset_sites logical. If TRUE (default), subsets the hydrological data to only
+#'   include reaches with sampling sites from `in_sites_dt`.
+#' @param in_sites_dt data.table. Site information with columns:
+#'   - `reach_id`: River reach identifier
+#'   - `country`: Country name
+#'   Only used if `subset_sites` is TRUE.
+#' @param in_drn_dt data.table. Drainage basin metadata with at least:
+#'   - `catchment`: Catchment identifier
+#'   - `country`: Country name
+#' @param min_date Date. Minimum date to include in the analysis. Default is 1990-01-01.
+#' @param include_metadata logical. If TRUE (default), includes metadata columns
+#'   (country, gcm, scenario) in the output.
+#'
+#' @return data.table. A data.table with annual hydrological statistics. For discharge data:
+#'   - `meanQ`: Mean annual discharge
+#'   - `meanQ3650past`: 10-year rolling mean of annual discharge
+#'   For flow state data:
+#'   - `DurD_yr`: Proportion of days with no flow
+#'   - `FreD_yr`: Frequency of no-flow events (unique no-flow periods per year)
+#'   - `FstDrE`: Julian day of first drying event
+#'   - `meanConD_yr`: Mean duration of no-flow events
+#'   - `FreD3650past`: Frequency of no-flow events in past 10 yrs
+#'   - `DurD_CV[10,30]yrpast`: Coefficient of variation of no-flow duration
+#'   - `meanConD_CV[10,30]yrpast`: Coefficient of variation of mean no-flow event duration
+#'   - `FstDrE_SD[10,30]yrpast`: Standard deviation of first drying event day
+#'   - ECDF columns for `DurD_yr` and `FreD_yr`
+#'   All results are filtered to include only years >= `min_date`.
+#'
+#' @export
 summarize_drn_hydroproj_stats <- function(hydroproj_path,
                                           hydroref_path,
                                           subset_sites=TRUE,
@@ -5998,6 +6664,7 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path,
                                           min_date = as.Date('1990-01-01'),
                                           include_metadata = TRUE) {
   
+  # Import and format hydrological projection data
   hydromod_preformatted <- import_hydromod_gcm(hydroproj_path, 
                                                hydroref_path, in_drn_dt) 
   
@@ -6025,6 +6692,7 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path,
   if (metadata_dt$varname == 'discharge') {
     metadata_dt[varname=='discharge', varname:='qsim']
     
+    # Calculate annual mean discharge and 10-year rolling mean
     stats_dt_yr <- hydro_dt[, year := year(date)] %>%
       .[(date >= min_date - lubridate::years(30)) 
         & (date < as.Date('2100-01-01')),
@@ -6038,8 +6706,10 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path,
   
   # compute yearly drying duration stats ---------------------------------------
   if (metadata_dt$varname == 'flowstate') {
+    # Standardize variable name
     metadata_dt[varname=='flowstate', varname:='isflowing']
     
+    # Filter data to the analysis period
     stats_dt <- hydro_dt[(date >= min_date-lubridate::years(30)) &
                            (date < as.Date('2100-01-01')),]
     stats_dt[, `:=`(doy  = as.numeric(format(date,"%j")),
@@ -6141,13 +6811,29 @@ summarize_drn_hydroproj_stats <- function(hydroproj_path,
 # in_env_dt <- tar_read(env_dt)
 # in_genal_upa = tar_read(genal_sites_upa_dt)
 
-#' @title Merge all variables for sites (campaign-level)
-#' @description Merges biodiversity, hydrological, and environmental data
-#'              at the individual campaign × site × organism level.
-#' @param in_spdiv_local A biodiversity data.table.
-#' @param in_hydrocon_compiled Hydrological/connectivity data by date & site.
-#' @param in_env_dt Environmental data at sampling times.
-#' @param in_genal_upa Upstream area data for the Genal basin.
+#' Merge all variables for sites (campaign-level)
+#'
+#' Merges biodiversity, hydrological, and environmental data at the individual
+#' campaign × site × organism level into a comprehensive data.table.
+#'
+#' @param in_spdiv_local data.table. Biodiversity data 
+#' @param in_spdiv_drn data.table. Optional additional biodiversity data at the drainage
+#'   basin level to merge with `in_spdiv_local`. Default is NULL.
+#' @param in_hydrocon_compiled data.table. Hydrological/connectivity data w
+#' @param in_env_dt data.table. Environmental data at sampling times 
+#' @param in_genal_upa data.table. Upstream area data for the Genal basin
+#' @return list. A list containing:
+#'   - `dt`: Merged data.table with all variables
+#'   - `dry_only_sites`: Vector of site identifiers that were always dry or standing pools
+#'   - `cols`: List of column categories:
+#'     - `div`: Biodiversity columns
+#'     - `hydro_con`: Hydrological connectivity columns
+#'     - `env`: Environmental columns
+#'     - `group_cols`: Grouping columns
+#'     - `exclude_cols`: Columns to exclude from analysis
+#'     - `env_num`: Numeric environmental columns
+#'
+#' @export
 merge_allvars_sites <- function(in_spdiv_local, 
                                 in_spdiv_drn=NULL,
                                 in_hydrocon_compiled,
@@ -6252,6 +6938,8 @@ merge_allvars_sites <- function(in_spdiv_local,
 #' @return A list containing:
 #'   \item{dt_summarized}{Merged site-level summarized data}
 #'   \item{cols}{List of relevant column vectors for summarized merging}
+#'
+#' @export
 merge_allvars_summarized <- function(in_spdiv_local,
                                      in_hydrocon_summarized,
                                      in_env_summarized,
@@ -6310,6 +6998,25 @@ merge_allvars_summarized <- function(in_spdiv_local,
 }
 
 #------ create_hydro_vars_dt ---------------------------------------------------      
+#' Create hydrological variables data.table
+#'
+#' Creates a reference data.table containing hydrological variable metadata including
+#' root variable names, human-readable labels, classification categories, and metric numbers.
+#'
+#' @param in_hydro_vars_forssn character. Vector of hydrological variable names to be included
+#'   in the output data.table. These will be processed to extract root variable names.
+#'
+#' @return data.table. A data.table with columns:
+#'   - `hydro_var`: Original variable name (from input)
+#'   - `hydro_var_root`: Root variable name with time window suffixes removed
+#'   - `window_d`: Factor of extracted window durations (if applicable)
+#'   - `hydro_label`: Human-readable label for the variable
+#'   - `hydro_class`: Classification category for the variable (factor with levels:
+#'     "Drying duration", "Drying frequency", "Drying timing", "Drying unpredictability",
+#'     "Flow magnitude", "Connectivity")
+#'   - `metric_num`: Numeric identifier for the metric within its class
+#'
+#' @export
 create_hydro_vars_dt <- function(in_hydro_vars_forssn) {
   dt <- data.table(hydro_var=in_hydro_vars_forssn)
   
@@ -6380,6 +7087,8 @@ create_hydro_vars_dt <- function(in_hydro_vars_forssn) {
 #'     class and country.
 #' @param in_allvars_sites A list containing the merged data tables, specifically `in_allvars_sites$dt`.
 #' @return A list containing two ggplot objects: `richness` and `site_gamma`.
+#' 
+#' @export
 plot_edna_biof_vs_sedi <- function(in_allvars_sites) {
   allvars_edna <- setDT(in_allvars_sites$dt)[organism_class %in% c('dia', 'fun', 'bac'),] 
   allvars_edna[, edna_source := gsub('^[a-z]+_', '', organism)]
@@ -6437,6 +7146,8 @@ plot_edna_biof_vs_sedi <- function(in_allvars_sites) {
 #'     of column names (`cols`) categorized by their origin.
 #' @return A list containing five correlation matrices for different variable 
 #'     combinations and groupings, plus the original column list.
+#' 
+#' @export
 compute_cor_matrix <- function(in_allvars_sites) {
   dt <- in_allvars_sites$dt
   cols_by_origin <- in_allvars_sites$cols
@@ -6504,6 +7215,8 @@ compute_cor_matrix <- function(in_allvars_sites) {
 #'      hydrological, environmental, and diversity metrics at a broader scale.
 #' @param in_allvars_summarized A list containing the summarized data table (`dt_summarized`) and column list (`cols`).
 #' @return A list of correlation matrices for summarized data.
+#' 
+#' @export
 compute_cor_matrix_summarized <- function(in_allvars_summarized) {
   dt <- in_allvars_summarized$dt
   cols_by_origin <- in_allvars_summarized$cols
@@ -6569,6 +7282,10 @@ compute_cor_matrix_summarized <- function(in_allvars_summarized) {
 #' @param in_cor_matrices A list of correlation matrices, typically the output 
 #'    of `compute_cor_matrix` or `compute_cor_matrix_summarized`.
 #' @param p_threshold A numeric value to filter correlations based on their p-value.
+#' 
+#' @return ggplot of heatmap
+#' 
+#' @export
 plot_cor_heatmaps <- function(in_cor_matrices,
                               p_threshold = 1) {
   
@@ -6754,9 +7471,6 @@ plot_cor_heatmaps <- function(in_cor_matrices,
 }
 
 
-
-
-
 #------ ordinate_local_env ----------------------------------------------------
 # autoplot(local_env_pca$miv_nopools$pca, data = local_env_pca$miv_nopools$trans_dt, 
 #          loadings = TRUE, loadings.colour = 'blue',
@@ -6772,6 +7486,8 @@ plot_cor_heatmaps <- function(in_cor_matrices,
 #' @param in_allvars_dt A data table containing environmental data, which may be summarized by site.
 #' @return A list containing the PCA results for macroinvertebrates and eDNA groups, 
 #'     as well as a combined data table with the new PCA axes.
+#'
+#' @export
 ordinate_local_env <- function(in_allvars_dt) {
   #1. Compute PCA for miv_nopools ----------------------------------------------
   # define environmental columns for macroinvertebrates
@@ -6907,6 +7623,8 @@ ordinate_local_env <- function(in_allvars_dt) {
 #' @param in_network_path A list of file paths to the river network shapefiles, separated by country.
 #' @return A list containing two spatial objects: one for historical prediction 
 #'      points and one for projected prediction points.
+#'
+#' @export
 create_ssn_pred_pts <- function(in_network_path) {
   # Process the river network data
   # load and combine all country-specific river network shapefiles
@@ -6971,6 +7689,8 @@ create_ssn_pred_pts <- function(in_network_path) {
 #' @param out_ssn_name The base name for the output SSN file.
 #' @param overwrite A logical value indicating whether to overwrite existing files.
 #' @return A list of SSN objects, one for each organism.
+#' 
+#' @export
 create_ssn_europe <- function(in_network_path,
                               in_sites_path,
                               in_allvars_dt,
@@ -7214,6 +7934,8 @@ create_ssn_europe <- function(in_network_path,
 #' @param ptcolor_col An optional column for coloring points.
 #' @param ptcolor_lims Optional limits for the point color scale.
 #' @return A ggplot object representing the SSN map.
+#' 
+#' @export
 map_ssn_util <- function(in_ssn, 
                          in_edges,
                          linewidth_col='qsim_avg',                                
@@ -7358,6 +8080,8 @@ map_ssn_util <- function(in_ssn,
 #' @param in_edges The river network edges (an `sf` object).
 #' @param in_pts The observation points (an `sf` object).
 #' @return A list with `xlim` and `ylim` vectors for the new square plot limits.
+#' 
+#' @export
 pad_ssn_map <- function(in_edges=NULL, in_pts=NULL) {
   #Get bbox for edges + obs
   bb_edges <- if (!is.null(in_edges)) {sf::st_bbox(in_edges)}
@@ -7426,6 +8150,8 @@ pad_ssn_map <- function(in_edges=NULL, in_pts=NULL) {
 #' @param ptcolor_col An optional column for coloring points.
 #' @param page_title An overall title for the plot.
 #' @return A patchwork object containing the faceted maps.
+#' 
+#' @export
 map_ssn_facets <- function(in_ssn, 
                            facet_col,
                            in_pts = NULL,
@@ -7527,6 +8253,8 @@ map_ssn_facets <- function(in_ssn,
 #' @param in_organism_dt A data table mapping organism codes to their labels.
 #' @param verbose A logical value to indicate whether to print progress messages.
 #' @return A named list of ggplot objects, combining maps of diversity and physical variables.
+#' 
+#' @export
 map_ssn_summarized <- function(in_ssn_summarized,
                                in_allvars_summarized,
                                in_organism_dt,
@@ -7590,6 +8318,8 @@ map_ssn_summarized <- function(in_ssn_summarized,
 #' @param in_ssn_summarized_maps A named list of ggplot objects to be saved.
 #' @param out_dir The output directory for the saved files.
 #' @return A list of file paths to the saved PNG files.
+#' 
+#' @export
 save_ssn_summarized_maps <- function(in_ssn_summarized_maps,
                                      out_dir) {
   
@@ -7639,6 +8369,8 @@ save_ssn_summarized_maps <- function(in_ssn_summarized_maps,
 #' @param write_plots Logical: whether to save the plots as PNG files.
 #' @param out_dir Output directory for saved plots.
 #' @return A list of ggplot objects: hydrograph, hydrograph with sampling dates, and alpha diversity plots per organism.
+#' 
+#' @export
 plot_drn_hydrodiv <- function(in_hydrocon_compiled,
                               in_sites_dt,
                               in_allvars_dt,
@@ -7793,6 +8525,8 @@ plot_drn_hydrodiv <- function(in_hydrocon_compiled,
 #' @param in_allvars_sites A list containing a data.table of all merged variables.
 #' @param alpha_var Character string: name of the alpha diversity column to use (e.g., "richness", "shannon").
 #' @return A list of ggplot objects showing the relationships for different organism groups.
+#' 
+#' @export
 check_cor_div_habvol <- function(in_allvars_sites, alpha_var = "richness") {
   
   dt <- copy(in_allvars_sites$dt)
@@ -7874,6 +8608,31 @@ check_cor_div_habvol <- function(in_allvars_sites, alpha_var = "richness") {
 # in_drn_dt <- drn_dt_format
 # in_organism_dt = tar_read(organism_dt)
 
+#' Plot flow state vs. richness relationship
+#'
+#' Creates boxplots showing the relationship between hydrological state (dry, flowing, pooled)
+#' and relative richness (richness at sampling time divided by mean annual richness) for
+#' various organism groups across different countries.
+#'
+#' @param in_allvars_sites list. A list containing a data.table `dt` with columns:
+#'   - `richness`: Richness value at sampling time
+#'   - `mean_richness`: Mean annual richness
+#'   - `stream_type`: Stream type ('TR' for target streams)
+#'   - `organism`: Organism group (e.g., 'bac_biof', 'fun_sedi')
+#'   - `state_of_flow`: Hydrological state ('dry', 'flowing', 'pooled')
+#'   - `country`: Country name
+#' @param in_drn_dt data.table. Drainage basin metadata with at least:
+#'   - `country`: Country name
+#'   - Other columns to merge with the input data
+#' @param in_organism_dt data.table. Organism metadata with columns:
+#'   - `organism`: Organism group identifier
+#'   - `organism_class`: Organism class (e.g., 'Microbes')
+#'   - `organism_sub`: Organism subclass (e.g., 'Biofilm', 'Sediment')
+#' @param out_dir character. Output directory path where the plot will be saved.
+#'
+#' @return ggplot. The generated boxplot object.
+#'
+#' @export
 plot_flow_state_richness <- function(in_allvars_sites,
                                      in_drn_dt, in_organism_dt, out_dir) {
   tr_microbes_dt <- in_allvars_sites$dt[
@@ -7947,6 +8706,8 @@ plot_flow_state_richness <- function(in_allvars_sites,
 #' @param write_plots Logical: whether to save the plots as PNG files.
 #' @param out_dir Output directory for saved plots.
 #' @return A list of ggplot objects: one for basin area and one for discharge.
+#' 
+#' @export
 plot_areadiv_scatter <- function(in_dt,
                                  in_organism_dt,
                                  alpha_var = "mean_richness",
@@ -8017,6 +8778,23 @@ plot_areadiv_scatter <- function(in_dt,
 #------ plot_PrdD --------------------------------------------------------------
 # in_allvars_sites <- tar_read(allvars_sites)
 
+#' Plot richness vs. days since last drying event
+#'
+#' Creates scatterplots showing the relationship between the number of days since the last
+#' drying event (PrdD) and richness for different organism groups, with optional standardization.
+#'
+#' @param in_allvars_sites list. A list containing a data.table `dt` with columns:
+#'   - `PrdD`: Days since last drying event (numeric or character)
+#'   - `richness`: Richness value
+#'   - `country`: Country name
+#'   - `organism`: Organism group
+#'   - `site`: Site identifier
+#'
+#' @return list. A list containing two ggplot objects:
+#'   1. Scatterplot of raw richness vs. PrdD
+#'   2. Scatterplot of standardized richness vs. PrdD
+#'  
+#'  @export
 plot_PrdD <- function(in_allvars_sites) {
   ggplot(allvars_sites$dt, aes(x=as.numeric(PrdD), y=richness, color=country)) + 
     geom_point(alpha=0.2) + 
@@ -8056,6 +8834,8 @@ plot_PrdD <- function(in_allvars_sites) {
 #' @param plot_name_suffix A string to append to the output filename.
 #' @param out_dir The output directory for the saved plot.
 #' @return A ggplot object of the correlation plot.
+#' 
+#' @export
 plot_cor_hydrowindow <-  function(in_cor_dt, temporal_var_substr, response_var_list,
                                   colors_list, save_plot=T, plot_name_suffix="", out_dir) {
   
@@ -8129,6 +8909,8 @@ plot_cor_hydrowindow <-  function(in_cor_dt, temporal_var_substr, response_var_l
 #' @param plot_name_suffix A string to append to the output filename.
 #' @param out_dir The output directory for the saved plot.
 #' @return A ggplot object of the scatter plot with linear model fits.
+#' 
+#' @export
 plot_scatter_lm <-  function(in_allvars_sites, 
                              in_organism_dt,
                              temporal_var_substr, 
@@ -8181,32 +8963,60 @@ plot_scatter_lm <-  function(in_allvars_sites,
 # in_ssn <- in_ssn_eu$miv_nopools$ssn
 # tar_load(ssn_covtypes)
 
-#' @title Quick SSN model fitting
-#' @description A wrapper function to fit linear or generalized linear 
-#' spatial stream network (SSN) models with different covariance structures.
-#' @param in_ssn A spatial stream network (SSN) object.
-#' @param in_formula A formula object or string for the model.
-#' @param ssn_covtypes A data table specifying the covariance types 
-#'      (functional form of the'taildown', 'tailup', 'euclid' components).
-#' @param partition_formula A formula object for a partition factor (e.g., a sampling campaign).
+#' Quick SSN model fitting
+#'
+#' A wrapper function to fit linear or generalized linear spatial stream network (SSN) models
+#' with different covariance structures.
+#'
+#' @param in_ssn A spatial stream network (SSN) object created by the SSN2 package.
+#' @param in_formula A formula object or character string specifying the model formula.
+#'   For example: "y ~ x1 + x2"
+#' @param ssn_covtypes A data.table specifying the covariance types for the SSN model components.
+#'   Must contain columns:
+#'   - `down`: Character vector of tail-down covariance types to test
+#'   - `up`: Character vector of tail-up covariance types to test
+#'   - `euc`: Character vector of Euclidean covariance types to test
+#'   - `label`: Character vector of labels for each combination (used to name output list elements)
+#' @param partition_formula A formula object for a partition factor (e.g., sampling campaign).
+#'   Default is `~ as.factor(campaign)`.
 #' @param random_formula A formula object for random effects (e.g., country).
-#' @param family A string for the `glm` family, or 'Gaussian' for `lm`.
-#' @param estmethod A string for the estimation method (e.g., 'ml' for Maximum Likelihood).
-#' @return A named list of fitted SSN model objects, or an object indicating failure.
+#'   Default is `~ country`.
+#' @param family A string or family object for the `glm` family. Use "Gaussian" for `lm`.
+#'   Default is "Gaussian".
+#' @param estmethod A character string for the estimation method (e.g., 'ml' for Maximum Likelihood,
+#'   'reml' for Restricted Maximum Likelihood). Default is 'ml'.
+#'
+#' @return A named list of fitted SSN model objects (either `ssn_lm` or `ssn_glm` objects),
+#'   or objects indicating failure for combinations that did not converge.
+#'   Failed models contain:
+#'   - `fit_status`: "failed"
+#'   - `error_message`: The error message
+#'   - `label`: The model label
+#'   - `taildown`, `tailup`, `euc`: The covariance types used
+#'
+#' @details
+#' The function:
+#' 1. Creates distance matrices for the SSN object using `SSN2::ssn_create_distmat`
+#' 2. Fits models for each combination of covariance structures specified in `ssn_covtypes`
+#' 3. For Gaussian family, uses `ssn_lm`; for other families, uses `ssn_glm`
+#' 4. Returns a named list of model objects, with one element for each covariance combination
+#' 
+#' @export
 quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,  
                       partition_formula = as.formula("~ as.factor(campaign)"),
                       random_formula = as.formula("~ country"),
                       family = "Gaussian", # arguments are passed to and evaluated by ssn_lm()
                       estmethod = "ml") {
-  # 1. Create distance matrices for the SSN object
+  # Create distance matrices for the SSN object
   SSN2::ssn_create_distmat(in_ssn)
   
-  # 2. Fit models for each combination of covariance structures
+  # Fit models for each combination of covariance structures
   ssn_list <- mapply(function(down_type, up_type, euc_type) {
     label <- paste(down_type, up_type, euc_type, sep = "_")
     message("Fitting model: ", label)
     
     result <- tryCatch({
+      # Fit linear SSN model for Gaussian family
       if (family %in% c("Gaussian", "gaussian", gaussian())) {
         fit <- ssn_lm(
           formula = as.formula(in_formula),
@@ -8219,6 +9029,7 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
           random = random_formula,
           estmethod = estmethod
         )
+      # Fit generalized linear SSN model for other families
       } else {
         fit <- ssn_glm(
           formula = as.formula(in_formula),
@@ -8255,7 +9066,7 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
   up_type = ssn_covtypes$up,
   euc_type = ssn_covtypes$euc,
   SIMPLIFY = FALSE) %>%
-    setNames(ssn_covtypes$label)
+    setNames(ssn_covtypes$label) # Name the list elements using the labels from ssn_covtypes
   
   return(ssn_list)
 }
@@ -8292,22 +9103,64 @@ quick_ssn <- function(in_ssn, in_formula, ssn_covtypes,
 # estmethod='ml'
 # family= "Gaussian"
 
-
-#' @title Model SSN with hydrological variables across time windows
-#' @description Automates the process of fitting SSN models to test the effect 
-#'      of a specific hydrological variable on a biological response variable, 
-#'      collecting model summaries for comparison.
-#' @param in_ssn A list of SSN objects, typically one for each organism.
-#' @param organism A string specifying the organism to model.
-#' @param formula_root A string of fixed effects to be included in all models.
-#' @param hydro_var A string specifying the hydrological variable to test.
-#' @param response_var A string specifying the biological response variable.
-#' @param ssn_covtypes A data table of covariance types for model fitting.
-#' @param partition_formula A formula object for a partition factor.
-#' @param random_formula A formula object for random effects.
-#' @param family A string for the `glm` family, or 'Gaussian' for `lm`.
-#' @param estmethod A string for the estimation method.
-#' @return A list containing the fitted SSN models and a data table of their summary statistics.
+#' Model SSN with hydrological variables across time windows
+#'
+#' Automates the process of fitting Spatial Stream Network (SSN) models to test the effect
+#' of a specific hydrological variable on a biological response variable, collecting model
+#' summaries for comparison.
+#'
+#' @param in_ssn A named list of SSN objects, one for each organism group.
+#'   Each element should contain an `ssn` component with the SSN object.
+#' @param organism A character string specifying which organism's SSN object to use from `in_ssn`.
+#' @param formula_root A character string of fixed effects to be included in all models.
+#' @param hydro_var A character string specifying the hydrological variable to test.
+#'   If NULL, only the fixed effects in `formula_root` are used.
+#' @param response_var A character string specifying the biological response variable.
+#' @param ssn_covtypes A data.table specifying the covariance types for model fitting.
+#'   Must contain columns: `down`, `up`, `euc`, and `label`.
+#' @param partition_formula A formula object for a partition factor (e.g., sampling campaign).
+#'   Default is `~ as.factor(campaign)`.
+#' @param random_formula A formula object for random effects (e.g., country).
+#'   Default is `~ country`.
+#' @param family A character string for the `glm` family, or 'Gaussian' for `lm`.
+#'   Default is "Gaussian".
+#' @param estmethod A character string for the estimation method (e.g., 'ml' or 'reml').
+#'   Default is 'ml'.
+#' @param standardize_hydro_var logical. If TRUE (default), standardizes the hydrological variable
+#'   before including it in the model. The standardized variable is added to the SSN object with
+#'   a '_scaled' suffix.
+#' @param test_parabolic logical. If TRUE, includes a parabolic term for the hydrological variable
+#'   in the model formula. Default is FALSE.
+#' @param include_state_of_flow logical. If TRUE, includes the `state_of_flow` variable in the
+#'   model formula. Default is FALSE.
+#' @param include_seasonality logical. If TRUE, includes day of year (`doy`) and its square in the
+#'   model formula to account for seasonality. Default is FALSE.
+#'
+#' @return A list containing:
+#'   - `ssn_list`: A named list of fitted SSN model objects (or failure objects)
+#'   - `ssn_glance`: A data.table of model summary statistics with columns:
+#'     - `covtypes`: Covariance type combination label
+#'     - `fit_status`: "ok" or "failed"
+#'     - `error_message`: Error message for failed models (NA for successful models)
+#'     - `AICc`: Corrected Akaike Information Criterion
+#'     - Additional model metrics from `SSN2::glance`
+#'     - Metadata: `organism`, `response_var`, `hydro_var`, `family`
+#'
+#' @details
+#' The function:
+#' 1. Optionally standardizes the hydrological variable
+#' 2. Constructs the full model formula based on the provided components:
+#'    - Main effect of hydrological variable
+#'    - Interaction between hydrological variable and country
+#'    - Fixed effects from `formula_root`
+#'    - Optional parabolic term for hydrological variable
+#'    - Optional seasonality terms (doy and doy^2)
+#'    - Optional state_of_flow term
+#' 3. Fits SSN models for each covariance type combination using `quick_ssn`
+#' 4. Collects model summary statistics using `SSN2::glance`
+#' 5. Returns both the fitted models and their summaries
+#'
+#' @export
 model_ssn_hydrowindow <- function(in_ssn, organism, formula_root, 
                                   hydro_var, response_var, ssn_covtypes,
                                   partition_formula = as.formula("~ as.factor(campaign)"),
@@ -8414,6 +9267,8 @@ model_ssn_hydrowindow <- function(in_ssn, organism, formula_root,
 #' @param in_cor_dt A data.table containing correlation matrices, including `correlation` and `p_value`.
 #' @param color_list A named vector of colors for plotting each country.
 #' @return A ggplot object of the comparison plot.
+#' 
+#' @export
 plot_hydro_comparison <- function(var_substr, in_cor_dt, color_list) {
   
   sub_dt_compare <- in_cor_dt[grep(var_substr, variable2),] %>%
@@ -8449,6 +9304,7 @@ plot_hydro_comparison <- function(var_substr, in_cor_dt, color_list) {
 #' @param in_ssnmodels A list of fitted SSN model objects, typically from `model_ssn_hydrowindow`.
 #' @return A list containing a data table of covariance statistics, a subset of
 #'      the best covariance types, and a boxplot.
+#' @export
 select_ssn_covariance <- function(in_ssnmodels) {
   # Combine the 'ssn_glance' data tables from all fitted models into a single data table
   ssn_glance_bind <- lapply(in_ssnmodels, `[[`, "ssn_glance") %>%
@@ -8516,20 +9372,45 @@ select_ssn_covariance <- function(in_ssnmodels) {
 #                                            in_response_var, '_', in_organism))
 # in_hydro_vars_dt <- tar_read(hydro_vars_dt)
 
-#' Prepare performance table summarizing hydrological window SSN models
+
+#' Prepare hydrological window performance table
 #'
-#' Extracts `glance` tables and fitted model objects, keeps only the selected 
-#' covariance type, and attaches hydro variable roots and labels.
+#' Processes SSN model results to create a performance table comparing different
+#' hydrological variables and model configurations for a specific organism.
 #'
-#' @param in_ssnmodels A `data.table` with columns `organism`, `hydro_var`, `response_var`,
-#'   and `ssn_div_models` (list-column of fitted models).
-#' @param in_organism Character. Organism identifier (e.g. `"miv_nopools"`).
-#' @param in_covtype_selected A list returned by `select_ssn_covariance()` containing
-#'   a `dt_sub` element with best covariance type per organism.
-#' @param in_hydro_vars_dt A `data.table` with hydro variable metadata including
-#'   columns `hydro_var_root` and `hydro_label`.
+#' @param in_ssnmodels data.table. A data.table containing SSN model results with columns:
+#'   - `organism`: Organism identifier
+#'   - `ssn_div_models`: List column containing model lists (output from `model_ssn_hydrowindow`)
+#'   - `hydro_var`: Hydrological variable name
+#'   - `response_var`: Response variable name
+#'   - `test_parabolic`: Logical indicating if parabolic term was tested
+#' @param in_organism character. The organism identifier to filter and analyze.
+#' @param in_covtype_selected data.table. A data.table containing selected covariance types with:
+#'   - `organism`: Organism identifier
+#'   - `covtypes`: Selected covariance type for each organism
+#' @param in_hydro_vars_dt data.table. Reference data.table with hydrological variable metadata
+#'   containing at least `hydro_var`, `hydro_var_root`, and `hydro_label`.
 #'
-#' @return A `data.table` with model performance information (AICc, variance components, etc.).
+#' @return list. A list containing two data.tables:
+#'   - `all`: Complete performance table with all models and metrics
+#'   - `best`: Subset of `all` containing only the best model (lowest AICc) for each hydro_var_root
+#'
+#' @details
+#' The function:
+#' 1. Extracts the selected covariance type for the specified organism
+#' 2. Unlists nested columns in the input data.table
+#' 3. Combines model glance tables with model objects
+#' 4. Filters to only include models with the selected covariance type
+#' 5. Adds root variable names and human-readable labels
+#' 6. Selects the best model (lowest AICc) for each hydrological variable root
+#'
+#' The resulting tables include:
+#' - Model performance metrics from `SSN2::glance`
+#' - Hydrological variable information
+#' - Covariance type information
+#' - Whether parabolic terms were tested
+#' - Human-readable labels for hydrological variables
+#' 
 #' @export
 prepare_hydrowindow_perf_table <- function(in_ssnmodels, in_organism, 
                                            in_covtype_selected, in_hydro_vars_dt) {
@@ -8597,17 +9478,38 @@ prepare_hydrowindow_perf_table <- function(in_ssnmodels, in_organism,
 # nrow_pag = 2
 # ncol_pag = 3
 
-#' Extract and plot SSN variance decomposition 
+#' Get hydrological window variance decomposition
 #'
-#' Computes variance components from selected SSN models, and Creates stacked 
-#' barplots of variance components across hydrological windows.
+#' Computes and visualizes variance decomposition from SSN models across different
+#' hydrological variables and temporal windows.
 #'
-#' @param perf_dt A `data.table` returned by [prepare_hydrowindow_perf_table()].
+#' @param perf_dt data.table. Performance data.table containing model results with columns:
+#'   - `response_var`: Response variable name
+#'   - `hydro_var`: Hydrological variable name
+#'   - `covtypes`: Covariance type combination
+#'   - `hydro_label`: Human-readable hydrological variable label
+#'   - `window_d`: Window duration factor
+#'   - `test_parabolic`: Whether parabolic term was tested
+#'   - `mod`: List column containing fitted SSN model objects
+#' @param nrow_pag integer. Number of rows per page in the faceted plots. Default is 2.
+#' @param ncol_pag integer. Number of columns per page in the faceted plots. Default is 3.
 #'
-#' @return A list containing dt: `data.table` of variance components with labels
-#'  and colors for plotting, and plots: a list of stacked barcharts
+#' @return list. A list containing:
+#'   - `dt`: data.table with variance decomposition results
+#'   - `plots`: list of ggplot objects showing variance decomposition for each page
+#'
+#' @details
+#' The function:
+#' 1. Extracts variance components from each model using `SSN2::varcomp`
+#' 2. Maps technical variance component names to human-readable labels
+#' 3. Assigns colors to each variance component type
+#' 4. Creates stacked bar plots showing the proportion of variance explained by each component
+#' 5. Organizes plots into pages with specified rows and columns
+#' 6. Includes a special plot for null models (basin area only)
+#'
 #' @export
 get_hydrowindow_varcomp <- function(perf_dt, nrow_pag = 2, ncol_pag = 3) {
+  # Define human-readable labels for variance components
   varcomp_labels <- c(
     "Remaining variance (nugget)",
     "Spatially dependent variance - euclidean",
@@ -8617,6 +9519,7 @@ get_hydrowindow_varcomp <- function(perf_dt, nrow_pag = 2, ncol_pag = 3) {
     "Fixed effects pseudo-R2"
   )
   
+  # Extract variance components from models
   vc_dt <- perf_dt[
     , {
       if (inherits(mod[[1]], c("ssn_lm", "ssn_glm"))) { #To deal with models that did not work
@@ -8626,7 +9529,7 @@ get_hydrowindow_varcomp <- function(perf_dt, nrow_pag = 2, ncol_pag = 3) {
     by = .(response_var, hydro_var, covtypes, 
            hydro_label, window_d, test_parabolic)
   ] %>%
-    merge(
+    merge(  # Merge with variance component metadata
       data.table(
         varcomp = c("nugget","euclid_de","taildown_de",
                     "tailup_de","1 | country","Covariates (PR-sq)"),
@@ -8639,7 +9542,7 @@ get_hydrowindow_varcomp <- function(perf_dt, nrow_pag = 2, ncol_pag = 3) {
       by = "varcomp"
     )
   
-  #Make plots
+  # Prepare data for plotting
   varcomp_subdt <- vc_dt[proportion > 0 & hydro_label != "Null", ]
   varcomp_null <- vc_dt[proportion > 0 & hydro_label == "Null", ][
     , hydro_label := "Null: only basin area"]
@@ -8716,18 +9619,47 @@ get_hydrowindow_varcomp <- function(perf_dt, nrow_pag = 2, ncol_pag = 3) {
 
 #' Extract and plot marginal slopes (EMTrends) from best models
 #'
-#' Runs [get_ssn_emtrends()] for all predictors in the best models.
+#' Runs `get_ssn_emtrends()` for all predictors in the best models to compute and visualize
+#' estimated marginal trends (slopes) for hydrological variables.
 #'
-#' @param best_dt A `data.table` ($best) returned by [prepare_hydrowindow_perf_table()].
-#' @param in_hydro_vars_dt Metadata table with hydro variable names and labels.
+#' @param perf_dt data.table. A data.table (typically the `best` element) returned by
+#'   `prepare_hydrowindow_perf_table()`. Must contain columns:
+#'   - `hydro_var`: Hydrological variable name
+#'   - `mod`: List column containing fitted SSN model objects
+#'   - `test_parabolic`: Logical indicating if parabolic term was tested
+#' @param in_hydro_vars_dt data.table. Metadata table with hydrological variable information,
+#'   containing at least `hydro_var`, `hydro_var_root`, and `hydro_label`.
+#' @param in_drn_dt data.table. Drainage basin metadata with at least:
+#'   - `country`: Country name
+#'   - Other columns needed for `get_ssn_emtrends`
+#' @param plot logical. If TRUE, generates a faceted plot of the estimated slopes.
 #'
-#' @return A `data.table` and plots of estimated slopes across predictors.
+#' @return list. A list containing:
+#'   - `dt`: data.table with estimated marginal trends for all predictors
+#'   - `plot`: ggplot object if `plot=TRUE`, otherwise NULL
+#'
+#' @details
+#' The function:
+#' 1. For each hydrological variable in `perf_dt`:
+#'    - Extracts the corresponding model
+#'    - Handles special case for null models
+#'    - Computes estimated marginal trends using `get_ssn_emtrends`
+#'    - Records whether parabolic terms were tested
+#' 2. Combines all results into a single data.table
+#' 3. Adds human-readable labels and classification information
+#' 4. Caps confidence interval bounds at the observed range of trend values
+#' 5. Optionally creates a faceted plot of the estimated slopes
+#'    data.table` and plots of estimated slopes across predictors.
+#'    
 #' @export
 get_hydrowindow_emtrends <- function(perf_dt, in_hydro_vars_dt, in_drn_dt, plot) {
   
+  # Extract EM trends for each hydrological variable
   emtrends_dt_all <- lapply(perf_dt$hydro_var, function(in_pred_var) {
     print(in_pred_var)
     in_mod <- perf_dt[hydro_var == in_pred_var, mod][[1]]
+    
+    # Handle null model case
     if (in_pred_var == "null") {
       in_pred_var <- all.vars(in_mod$formula)[2]
       test_para <- FALSE
@@ -8735,6 +9667,8 @@ get_hydrowindow_emtrends <- function(perf_dt, in_hydro_vars_dt, in_drn_dt, plot)
       test_para <- perf_dt[hydro_var == in_pred_var, test_parabolic][[1]]
     }
     
+    
+    # Compute EM trends
     ssn_emtrends <- get_ssn_emtrends(
       in_mod=in_mod, 
       in_pred_var=in_pred_var, 
@@ -8743,21 +9677,22 @@ get_hydrowindow_emtrends <- function(perf_dt, in_hydro_vars_dt, in_drn_dt, plot)
       interaction_var = "country", 
       plot = FALSE)$dt
     
+    # Add parabolic test flag
     ssn_emtrends$test_parabolic <- test_para
     
     return(ssn_emtrends)
   }) %>% 
-    rbindlist(use.names = TRUE, fill = TRUE) %>%
-    .[, pred_var_label := get_full_hydrolabel(in_hydro_vars_dt, pred_var_name),
+    rbindlist(use.names = TRUE, fill = TRUE) %>%  #Combine all results
+    .[, pred_var_label := get_full_hydrolabel(in_hydro_vars_dt, pred_var_name),  # Add human-readable labels
       by=.(pred_var_name, country)] %>%
     setnames('pred_var_name', 'hydro_var') %>%
     get_hydro_var_root(in_place=F) %>%
-    merge(in_hydro_vars_dt[!duplicated(hydro_var_root), 
+    merge(in_hydro_vars_dt[!duplicated(hydro_var_root),  # Add classification information
                            .(hydro_var_root, hydro_class)], 
           by='hydro_var_root') %>%
     .[!(pred_var_label %in% c('Null', 'Mean flow percentile')),]
   
-  
+  # Cap confidence intervals at observed range of trend values
   emtrends_dt_all[, `:=`(
     lcl_capped = fifelse(asymp.LCL < min(trend), min(trend), asymp.LCL),
     ucl_capped = fifelse(asymp.UCL > max(trend), max(trend), asymp.UCL)
@@ -8776,7 +9711,7 @@ get_hydrowindow_emtrends <- function(perf_dt, in_hydro_vars_dt, in_drn_dt, plot)
     emtrends_plot <- NULL
   }
 
-  
+  #Return dt and plot
   return(list(
     dt=emtrends_dt_all,
     plot=emtrends_plot
@@ -8796,6 +9731,7 @@ get_hydrowindow_emtrends <- function(perf_dt, in_hydro_vars_dt, in_drn_dt, plot)
 #' @param best_dt A `data.table` ($best) returned by [prepare_hydrowindow_perf_table()].
 #'
 #' @return A `data.table` of observed and fitted values with hydro variable metadata.
+#' 
 #' @export
 get_hydrowindow_predictions <- function(best_dt) {
   lapply(seq(nrow(best_dt)), function(i) {
@@ -8812,6 +9748,44 @@ get_hydrowindow_predictions <- function(best_dt) {
 # in_drn_dt <- drn_dt_format
 # year_smooth = 10
 
+#' Plot hydrological data from historical and future periodes
+#'
+#' Creates time series plots comparing historical and projected hydrological metrics
+#' (dry day proportion and non-perennial network length) across countries and GCMs.
+#'
+#' @param in_hydrocon_proj list. A list of data.tables containing projected hydrological metrics
+#'   with columns: `reach_id`, `country`, `gcm`, `scenario`, `year`, `DurD_yr`, etc.
+#' @param in_hydromod_comb_hist list. A list of historical hydrological model data.tables with
+#'   columns: `reach_id`, `date`, `isflowing`, etc.
+#' @param in_ssn_eu_summarized list. A list containing SSN objects with river network information.
+#'   The first element should contain `$ssn$edges` with columns: `cat`, `country`, `length_m`.
+#' @param in_drn_dt data.table. Drainage basin metadata with at least:
+#'   - `country`: Country name
+#'   - Other columns for merging
+#' @param year_smooth integer. Number of years for smoothing window. Default is 3.
+#' @param outdir character. Output directory path for saving plots.
+#'
+#' @return list. A list containing ggplot objects:
+#'   - `DurD_wmean_hist`: Historical length-weighted annual percentage of dry days
+#'   - `per_npr_hist`: Historical percent non-perennial network length
+#'   - `DurD_wmean_smooth_proj`: Projected length-weighted annual percentage of dry days
+#'   - `per_npr_smooth_proj`: Projected percent non-perennial network length
+#'
+#' @details
+#' The function creates several types of plots:
+#'
+#' Historical plots (1970-2021):
+#' - Time series of length-weighted annual percentage of dry days
+#' - Time series of percent non-perennial network length
+#' - Both include reference points from sampling period (2021)
+#'
+#' Projected plots (1990-2100):
+#' - Time series of length-weighted annual percentage of dry days (smoothed)
+#' - Time series of percent non-perennial network length (smoothed)
+#' - Both show median and min-max range across GCMs
+#' - Both include vertical line at 2021 to separate historical and future periods
+#' 
+#' @export
 plot_hydrocon_histproj <- function(in_hydrocon_proj,
                                    in_hydromod_comb_hist,
                                    in_ssn_eu_summarized,
@@ -9152,15 +10126,66 @@ plot_hydrocon_histproj <- function(in_hydrocon_proj,
 #                     late_century=seq(2071, 2100))
 # scenario='ssp585'
 
-
+#' Plot summarized hydrological metrics
+#'
+#' Creates boxplots and ordination plots to visualize hydrological metrics
+#' from both reanalysis data and GCM projections, comparing historical, current, and future periods.
+#'
+#' @param in_allvars_summarized list. A list containing:
+#'   - `dt`: data.table with site-level hydrological metrics
+#'   - `cols`: list with `hydro_con_summarized` vector of hydrological columns
+#'   - Other metadata columns (e.g., `site`, `country`, `stream_type`)
+#' @param in_hydrocon_sites_proj data.table. Projected hydrological metrics
+#'   with columns: `site`, `country`, `year`, `scenario`, and various hydrological metrics.
+#' @param in_drn_dt data.table. Drainage basin metadata with at least:
+#'   - `country`: Country name
+#' @param in_hydro_vars_dt data.table. Hydrological variable metadata for labeling.
+#' @param reference_years numeric. Vector of years representing the historical reference period.
+#' @param sample_year numeric. The sampling year (e.g., 2021).
+#' @param future_years list. A list containing `late_century` vector of future years.
+#' @param scenario character. Climate scenario to filter projections (default: 'ssp585').
+#' @param outdir character. Output directory path for saving plots and tables.
+#' @param write_plot logical. If TRUE (default), saves plots to files.
+#'
+#' @return list. A list containing:
+#'   - `boxplot_reanalysis`: Boxplot of reanalysis hydrological metrics
+#'   - `boxplot_comparison`: Boxplot comparing reanalysis and projected metrics
+#'   - `ordiplot`: PCA ordination plot of sampling year data
+#'   - `ordiplot_assembled`: PCA ordination plot with loadings
+#'   - `ordiplot_comparison`: PCA ordination comparing historical and future periods
+#'   - `ordiplot_comparison_assembled`: Comparison PCA with loadings
+#'   - `tab_path`: Path to the saved statistics CSV file
+#'
+#' @details
+#' The function creates several visualizations:
+#'
+#' 1. Boxplots of hydrological metrics:
+#'    - From reanalysis data (sampling period)
+#'    - Comparing reanalysis and projected data across periods (1991-2020, 2021, 2071-2100)
+#'
+#' 2. PCA ordination plots:
+#'    - Sampling year PCA showing site positions
+#'    - Comparison PCA showing historical vs. future projections
+#'    - Both include variable loadings and convex hulls by country
+#'
+#' The function:
+#' - Subsets to temporary streams (`stream_type == 'TR'`)
+#' - Applies log10 transformation to Fdist metrics
+#' - Uses PCA to ordinate sites based on hydrological metrics
+#' - Projects GCM outputs onto the PCA space defined by sampling year data
+#' - Creates convex hulls to visualize country groupings
+#'
+#' @export
 plot_hydrocon_summarized <- function(in_allvars_summarized,
                                      in_hydrocon_sites_proj,
                                      in_drn_dt, in_hydro_vars_dt, 
                                      reference_years, sample_year, future_years,
                                      scenario='ssp585',
                                      outdir, write_plot=T) {
-  
+  # Prepare metadata columns
   metacols_sub <- c(intersect(metacols, names(in_allvars_summarized$dt)), 'stream_type')
+  
+  # Subset and transform data for reanalysis plots
   hydrocon_sub <- in_allvars_summarized$dt %>%
     .[!duplicated(site) & stream_type=='TR',
       c(metacols_sub,
@@ -9168,6 +10193,7 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
     .[, Fdist_mean_10past_undirected_avg_samp_log10 := 
         log10(Fdist_mean_10past_undirected_avg_samp+0.1)] 
   
+  # Prepare data for boxplots (reanalysis)
   hydrocon_samp_melt <- hydrocon_sub %>%
     melt(id.vars=metacols_sub) %>%
     merge(in_drn_dt, by='country')  %>%
@@ -9181,14 +10207,17 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
     ] %>%
     .[, period:='2021']
   
+  # Extract color mapping for countries
   color_vec <-  hydrocon_samp_melt[!duplicated(country),
                                    setNames(color, country)]
+  
+  # Define variables for boxplots
   vars_sub <- c("DurD_samp", "PDurD365past", "FreD_samp", "meanConD_yr", 
                 "FstDrE", "FstDrE_diff10yrpast",
                 "DurD_CV30yrpast", "FstDrE_SD30yrpast", 
                 "Fdist_mean_10past_undirected_avg_samp_log10")
   
-  #Create boxplot --------------------------------------------------------------
+  #Create boxplot for reanalysis data ------------------------------------------
   hydrocon_summarized_reanalysis_plot <- hydrocon_samp_melt[variable %in% vars_sub,] %>%
     ggplot(aes(x=country, y=value, fill=country, color=country)) +
     geom_point(alpha=0.5) +
@@ -9212,6 +10241,7 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
   hydrocon_sites_proj[, Fdist_undmean_yr_log10 := 
                         log10(Fdist_undmean_yr+0.1)] 
   
+  # Create period labels
   years_label <-rbindlist(list(
     data.table(period= '1991-2020', year=reference_years),
     data.table(period='2021', year=sample_year),
@@ -9225,18 +10255,22 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
     all.x=F
   )
   
+  # Prepare metadata columns for GCM data
   metacols_sub_gcm <- c('site', 'country', 'period')
   
+  # Define variables for GCM boxplots
   vars_sub_gcm <- c("DurD_yr", "FreD_yr", "meanConD_yr", 
                     "FstDrE", "DurD_CV30yrpast", "FstDrE_SD30yrpast", 
                     "Fdist_undmean_yr_log10")
   
+  # Get variable labels for GCM data
   vars_labels <- hydrocon_sites_proj[1,c(metacols_sub_gcm, vars_sub_gcm), with=F] %>%
     melt(id.vars=metacols_sub_gcm) %>%
     .[, variable_name := get_full_hydrolabel(in_hydro_vars_dt, 
                                              in_hydro_var=variable),
       by=.I]
   
+  # Prepare data for comparison boxplots
   hydrocon_gcm_melt <- hydrocon_sites_proj %>%
     .[, c(metacols_sub_gcm, vars_sub_gcm), with=F] %>%
     melt(id.vars=metacols_sub_gcm) %>%
@@ -9248,13 +10282,14 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
       ordered=T)
     ] 
   
+  # Combine GCM and reanalysis data for comparison plot
   hydrocon_samp_gcm_melt <- rbind(
     hydrocon_gcm_melt[period!='2021',], 
     hydrocon_samp_melt,
     use.names=T, fill=T) %>%
     .[, period := factor(period, levels=c('1991-2020', '2021', '2071-2100'))]
   
-  #Create boxplot --------------------------------------------------------------
+  #Create comparison boxplot ----------------------------------------------------
   hydrocon_summarized_comparison_plot <- hydrocon_samp_gcm_melt[variable %in% vars_sub_gcm,] %>%
     ggplot(aes(x=country, y=value, fill=country, color=country, linetype=period)) +
     # geom_point(alpha=0.5) +
@@ -9288,6 +10323,7 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
   pca_data <- in_allvars_summarized$dt[
     (DurD_samp>0) & !duplicated(site) & site != 'BUT08',] # & 
   
+  # Perform PCA
   hydro_pca <- trans_pca_wrapper(
     in_dt = pca_data, 
     in_cols_to_ordinate =  names(pca_subcols_mapping), 
@@ -9295,13 +10331,18 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
     group_cols = NULL, 
     num_pca_axes = 4)
   
+  # Merge with DRN metadata
   hydro_pca$dt <- merge(hydro_pca$dt, in_drn_dt, by='country')
   
   summary(hydro_pca$pca) #Include % variance
+  
+  # Get PCA summary statistics
   pc_importance_dt <- as.data.table(summary(hydro_pca$pca)$importance)
   
+  # Extract PCA loadings
   loadings <- hydro_pca$pca$rotation
   
+  # Create loadings plot
   loadings_plot <-  ggplot(data = loadings) +
     geom_segment( aes(x = 0, y = 0, xend = PC1*5, yend = PC2*5),
                   arrow = arrow(length = unit(0.2, "cm")), color = "black") +
@@ -9318,7 +10359,7 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
   # Get the actual data used for PCA to calculate center/scale
   pca_data_sub <- as.data.table(pca_data)[, names(pca_subcols_mapping), with=F]
   
-  # Calculate center and scale from the TRAINING DATA
+  # Calculate center and scale from the training data
   pca_center <- colMeans(pca_data_sub, na.rm = TRUE)
   pca_scale <- apply(pca_data_sub, 2, sd, na.rm = TRUE)
   
@@ -9497,6 +10538,7 @@ plot_hydrocon_summarized <- function(in_allvars_summarized,
 #' @param resp_var Character. Name of the response variable.
 #'
 #' @return A `ggplot2` object.
+#' 
 #' @export
 plot_hydrowindow_obs_preds <- function(preds, resp_var) {
   ggplot(preds, aes(x = .fitted, y = get(resp_var), color = country)) +
@@ -9514,6 +10556,7 @@ plot_hydrowindow_obs_preds <- function(preds, resp_var) {
 #' @param best_dt A `data.table` ($best) returned by [prepare_hydrowindow_perf_table()].
 #'
 #' @return A `ggplot2` object.
+#' 
 #' @export
 plot_hydrowindow_x_preds <- function(preds, best_dt) {
   preds_melt <- preds[, c(setdiff(best_dt$hydro_var,"null"), "country","basin_area_km2",".fitted"), with = FALSE] %>%
@@ -9532,16 +10575,42 @@ plot_hydrowindow_x_preds <- function(preds, best_dt) {
 # out_dir = file.path(resdir, "permutation_results")
 # save_individual = FALSE
 
-#' Run permutation tests for all Models in parallel
+#' Run all SSN permutations
 #'
-#' Processes all models in parallel.
-#' Each worker handles one complete model (all permutations).
+#' Runs permutation tests for multiple SSN models in parallel to assess the significance
+#' of hydrological variables by comparing observed model fits to null distributions.
 #'
-#' @param best_dt Data.table of best models
-#' @param n_perm Number of permutations per model (default: 500)
-#' @param out_dir Output directory
-#' @param n_cores Number of cores (default: detectCores() - 1)
-#' @param save_individual Save individual permutation results?
+#' @param perf_dt data.table. Performance data.table containing model information with columns:
+#'   - `mod`: List column containing fitted SSN model objects
+#'   - `hydro_var`: Hydrological variable name
+#'   - `organism`: Organism identifier
+#'   - `hydro_label`: Human-readable hydrological variable label
+#'   - `window_d`: Window duration
+#'   - `test_parabolic`: Whether parabolic term was tested
+#'   - `fit_status`: Model fit status
+#' @param n_perm integer. Number of permutations to run for each model. Default is 500.
+#' @param out_dir character. Output directory path for saving results. Default is "permutation_results".
+#' @param n_cores integer. Number of cores to use for parallel processing.
+#'   Default is `parallel::detectCores() - 1`.
+#' @param save_individual logical. If TRUE (default), saves individual permutation results
+#'   as .qs files for each model.
+#'
+#' @return data.table. A combined data.table with permutation test results for all models, including:
+#'   - `row_idx`: Original row index from `perf_dt`
+#'   - `organism`: Organism identifier
+#'   - `hydro_var`: Hydrological variable name
+#'   - `hydro_label`: Human-readable hydrological variable label
+#'   - `test_parabolic`: Whether parabolic term was tested
+#'   - `fit_status`: Model fit status
+#'   - `original_AIC`: AIC of the original model
+#'   - `mean_perm_AIC`: Mean AIC from permutations
+#'   - `sd_perm_AIC`: Standard deviation of AIC from permutations
+#'   - `p_value`: p-value from permutation test
+#'   - `n_successful`: Number of successful permutations
+#'   - `n_permutations`: Total number of permutations attempted
+#'   - `window_d`: Window duration
+#'
+#' @export
 run_all_ssn_permutations <- function(perf_dt, n_perm = 500, out_dir = "permutation_results",
                                      n_cores = parallel::detectCores() - 1,
                                      save_individual = TRUE) {
@@ -9676,6 +10745,7 @@ run_all_ssn_permutations <- function(perf_dt, n_perm = 500, out_dir = "permutati
 #' @note This approach is adequate even for models with quadratic terms
 #'  as long as they are explicitly included in the model with a I() or poly()
 #' @references [emmeans documentation](https://rvlenth.github.io/emmeans/articles/basics.html#depcovs)
+#' 
 #' @export
 get_hydrowindow_emmeans <- function(best_dt, 
                                     permutations_dt,
@@ -9787,6 +10857,7 @@ get_hydrowindow_emmeans <- function(best_dt,
 #' @param out_dir Character. Directory to save results.  
 #'
 #' @return A named list of file paths to saved CSV and PNG files.  
+#' 
 #' @export
 save_ssn_div_hydrowindow_plots <- function(
     perf_table,
@@ -9878,6 +10949,50 @@ save_ssn_div_hydrowindow_plots <- function(
 # write_plot=T
 # out_dir=figdir
 
+#' Plot variance decomposition of SSN models across multiple organisms
+#'
+#' Creates bar plots showing the marginal explained variance (pseudo-R²) of fixed effects
+#' for different hydrological variables across multiple organism groups.
+#'
+#' @param in_hydrowindow_varcomp_multiorg data.table. A data.table containing variance decomposition
+#'   results from `get_hydrowindow_varcomp` with columns:
+#'   - `varcomp`: Variance component name
+#'   - `proportion`: Proportion of variance explained
+#'   - `hydro_var`: Hydrological variable name
+#'   - `hydro_label`: Human-readable hydrological variable label
+#'   - `window_d`: Window duration
+#'   - `test_parabolic`: Whether parabolic term was tested
+#'   - `response_var`: Response variable name
+#'   - `organism`: Organism group identifier
+#' @param in_hydro_vars_dt data.table. Hydrological variable metadata with columns:
+#'   - `hydro_label`: Human-readable label
+#'   - `hydro_class`: Classification category
+#'   - `metric_num`: Numeric identifier within class
+#' @param in_organism_dt data.table. Organism metadata with columns:
+#'   - `organism`: Organism group identifier
+#'   - `organism_class`: Organism class (e.g., "Microbes")
+#'   - `organism_sub`: Organism subclass (e.g., "Biofilm", "Sediment")
+#' @param write_plot logical. If TRUE and `out_dir` is provided, saves the plot to a file.
+#' @param out_dir character. Output directory path for saving the plot. Default is NULL.
+#'
+#' @return list. A list containing:
+#'   - `dt`: data.table with processed variance decomposition data
+#'   - `plot`: ggplot object showing marginal explained variance by organism and hydrological variable
+#'
+#' @details
+#' The function:
+#' 1. Extracts the best model (highest proportion) for each hydrological variable and organism
+#' 2. Calculates marginal fixed effects R² by subtracting the null model R²
+#' 3. Filters out null and unwanted variables
+#' 4. Merges with organism and hydrological variable metadata
+#' 5. Creates a faceted bar plot showing:
+#'    - x-axis: Organism class
+#'    - y-axis: Marginal explained variance (percentage)
+#'    - Fill: Organism subclass
+#'    - Facets: Hydrological class and variable label
+#'    - Text labels: Window duration and time unit
+#'
+#' @export
 plot_varcomp_multiorganisms <- function(in_hydrowindow_varcomp_multiorg,
                                         in_hydro_vars_dt,
                                         in_organism_dt,
@@ -9979,6 +11094,57 @@ plot_varcomp_multiorganisms <- function(in_hydrowindow_varcomp_multiorg,
 # subset_variables = F
 # out_dir = figdir
 
+#' Plot estimated marginal trends across multiple organisms
+#'
+#' Creates point-range plots showing estimated marginal trends (slopes) for hydrological
+#' variables across different organism groups, with coefficients normalized by intercept.
+#'
+#' @param emtrends_list list. A list of data.tables containing estimated marginal trends
+#'   (output from `get_hydrowindow_emtrends`), one for each organism.
+#' @param in_hydrowindow_best_intercept_dt data.table. Contains intercept values for each
+#'   hydrological variable and organism with columns:
+#'   - `hydro_var`: Hydrological variable name
+#'   - `organism`: Organism identifier
+#'   - `intercept`: Intercept value from the model
+#'   - `test_parabolic`: Whether parabolic term was tested
+#' @param in_hydro_vars_dt data.table. Hydrological variable metadata with columns:
+#'   - `hydro_var`: Variable name
+#'   - `hydro_var_root`: Root variable name
+#'   - `hydro_label`: Human-readable label
+#' @param in_organism_dt data.table. Organism metadata with columns:
+#'   - `organism`: Organism identifier
+#'   - `organism_class`: Organism class (e.g., "Microbes")
+#'   - `organism_label`: Full organism label
+#'   - `organism_sub`: Organism subclass (e.g., "Biofilm", "Sediment")
+#' @param in_drn_dt data.table. Drainage basin metadata with at least:
+#'   - `country`: Country name
+#' @param write_plot logical. If TRUE and `out_dir` is provided, saves plots to files.
+#' @param subset_variables logical. If TRUE (default), creates a subset plot with
+#'   selected hydrological variables.
+#' @param out_dir character. Output directory path for saving plots. Default is NULL.
+#'
+#' @return list. A list containing:
+#'   - `dt`: data.table with all estimated marginal trends, normalized by intercept
+#'   - `plot`: ggplot object showing trends across organisms and hydrological variables
+#'
+#' @details
+#' The function:
+#' 1. Combines EM trends from all organisms into a single data.table
+#' 2. Adds human-readable labels and classification for hydrological variables
+#' 3. Normalizes coefficients by dividing by the absolute value of the intercept
+#' 4. Caps confidence intervals at the observed range of trend values
+#' 5. Formats organism names and time windows for plotting
+#' 6. Creates a faceted point-range plot showing:
+#'    - x-axis: Organism class
+#'    - y-axis: Normalized slope (trend/intercept)
+#'    - Points with error bars: Trend estimates with confidence intervals
+#'    - Facets: Hydrological class and variable label
+#'    - Text labels: Time window information
+#'
+#' The normalization by intercept allows comparison of effect sizes across different
+#' response variables with different scales.
+#'
+#' @export
 plot_emtrends_multiorganisms <- function(emtrends_list,
                                          in_hydrowindow_best_intercept_dt,
                                          in_hydro_vars_dt,
@@ -10134,6 +11300,79 @@ plot_emtrends_multiorganisms <- function(emtrends_list,
 # hydro_vars_dt <- tar_read(hydro_vars_dt)
 # out_dir = figdir
 
+#' Get summary table and plot across all SSN hydrowindow models 
+#'
+#' Combines estimated marginal trends (EMTrends), variance decomposition, and permutation test results
+#' to create a comprehensive summary of model performance across multiple organisms and hydrological variables.
+#'
+#' @param emtrends_dt data.table. Data.table containing estimated marginal trends with columns:
+#'   - `trend`: Estimated slope
+#'   - `p_value`: p-value for the trend
+#'   - `hydro_var`: Hydrological variable name
+#'   - `hydro_var_root`: Root variable name
+#'   - `organism`: Organism identifier
+#'   - `country`: Country name
+#' @param varcomp_dt data.table. Data.table containing variance decomposition results with columns:
+#'   - `varcomp`: Variance component name
+#'   - `proportion`: Proportion of variance explained
+#'   - `hydro_var`: Hydrological variable name
+#'   - `hydro_label`: Human-readable hydrological variable label
+#'   - `organism`: Organism identifier
+#'   - `window_d`: Window duration
+#'   - `marginal_fixedR2`: Marginal R² for fixed effects
+#' @param permutations_dt data.table. Data.table containing permutation test results with columns:
+#'   - `organism`: Organism identifier
+#'   - `hydro_label`: Human-readable hydrological variable label
+#'   - `test_parabolic`: Whether parabolic term was tested
+#'   - `original_AIC`: AIC of the original model
+#'   - `mean_perm_AIC`: Mean AIC from permutations
+#'   - `p_value`: p-value from permutation test
+#'   - `n_successful`: Number of successful permutations
+#' @param hydro_vars_dt data.table. Hydrological variable metadata with columns:
+#'   - `hydro_var`: Variable name
+#'   - `hydro_var_root`: Root variable name
+#'   - `hydro_label`: Human-readable label
+#'   - `hydro_class`: Classification category
+#'   - `window_d`: Window duration
+#' @param out_dir character. Output directory path for saving plots and tables.
+#' @param write_plot logical. If TRUE (default), saves plots to files.
+#'
+#' @return list. A list containing:
+#'   - `dt`: data.table with merged summary statistics
+#'   - `plot`: Composite ggplot object showing:
+#'     1. Detailed plot of trend significance and effect sizes
+#'     2. Overall summary plot of mean statistics by organism and hydrological class
+#'
+#' @details
+#' The function:
+#' 1. Categorizes trend significance across countries:
+#'    - Counts countries with significant negative, non-significant, and significant positive trends
+#'    - Assigns categories based on the distribution of trend significance
+#' 2. Merges all data sources (variance decomposition, EM trends, permutation tests)
+#' 3. Adds additional metadata:
+#'    - Window duration ratios
+#'    - Time units
+#'    - Formatted variable labels
+#' 4. Creates visualization:
+#'    - Scatter plot showing trend significance categories by organism and hydrological variable
+#'    - Point size represents marginal R²
+#'    - Point shape represents model significance from permutation tests
+#'    - Point color represents trend direction and significance
+#' 5. Creates overall summary plot:
+#'    - Shows mean marginal R² by organism and hydrological class
+#'    - Shows mean trend sign
+#' 6. Creates temporal window plot:
+#'    - Shows selected time windows for each organism and hydrological variable
+#' 7. Saves results to CSV file
+#'
+#' The significance categories are:
+#' - "all positive/negative (6/6)": All countries show significant effects in the same direction
+#' - "mostly positive/negative (>3/6)": Majority of countries show significant effects
+#' - "slightly positive/negative (3/6)": Exactly 3 countries show significant effects
+#' - "mixed": Mixed significance and directions
+#' - "mostly/all non-significant": Most or all countries show non-significant effects
+#'
+#' @export
 get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
                                                    varcomp_dt,
                                                    permutations_dt,
@@ -10476,8 +11715,55 @@ get_hydrowindown_multiorganism_summary <- function(emtrends_dt,
 # emtrends_dt <- tar_read(emtrends_multiorganism_all_richness)$dt
 # out_dir <- figdir
 
+#' Test difference in estimated marginal trends between biofilm vs. sediment
+#'
+#' Performs a meta-analysis to compare estimated marginal trends between biofilm and sediment
+#' models across different organism classes (Diatoms, Fungi, Bacteria) and hydrological variables.
+#'
+#' @param emtrends_dt data.table. Data.table containing estimated marginal trends with columns:
+#'   - `organism`: Organism identifier
+#'   - `organism_class`: Organism class (Diatoms, Fungi, Bacteria)
+#'   - `organism_sub`: Organism subclass (Biof., Sedi.)
+#'   - `hydro_var`: Hydrological variable name
+#'   - `hydro_var_root`: Root variable name
+#'   - `trend_rel`: Relative trend estimate (normalized by intercept)
+#'   - `SE_rel`: Standard error of relative trend
+#'   - `test_parabolic`: Whether parabolic term was tested
+#'   - `country`: Country name
+#' @param out_dir character. Output directory path for saving the plot.
+#'
+#' @return list. A list containing:
+#'   - `dt`: data.table with meta-analysis results
+#'   - `plot`: ggplot object showing differences in trends between biofilm and sediment
+#'
+#' @details
+#' The function:
+#' 1. Filters to microbial organisms (Diatoms, Fungi, Bacteria) and drying-related variables
+#' 2. Excludes parabolic relationships
+#' 3. Calculates average trend estimates across countries for each organism-variable combination
+#' 4. Computes differences between biofilm and sediment trends for each country
+#' 5. Performs random-effects meta-analysis using REML for each organism-variable combination
+#' 6. Adjusts p-values using FDR correction
+#' 7. Creates a visualization showing:
+#'    - x-axis: Difference in average marginal trend (sediment - biofilm)
+#'    - y-axis: I² statistic (heterogeneity on log scale)
+#'    - Points colored by average sediment trend sign
+#'    - Points sized by significance of trend difference
+#'    - Facets by organism class
+#'
+#' Interpretation of results:
+#' - `diff_estimate`: Pooled sediment-biofilm difference in slope (weighted by precision).
+#'   Positive = stronger positive (or weaker negative) effect in sediment; negative = reverse.
+#' - `pval`/`p_adj`: Significance of the pooled difference from zero.
+#' - `I2`: Percentage of variance in country-level differences reflecting cross-country heterogeneity.
+#'   Low I² (~0-25%) = consistent substrate effect across countries.
+#'   High I² (>50-75%) = substrate difference varies by country.
+#' - `QEp`: p-value of Q-test for heterogeneity (formal test of whether I² > 0).
+#'
+#' @export
 test_biof_vs_sedi_emtrends <- function(emtrends_dt,
                                        out_dir) {
+  # Identify drying-related variables (exclude flow magnitude variables)
   dry_vars <- setdiff(unique(emtrends_dt$hydro_var_root), c('maxPQ', 'oQ10'))
   
   #Substract data to only keep microbes, variables related to drying
@@ -10487,7 +11773,7 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt,
     & hydro_var_root %in% dry_vars
     & test_parabolic == F,]
   
-  #Get average estimate across countries
+  # Calculate average trend estimate across countries for each organism-variable combination
   emtrends_micro[
     , estimate_trend_avg := mean(trend_rel),
     by = .(organism, hydro_var, hydro_var_root, test_parabolic)]
@@ -10502,12 +11788,13 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt,
   ),
   by = .(country, organism_class, hydro_var, hydro_var_root, test_parabolic)]
   
+  # Calculate difference and standard error of difference
   dt_diff[, `:=`(
     diff = trend_sediment - trend_biofilm,
     se_diff = sqrt(SE_biofilm^2 + SE_sediment^2)
   )]
   
-  # Run meta-analysis model
+  # Run meta-analysis model for each organism-variable combination
   # https://wviechtb.github.io/metafor/reference/rma.uni.html
   meta_results <- dt_diff[, {
     m <- metafor::rma(yi = diff, sei = se_diff, method = "REML", data = .SD)
@@ -10517,8 +11804,11 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt,
   }, by = .(organism_class, hydro_var, hydro_var_root, 
             test_parabolic, avg_trend_sediment)] 
   
+  # Adjust p-values using FDR correction
   meta_results[, p_adj := p.adjust(pval, method = "fdr"), 
                by=.(hydro_var_root, test_parabolic, organism_class)]
+  
+  # Add significance flags
   meta_results[, `:=`(p_signif=as.factor(p_adj < 0.05),
                       QEp_signif=QEp < 0.05,
                       avg_trend_sed_sign = fifelse(avg_trend_sediment>0,
@@ -10544,6 +11834,7 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt,
       few countries) test of whether I² is significantly greater than zero.
   "
   
+  # Create visualization of trend differences
   dt_to_display  <- meta_results[p_signif==TRUE & I2 < 25,]
   substrate_metatrenddiff_plot <- ggplot(meta_results,
          aes(x=diff_estimate, y=I2+0.1, 
@@ -10585,6 +11876,7 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt,
   # PDurD increases richness less for sediments than bacteria
   # FreD mixed
   
+  #Save plot
   ggsave(
     filename = create_dated_plot_path(
       dir=out_dir, 
@@ -10670,6 +11962,7 @@ test_biof_vs_sedi_emtrends <- function(emtrends_dt,
 #'   4. Generates null distribution by permuting ranks within each bootstrap iteration
 #'   5. Calculates p-value as proportion of null correlations where |ρ_null| ≥ |ρ_obs|
 #'
+#' @export
 test_country_emtrends <- function(emtrends_dt,     
                                   permutations_dt,
                                   out_dir) {
@@ -11143,6 +12436,7 @@ GH#
   #' @param dt data.table with columns: country, drn_trend_rank_boot, drn_trend_rank_null, boot_i
   #' @param group_col Character vector of grouping variables (NULL for global test)
   #' @return data.table with pairwise comparisons and significance
+  #' @export
   test_pairwise_ranks <- function(dt, group_col = NULL) {
     # Compute observed stats - one row per group × country
     if (is.null(group_col)) {
@@ -11458,19 +12752,56 @@ GH#
 # varcomp_dt=tar_read(varcomp_multiorganism_richness)
 # best_intercept_dt <- tar_read(hydrowindow_best_richness_intercept_dt)
 
+#' Get boxplots of variance decomposition for hydrowindow models across organisms
+#'
+#' Creates boxplots showing the distribution of variance components (spatially-dependent variance)
+#' across different organism groups and hydrological variables.
+#'
+#' @param varcomp_dt data.table. Data.table containing variance decomposition results with columns:
+#'   - `organism`: Organism identifier
+#'   - `organism_sub`: Organism subclass (e.g., "Biof.", "Sedi.")
+#'   - `organism_class`: Organism class (e.g., "Bacteria", "Fungi")
+#'   - `hydro_var`: Hydrological variable name
+#'   - `varcomp`: Variance component name (e.g., "euclid_de", "taildown_de", "tailup_de")
+#'   - `varcomp_label`: Human-readable variance component label
+#'   - `proportion`: Proportion of variance explained
+#'   - `test_parabolic`: Whether parabolic term was tested
+#' @param best_intercept_dt data.table. Data.table containing intercept values for best models with columns:
+#'   - `organism`: Organism identifier
+#'   - `hydro_var`: Hydrological variable name
+#'   - `test_parabolic`: Whether parabolic term was tested
+#' @param out_dir character. Output directory path for saving the plot.
+#'
+#' @return ggplot. A ggplot object showing boxplots of variance components by organism subclass.
+#'
+#' @details
+#' The function:
+#' 1. Merges variance decomposition data with best intercept data
+#' 2. Simplifies variance component labels (combines spatially-dependent components)
+#' 3. Aggregates proportions by organism, subclass, class, hydrological variable, and simplified component
+#' 4. Creates a faceted boxplot showing:
+#'    - x-axis: Organism subclass
+#'    - y-axis: Proportion of variance (percentage)
+#'    - Fill/color: Simplified variance component
+#'    - Facets: Organism class
+#'    
+#' @export
 get_hydrowindow_multiorganism_varcomp_boxplot <- function(varcomp_dt,
                                                           best_intercept_dt,
                                                           out_dir) {
+  # Merge with best intercept data to filter to best models
   varcomp_sub <- merge(varcomp_dt, 
         best_intercept_dt[, .(organism, hydro_var, test_parabolic)], 
         by=c('organism', 'hydro_var', 'test_parabolic'),
         all.x=F)
   
+  # Simplify variance component labels
   varcomp_sub[, varcomp_label_simple := 
                 fifelse(varcomp %in% c("euclid_de", "taildown_de", "tailup_de"),
                         'Spatially-dependent variance',
                         as.character(varcomp_label))]
   
+  # Aggregate proportions by organism, subclass, class, variable, and simplified component
   varcomp_simple <- varcomp_sub[
     varcomp != 'nugget', 
     list(proportion =sum(proportion)),
@@ -11479,6 +12810,7 @@ get_hydrowindow_multiorganism_varcomp_boxplot <- function(varcomp_dt,
   
   varcomp_sub[organism=='miv_nopools_ept', mean(proportion), by=varcomp]
   
+  # Create faceted boxplot
   varcomp_best_boxplot <- ggplot(varcomp_simple, 
          aes(x=organism_sub, y=proportion, 
              fill=varcomp_label_simple, 
@@ -11502,7 +12834,7 @@ get_hydrowindow_multiorganism_varcomp_boxplot <- function(varcomp_dt,
           strip.placement = "outside")
   
   
-  #Output t
+  #Output plot
   ggsave(
     filename = file.path(
       out_dir, 
@@ -11518,7 +12850,6 @@ get_hydrowindow_multiorganism_varcomp_boxplot <- function(varcomp_dt,
     units='in',
     dpi=600
   )
-
 
   return(varcomp_best_boxplot)
 }
@@ -11570,7 +12901,8 @@ get_hydrowindow_multiorganism_varcomp_boxplot <- function(varcomp_dt,
 #'     \item \strong{ssn_mod_fit_best}: The "absolute best" model fit, refitted with REML.
 #'     \item \strong{ssn_pred_best}: Augmented data for the "best" model.
 #'   }
-#'   
+#'
+#' @export
 model_miv_richness_yr <- function(in_ssn_eu_summarized,
                                   in_allvars_summarized,
                                   in_cor_matrices, 
@@ -18899,6 +20231,45 @@ model_bac_biof_richness_yr <- function(in_ssn_eu_summarized,
 #------ get_perf_table_modyr_multiorganism-------------------------------------------
 # in_mod_list = tar_read(ssn_mod_yr_fit_multiorganism)
 
+#' Get performance table for models across multiple organisms
+#'
+#' Extracts performance metrics from a list of fitted models 
+#' including variance decomposition, cross-validation, and goodness-of-fit statistics.
+#'
+#' @param in_mod_list list. A named list of fitted model objects, with one model per organism.
+#'   Each model should be of class lm, glm, ssn_lm, ssn_glm, lme, or merMod.
+#'
+#' @return data.table. A combined data.table with one row per model containing:
+#'   - `organism`: Organism identifier (from list names)
+#'   - `formula`: Formatted model equation
+#'   - `family`: Model family (for GLMs)
+#'   - `tailup_type`: Tail-up covariance type (for SSN models)
+#'   - `taildown_type`: Tail-down covariance type (for SSN models)
+#'   - `euclid_type`: Euclidean covariance type (for SSN models)
+#'   - Standard model metrics from `broom::glance`:
+#'     - `r.squared`, `adj.r.squared`, `sigma`, `statistic`, `p.value`, `df`, `logLik`,
+#'       `AIC`, `BIC`, `deviance`, `df.residual`, `nobs`
+#'   - `GVIF`: Generalized Variance Inflation Factor (maximum across predictors)
+#'   - `varcomp_country_only`: Variance explained by country fixed effect alone
+#'   - `varcomp_hydroenv_covariates`: Variance explained by hydrological/environmental covariates
+#'     (fixed effects R² minus country-only R²)
+#'   - Cross-validation metrics from `SSN2::loocv`:
+#'     - `mape_loocv`: Mean Absolute Percentage Error
+#'     - `pseudo_r2_loocv`: Pseudo R² from leave-one-out cross-validation
+#'     - `cv_predict`: Cross-validated predictions
+#'
+#' @details
+#' The function processes each model to extract:
+#' 1. Model formula as a formatted equation
+#' 2. Variance decomposition from `SSN2::varcomp`
+#' 3. If country is a fixed effect, calculates:
+#'    - Variance explained by country alone
+#'    - Variance explained by other covariates (total fixed effects R² minus country-only R²)
+#' 4. Standard model metrics from `broom::glance`
+#' 5. Variance Inflation Factors from `car::vif`
+#' 6. Leave-one-out cross-validation metrics from `SSN2::loocv`
+#' 
+#' @export
 get_perf_table_modyr_multiorganism <- function(in_mod_list) {
   
   out_tab <- lapply(in_mod_list, function(in_mod_fit) {
@@ -18983,7 +20354,7 @@ get_perf_table_modyr_multiorganism <- function(in_mod_list) {
 # in_hydro_vars_dt = tar_read(hydro_vars_dt)
 # plot_path_prefix <- 'ssn_mod_yr_miv_diagplot'
 
-#' Diagnose SSN Model Performance and Create Diagnostic Plots
+#' Get diagnostic plots of SSN Model Performance
 #'
 #' This function takes a list of fitted SSN models and performs diagnostics. It creates
 #' plots of predicted vs. observed values for both the "best" and "final" models
@@ -19003,6 +20374,8 @@ get_perf_table_modyr_multiorganism <- function(in_mod_list) {
 #'     \item \strong{varcomp_best}: Variance components for the best-fit model.
 #'     \item \strong{varcomp_final}: Variance components for the final prediction model.
 #'   }
+#'   
+#' @export
 plot_ssn_mod_diagplot <- function(in_mod_fit,
                                   in_perf_dt,
                                   in_drn_dt,
@@ -19215,6 +20588,7 @@ mosaic_mod_yr_diagplots <- function(in_ssn_mod_yr_diagplot_multiorganism,
 #'     \item \strong{proj}: A data table with future predictions, including
 #'       GCM and scenario information.
 #'   }
+#' @export
 predict_ssn_mod <- function(in_ssn_mod_fit, in_hydrocon_sites_proj, 
                             type_predict, predict_years, 
                             overwrite=FALSE, verbose=TRUE) {
@@ -19380,6 +20754,57 @@ predict_ssn_mod <- function(in_ssn_mod_fit, in_hydrocon_sites_proj,
 #                     late_century=seq(2071, 2100))
 # n_sim = 100
 
+#' Compute drying-induced changes in local diversity
+#'
+#' Simulates future richness values based on a fitted SSN model and projected hydrological data,
+#' then computes percentage and absolute changes relative to a reference period.
+#'
+#' @param in_ssn_mod_fit A fitted SSN model object (ssn_lm or ssn_glm class).
+#' @param in_ssn_proj_dt data.table. Projected data with columns:
+#'   - `organism`: Organism identifier
+#'   - `site`: Site identifier
+#'   - `country`: Country name
+#'   - `scenario`: Climate scenario
+#'   - `gcm`: Global Climate Model identifier
+#'   - `year`: Year
+#'   - `response_var`: Response variable name
+#'   - `mod`: Model identifier
+#'   - `.fitted`: Fitted values from the model
+#'   - `.se.fit`: Standard errors of fitted values
+#' @param reference_years numeric. Vector of years representing the reference period.
+#' @param future_years list. A list containing:
+#'   - `mid_century`: Vector of years for mid-century period
+#'   - `late_century`: Vector of years for late-century period
+#' @param n_sim integer. Number of simulations to perform for each projection. Default is 1000.
+#'
+#' @return list. A list containing:
+#'   - `sims_dt`: data.table with simulated diversity values for each year and simulation
+#'   - `stats_dt`: data.table with summary statistics of diversity changes including:
+#'     - `mean_change`: Mean change
+#'     - `lower_change`: 2.5th percentile of change
+#'     - `upper_change`: 97.5th percentile of change
+#'     - For both percentage and absolute changes
+#'     - For both mid-century and late-century periods
+#'
+#' @details
+#' The function:
+#' 1. Checks if the input is a valid SSN model
+#' 2. For GLM models, gets the inverse link function for back-transformation
+#' 3. Creates a data.table of years with period labels (reference, mid_century, late_century)
+#' 4. Simulates diversity values by:
+#'    - Drawing from a normal distribution with mean = fitted value and sd = standard error
+#'    - Applying inverse link function for GLMs
+#' 5. Computes changes relative to reference period:
+#'    - Percentage change: 100 * (future - reference) / reference
+#'    - Absolute change: future - reference
+#' 6. Calculates summary statistics across simulations:
+#'    - Mean change
+#'    - 95% confidence intervals (2.5th and 97.5th percentiles)
+#'
+#' For linear models (ssn_lm), the identity link is used.
+#' For generalized linear models (ssn_glm), the appropriate inverse link function is applied.
+#'
+#' @export
 compute_div_change <- function(in_ssn_mod_fit, in_ssn_proj_dt,
                                reference_years, future_years, n_sim) {
   
@@ -19464,6 +20889,8 @@ compute_div_change <- function(in_ssn_mod_fit, in_ssn_proj_dt,
 #'
 #' @return The function is primarily used for its side effects (creating plots and
 #'   maps) and does not return a value.
+#' 
+#' @export
 plot_ssn_proj <- function(
     in_future_sims_dt,
     in_future_stats_dt,

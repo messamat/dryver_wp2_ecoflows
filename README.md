@@ -114,15 +114,10 @@ summary_results_list <- tar_read(summary_multiorganism_richness) #Load target in
 **7.2. Model Selection Workflow**
 
 - **Step 1: Covariance Structure Screening:**
-
 - Run initial SSN models with a single hydrological variable (`DurD365past`) for each organism group
-
 - Test all 144 covariance structure combinations
-
 - Select top 5 covariance structures per organism based on AIC
-
 - **Step 2: Full Model Fitting**
-
   - For each organism group and diversity metric (`richness`, `invsimpson`): fit models with:
     - Base formula: `log10(basin_area_km2) + log10(basin_area_km2):country`
     - Partition formula: `~ as.factor(campaign)`
@@ -131,17 +126,11 @@ summary_results_list <- tar_read(summary_multiorganism_richness) #Load target in
     - Top 5 covariance structures from Step 1
     - Gaussian family, ML estimation
   - For fungi and bacteria: Test both linear and parabolic relationships
-
 - **Step 3: Model Selection**
-
 - Select best covariance structure for each model
-
 - Generate performance tables (AIC, R², p-values, coefficients)
-
 - Decompose model variance (fixed effects, random effects, spatial covariance)
-
 - **Step 4: Post-Hoc Analysis**
-
   - Compute estimated marginal trends (emtrends)
   - Generate predictions for best models
   - Plot: Observed vs. predicted values, Predictor vs. fitted values, Variance decomposition, and Estimated marginal means and trends
@@ -163,10 +152,10 @@ summary_results_list <- tar_read(summary_multiorganism_richness) #Load target in
 - Figures
 - Hypothesis Testing Results
 
-### **Lexicon: Key Terms and Acronyms**
+### **Lexicon**
 
 | **Term** | **Definition** |
-|----|----|
+|------------------------------------|------------------------------------|
 | **DRN** | Drying River Network. A river network characterized by intermittent flow (periods of flowing, pooling, and drying). The study focuses on 6 DRNs across Europe. |
 | **miv, ept, och, dia, fun, bac** | Macroinvertebrates, EPT (Ephemeroptera, Plecoptera, Trichoptera), OCH (Odonata, Coleoptera, Hephemeroptera), diatoms, fungi, and bacteria |
 | **sedi and biof** | Sediment and biofilm sampling substrates. Samples collected from riverbed sediments. |
