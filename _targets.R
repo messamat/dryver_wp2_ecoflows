@@ -5,18 +5,12 @@ setwd(rootdir)
 source('R/packages.R')
 source("R/functions.R")
 source("R/SpaTemp_function_M_edit.R")
-# if (!file.exists("bin/03_diversity_metrics.R")) {
-#   download.file(url = "https://github.com/LysandreJ/dryver/blob/main/Script/03_diversity_metrics.R",
-#                 destfil = file.path("bin", "03_diversity_metrics.R")
-#   )
-# }
 source("bin/03_diversity_metrics.R") 
 
 hydromod_present_dir <- file.path('data', 'wp1', 'Results_present_period_final')
 wp1_data_gouv_dir <- file.path('data', 'wp1', 'data_gouv') #Official WP1 data published later, with fuller attributes (upstream drainage area)
 
 bio_dir <- file.path('data', 'wp2', '01_WP2 final data')
-#datdir <- file.path('data', 'data_annika')
 resdir <- 'results'
 figdir <- file.path(resdir, 'figures')
 
@@ -44,17 +38,17 @@ drn_dt_format <- data.table(
   color = c( "#01665e", "#80cdc1", "#8073ac", "#bf812d", "#8c510a", "#543005")
 )
 
-  
+#Set up hydrological data file names  
 hydro_combi <- expand.grid(
   in_country = drn_dt$country,
   in_varname =  c('isflowing', 'qsim'),
   stringsAsFactors = FALSE)
 
 if (!interactive()) {
-  perf_ratio <- 0.7 #Set how much you want to push your computer (% of cores and RAM)
+  perf_ratio <- 0.7 #Set how much to push your computer (% of cores and RAM)
   nthreads <- round(parallel::detectCores(logical=F)*perf_ratio)
   #future::plan("future::multisession", workers=nthreads)
-  total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #ADJUST BASED ON PLATFORM
+  total_ram <- memuse::Sys.meminfo()$totalram@size*(10^9) #In GiB #Adjust based on platform
   options(future.globals.maxSize = perf_ratio*total_ram)
   # targets::tar_option_set(controller = crew_controller_local(workers = nthreads)) #Set up parallel computing in targets
 }
@@ -119,14 +113,6 @@ preformatting_targets <- list(
   )
   ,
   
-  #Path to DEM for Genal catchment in Spain (basin area is missing)
-  tar_target(
-    dem_genal_rediam_path,
-    file.path(rootdir, 'data', 'dem_genal', 'rediam', 'MDT_2010_11_AND.tif'),
-    format='file'
-  ),
-  
-  
   ##############################################################################
   ### DOWNLOAD DATA ############################################################
   #Download HydroSHEDS flow direction at 90 m for Europe
@@ -148,23 +134,9 @@ preformatting_targets <- list(
   )
   ,
   
-  #Download amber river barriers dataset
-  tar_target(
-    amber_path,
-    {
-      amber_dir_path <- download_unzip(
-        url =  "https://figshare.com/ndownloader/articles/12629051/versions/5",
-        out_dir = file.path('data', 'amber'), 
-        out_zip=NULL)
-      unzip(file.path(amber_dir_path, 'Fig1_AMBER_BARRIER_ATLAS_V1.zip'),
-            exdir = file.path('data', 'amber'))
-      return(file.path(amber_dir_path, 'AMBER_BARRIER_ATLAS_V1.csv'))
-    }
-  ),
-  
   ##############################################################################
   ### READ DATA ################################################################
-  #Read new reach data
+  #Read basic reach attribute data: ID, to-reach, length, slope, upstream_area
   tar_target(
     reaches_attri,
     lapply(drn_dt$catchment, function(in_catchment) {
@@ -176,7 +148,7 @@ preformatting_targets <- list(
   ,
   
   
-  #Read reach data
+  #Read additional reach attribute data
   tar_target(
     reaches_dt,
     lapply(hydromod_paths_dt$country, function(in_country) {
@@ -252,7 +224,7 @@ preformatting_targets <- list(
   )
   ,
   
-  #Clean networks
+  #Clean river networks
   tar_target(
     network_clean_gpkg_list,
     lapply(names(network_sub_gpkg_list), function(in_country) {
@@ -289,7 +261,7 @@ preformatting_targets <- list(
   )
   ,
   
-  #Direct network
+  #Ensure that reaches flow in the right direction throughout the river networks
   tar_target(
     network_directed_gpkg_list,
     lapply(names(network_clean_gpkg_list), function(in_country) {
@@ -308,7 +280,7 @@ preformatting_targets <- list(
   )
   ,
   
-  #Fix complex confluences
+  #Fix complex confluences (>2 reaches)
   tar_target(
     network_nocomplexconf_gpkg_list,
     lapply(names(network_directed_gpkg_list), function(in_country) {
@@ -400,7 +372,7 @@ preformatting_targets <- list(
   ,
   
   #Snap sites to corresponding reach in network
-  #Note that BUT12 is located several 100 m from 
+  #Note that BUT12 is located several 100s m from 
   #the corresponding reach in the corrected network
   tar_target(
     site_snapped_gpkg_list,
@@ -417,31 +389,7 @@ preformatting_targets <- list(
     }) %>% setNames(names(site_points_gpkg_list))
   ),
   
-  # #Subset amber river barrier dataset to only keep barriers on DRNs
-  # tar_target(
-  #   barrier_points_gpkg_list,
-  #   subset_amber(amber_path = amber_path, 
-  #                in_hydromod_paths_dt = hydromod_paths_dt, 
-  #                out_dir = file.path(resdir, 'gis'),
-  #                overwrite = T) 
-  # )
-  # ,
-  # 
-  # #Snap barriers to river network
-  # tar_target(
-  #   barrier_snapped_gpkg_list,
-  #   lapply(names(barrier_points_gpkg_list), function(in_country) {
-  #     snap_barrier_sites(in_sites_path = barrier_points_gpkg_list[[in_country]], 
-  #                        in_network_path = network_ssnready_shp_list[[in_country]],
-  #                        out_snapped_sites_path=NULL, 
-  #                        in_sites_idcol = 'GUID',
-  #                        attri_to_join = c('cat', 'UID'),
-  #                        custom_proj = F,
-  #                        overwrite = T)
-  #   }) %>% setNames(names(site_points_gpkg_list))
-  # )
-  # ,
-  # 
+  #Get drainage area of sites in the Genal (Spain) network
   tar_target(
     genal_sites_upa_dt,
     get_genal_drainage_area(in_flowdir_path = flowdir_hydrosheds90m_path, 
@@ -493,6 +441,7 @@ mapped_hydrotargets <- tarchetypes::tar_map(
   )
 )
 
+#Merge hydrological metrics across all DRNs
 combined_hydrotargets <- list(
   tar_combine(
     hydromod_comb_hist,
@@ -680,6 +629,7 @@ formatting_targets <- list(
   )
   ,
   
+  #Compute averaged hydrological metrics during the sampling year for sites
   tar_target(
     hydrocon_sites_summarized,
     summarize_sites_hydrocon(
@@ -689,7 +639,8 @@ formatting_targets <- list(
   )
   ,
   
-  #Compute summary hydrostats for each reach in network 
+  #Compute mean annual hydrological metrics for each reach in network 
+  #over the historical period
   tar_target(
     hydrostats_net_hist,
     lapply(names(network_ssnready_shp_list), function(in_country) {
@@ -704,6 +655,7 @@ formatting_targets <- list(
   )
   ,
   
+  #List files containing flow state projections
   tar_target(
     hydro_proj_files,
     list.files(
@@ -714,6 +666,8 @@ formatting_targets <- list(
   )
   ,
   
+  #Compute mean annual hydrological metrics at sampling sites from 19990 to 2100 
+  #for all scenarios and GCMs
   tar_target(
     hydrocon_sites_proj_gcm,
     future_lapply(hydro_proj_files, function(in_hydro_proj_file) {
@@ -768,11 +722,10 @@ formatting_targets <- list(
       return(all_stats)
     }
     )
-    # ,
-    # pattern = map(hydro_proj_files)
   )
   , 
   
+  #Compute environmental data at sampling sites averaged across campaigns
   tar_target(
     env_summarized,
     summarize_env(in_env_dt = env_dt,
@@ -780,7 +733,8 @@ formatting_targets <- list(
   )
   ,
   
-  #Compute local taxonomic diversity
+  #Compute local taxonomic diversity at every combination of:
+  #sampling site, sampling campaign, DRN, and organism group
   tar_target(
     spdiv_local,
     lapply(names(bio_dt), function(in_org) {
@@ -820,6 +774,7 @@ formatting_targets <- list(
   ),
   
   #Merge ecological, environmental and hydrological data by site across campaigns
+  #(averaged over the sampling period)
   tar_target(
     allvars_summarized,
     merge_allvars_summarized(
@@ -842,7 +797,7 @@ formatting_targets <- list(
   ##############################################################################
   ### EXPLORE DATA #############################################################
   ##############################################################################
-  #All organisms: max 12
+  #Set up organism groups to analyze
   tar_target(
     organism_list,
     c('miv_nopools', 
@@ -880,13 +835,15 @@ formatting_targets <- list(
   )
   ,
   
+  #Set up alpha diversity variables to analyze
   tar_target(
     alpha_var_list,
     c('richness', 'expshannon', 'invsimpson')
   )
   ,
   
-  #Visualize percentage of flowing sites by DRN over time
+  #Plot historical percentage of flowing sites by DRN over time during
+  #the sampling period and the temporal distribution of sampling campaigns 
   tar_target(
     hydrodiv_bydrn_plot,
     lapply(alpha_var_list, function(in_var) {
@@ -901,6 +858,7 @@ formatting_targets <- list(
   )
   ,
   
+  #Plot projected future drying prevalence across DRNs
   tar_target(
     hydrocon_histproj_plots,
     plot_hydrocon_histproj(in_hydrocon_proj = hydrocon_sites_proj_gcm,
@@ -912,6 +870,8 @@ formatting_targets <- list(
   )
   ,
   
+  #Plot the historical, sampling period, and future distribution of 
+  #hydrological metrics across DRNs
   tar_target(
     hydrocon_summarized_plot,
     plot_hydrocon_summarized(in_allvars_summarized = allvars_summarized,
@@ -926,7 +886,10 @@ formatting_targets <- list(
                              outdir = figdir)
   )
   ,
-    
+  
+  #Plot the relationships (scatter plot + linear regression) 
+  #between antecedent drying duration and local taxonomic diversity at the time of sampling
+  #by DRN, for multiple temporal windows and across organim groups
   tar_target(
     hydrowindow_lm_scatter,
     plot_scatter_lm(in_allvars_sites=allvars_sites, 
@@ -940,6 +903,8 @@ formatting_targets <- list(
   )
   ,
   
+  #Plot the relationship between drainage area or mean discharge and mean richness
+  #during the sampling period
   tar_target(
     area_div_scatter,
     plot_areadiv_scatter(in_dt=allvars_summarized$dt,
@@ -949,12 +914,16 @@ formatting_targets <- list(
   )
   ,
   
+  #Plot the correlation between alpha diversity in sediment and biofilm
+  #at sampling time and averaged across the sampling period
+  #for every diversity metric, organism group and DRN
   tar_target(
     biof_vs_sedi_plots,
     plot_edna_biof_vs_sedi(in_allvars_sites=allvars_sites) 
   )
   ,
   
+  #Plot richness vs flow state (flowing, pool, dry)
   tar_target(
     richness_vs_flowstate_plot,
     plot_flow_state_richness(in_allvars_sites = allvars_sites,
@@ -964,14 +933,16 @@ formatting_targets <- list(
   )
   ,
   
-  #For sites x dates: Create matrices of correlations between predictors and responses, and among predictors
+  #For sites x dates: 
+  #Create matrices of correlations between predictors and responses, and among predictors
   tar_target(
     cor_matrices_list,
     compute_cor_matrix(allvars_sites)
   )
   ,
   
-  #For data averaged by site: Create matrices of correlations between predictors and responses, and among predictors
+  #For data averaged by site over the sampling period: 
+  #Create matrices of correlations between predictors and responses, and among predictors
   tar_target(
     cor_matrices_list_summarized,
     compute_cor_matrix_summarized(allvars_summarized)
@@ -989,7 +960,7 @@ formatting_targets <- list(
   )
   ,
   
-  #Create correlation heatmaps across all variables
+  # For sites x dates: create correlation heatmaps across all variables
   tar_target(
     cor_heatmaps,
     plot_cor_heatmaps(in_cor_matrices = cor_matrices_list, 
@@ -997,14 +968,13 @@ formatting_targets <- list(
   )
   ,
   
+  #For data averaged by site over the sampling period: create correlation heatmaps
   tar_target(
     cor_heatmaps_summarized,
     plot_cor_heatmaps(in_cor_matrices = cor_matrices_list_summarized, 
                       p_threshold = 0.05)
   )
   ,
-  
-  
   
   #Check whether diversity is related to habitat volumne (for miv and biofilm)
   #-> No, good
@@ -1051,7 +1021,7 @@ formatting_targets <- list(
   )
   ,
   
-  #Define all hydrological variables: 62
+  #Define all hydrological variables: 92
   tar_target(
     hydro_vars_forssn,
     {
@@ -1213,11 +1183,13 @@ temporal_analysis_targets_mapped <- tar_map(
     }
   ),
   
+  #Select covariance structure and fit models
   tar_target(
     ssn_covtype_selected,
     select_ssn_covariance(in_ssnmodels = ssn_div_hydrowindow)
   ),
   
+  #Get table of perfomance statistics for model and model parameters
   tar_target(
     hydrowindow_perf_tables,
     {
@@ -1239,6 +1211,7 @@ temporal_analysis_targets_mapped <- tar_map(
     }
   ),
   
+  #Decompose model variance and plot for every temporal window x metric
   tar_target(
     hydrowindow_varcomp_all,
     get_hydrowindow_varcomp(
@@ -1248,7 +1221,8 @@ temporal_analysis_targets_mapped <- tar_map(
   )
   ,
   
-  
+  #Get the estimated marginal trends (i.e., by DRN) of the temporal window model 
+  #with the lowest AIC (the "best" model) for each hydrological metric
   tar_target(
     hydrowindow_emtrends_best,
     get_hydrowindow_emtrends(
@@ -1259,6 +1233,7 @@ temporal_analysis_targets_mapped <- tar_map(
   )
   ,
   
+  #Get all estimated marginal trends
   tar_target(
     hydrowindow_emtrends_all,
     {
@@ -1285,6 +1260,7 @@ temporal_analysis_targets_mapped <- tar_map(
   )
   ,
   
+  #Get predictions for the "best" models
   tar_target(
     hydrowindow_best_preds,
     get_hydrowindow_predictions(
@@ -1292,6 +1268,7 @@ temporal_analysis_targets_mapped <- tar_map(
   )
   ,
   
+  #Plot observation vs. predictions for the best models
   tar_target(
     hydrowindow_obs_preds_plot,
     plot_hydrowindow_obs_preds(
@@ -1300,6 +1277,7 @@ temporal_analysis_targets_mapped <- tar_map(
   )
   ,
   
+  #Plot predictors vs fitted values
   tar_target(
     hydrowindow_x_preds_plot,
     plot_hydrowindow_x_preds(
@@ -1309,20 +1287,22 @@ temporal_analysis_targets_mapped <- tar_map(
   )
   ,
   
+  #Save plots
   tar_target(
     ssn_div_hydrowindow_plots_paths,
     save_ssn_div_hydrowindow_plots(
       hydrowindow_perf_tables,
-      plot_varcomp = NULL, #hydrowindow_varcomp_all,
-      plot_obs_preds = NULL, #hydrowindow_obs_preds_plot,
-      plot_x_preds = NULL, #hydrowindow_x_preds_plot,
-      plot_emmeans = NULL, #hydrowindow_emmeans_best,
-      plot_emtrends = NULL, #hydrowindow_emtrends_best,
+      plot_varcomp = hydrowindow_varcomp_all,
+      plot_obs_preds = hydrowindow_obs_preds_plot,
+      plot_x_preds = hydrowindow_x_preds_plot,
+      plot_emmeans = hydrowindow_emmeans_best,
+      plot_emtrends = hydrowindow_emtrends_best,
       in_organism = in_organism,
       in_response_var = in_response_var,
       out_dir = figdir)
   ),
   
+  #Test significance of best models through permutation
   tar_target(
     ssn_div_hydrowindow_permutations,
     if (in_response_var=='richness') {
@@ -1335,19 +1315,19 @@ temporal_analysis_targets_mapped <- tar_map(
     }
   ),
   
+  #Extract estimated marginal slopes of the best models for richness
   tar_target(
     hydrowindow_emmeans_best,
     if (in_response_var=='richness') {
-    get_hydrowindow_emmeans( 
-      best_dt = hydrowindow_perf_tables$best,
-      permutations_dt = ssn_div_hydrowindow_permutations,
-      in_hydro_vars_dt = hydro_vars_dt,
-      in_drn_dt = drn_dt)
+      get_hydrowindow_emmeans( 
+        best_dt = hydrowindow_perf_tables$best,
+        permutations_dt = ssn_div_hydrowindow_permutations,
+        in_hydro_vars_dt = hydro_vars_dt,
+        in_drn_dt = drn_dt)
     }
   )
   
 )
-
 
 
 temporal_analysis_permutations <- list(
@@ -1382,6 +1362,8 @@ temporal_analysis_targets_combined <- list(
   ,
   
   tar_target(
+    #For richness: combine model characteristics and performances 
+    #across all organism groups and metrics for best models
     hydrowindow_best_richness_intercept_dt,
     list(
       miv_nopools = hydrowindow_perf_tables_richness_miv_nopools$best,
@@ -1400,6 +1382,7 @@ temporal_analysis_targets_combined <- list(
   )
   ,
   
+  #For richness: combine variance decomposition analysis across all organism groups and metrics
   tar_target(
     hydrowindow_varcomp_richness_multiorg,
     list(
@@ -1417,7 +1400,9 @@ temporal_analysis_targets_combined <- list(
   )
   ,
   
-  #Combine performance tables
+  #For inverse simpson index: 
+  #combine model characteristics and performances 
+  #across all organism groups and metrics for best models
   tar_target(
     hydrowindow_best_invsimpson_intercept_dt,
     list(
@@ -1437,6 +1422,8 @@ temporal_analysis_targets_combined <- list(
   )
   ,
   
+  #For inverse simpson index 
+  #combine variance decomposition analysis across all organism groups and metrics
   tar_target(
     hydrowindow_varcomp_invsimpson_multiorg,
     list(
@@ -1454,6 +1441,7 @@ temporal_analysis_targets_combined <- list(
   )
   ,
   
+  #Format table and plot variance decomposition for richness across all organisms
   tar_target(
     varcomp_multiorganism_richness,
     plot_varcomp_multiorganisms(
@@ -1465,6 +1453,7 @@ temporal_analysis_targets_combined <- list(
   )
   ,
   
+  #Format table and plot variance decomposition for inverse simpson index across all organisms
   tar_target(
     varcomp_multiorganism_invsimpson,
     plot_varcomp_multiorganisms(
@@ -1476,6 +1465,7 @@ temporal_analysis_targets_combined <- list(
   )
   ,
   
+  #For richness: format table and plot estimated marginal trends for all models across organisms 
   tar_target(
     emtrends_multiorganism_all_richness,
     plot_emtrends_multiorganisms(
@@ -1500,6 +1490,7 @@ temporal_analysis_targets_combined <- list(
   )
   ,
   
+  #For richness: format table and plot estimated marginal trends for best models across organisms
   tar_target(
     emtrends_multiorganism_best_richness,
     plot_emtrends_multiorganisms(
@@ -1524,6 +1515,7 @@ temporal_analysis_targets_combined <- list(
   )
   ,
   
+  #For inverse simpson index: format table and plot estimated marginal trends for best models across organisms
   tar_target(
     emtrends_multiorganism_best_invsimpson,
     plot_emtrends_multiorganisms(emtrends_list = list(
@@ -1546,6 +1538,8 @@ temporal_analysis_targets_combined <- list(
   )
   ,
   
+  #Format final summary table and plot of best models for richness
+  #(main text figure, to test H1 and H2a-c)
   tar_target(
     summary_multiorganism_richness,
     get_hydrowindown_multiorganism_summary(
@@ -1558,21 +1552,16 @@ temporal_analysis_targets_combined <- list(
   )
   ,
 
+  #Test hypothesis and plot marginal trend differences 
+  #between sediment and biofilm richness through meta-analysis (H2d)
   tar_target(
     biof_vs_sedi_emtrends_rma_table,
     test_biof_vs_sedi_emtrends(emtrends_dt=emtrends_multiorganism_all_richness$dt,
                                out_dir=figdir)
   )
   ,
-
-  tar_target(
-    country_ranking_test_table,
-    test_country_emtrends(emtrends_dt=emtrends_multiorganism_best_richness$dt,
-                          permutations_dt = hydrowindow_permutations_all_dt,
-                          out_dir = figdir)
-  )
-  ,
   
+  #Test and plot hypothesis of relative influence of hydrological and spatial factors (H3)
   tar_target(
     hydrowindow_multiorganism_varcomp_boxplot,
     get_hydrowindow_multiorganism_varcomp_boxplot(
@@ -1581,10 +1570,19 @@ temporal_analysis_targets_combined <- list(
       out_dir=figdir
     )
   )
+  ,
+  
+  #Test and plot hypothesis of gradient in drying sensitivity across DRNs (H4)
+  tar_target(
+    country_ranking_test_table,
+    test_country_emtrends(emtrends_dt=emtrends_multiorganism_best_richness$dt,
+                          permutations_dt = hydrowindow_permutations_all_dt,
+                          out_dir = figdir)
+  )
 )
 
 ##############################################################################
-### MODEL SITES SUMMARIZED ###################################################
+### MODEL SITES SUMMARIZED (AVERAGED ACROSS SAMPLING PERIOD) #################
 ##############################################################################
 
 annual_analysis_targets <- list(   
@@ -1626,6 +1624,7 @@ annual_analysis_targets <- list(
   # )
   # ,
   
+  #Model selection workflow for each organism group and diversity metric ------
   tar_target(
     ssn_mods_miv_richness_yr,
     model_miv_richness_yr(in_ssn_eu_summarized = ssn_eu_summarized,
@@ -1755,6 +1754,7 @@ annual_analysis_targets <- list(
   )
   ,
   
+  #Get fitted selected model for all organism groups 
   tar_target(
     ssn_mod_yr_fit_multiorganism,
     list(
@@ -1778,6 +1778,7 @@ annual_analysis_targets <- list(
   )
   ,
   
+  #Format summary table of performance across all selected models
   tar_target(
     ssn_mod_yr_perf_multiorganism,
     get_perf_table_modyr_multiorganism(in_mod_list=ssn_mod_yr_fit_multiorganism)
@@ -1785,6 +1786,8 @@ annual_analysis_targets <- list(
   
   ,
   
+  #Plot estimated marginal means, scatterplot of obs vs. pred, and variance decomposition
+  #for each selected model
   tar_target(
     ssn_mod_yr_diagplot_multiorganism,
     lapply(names(ssn_mod_yr_fit_multiorganism), function(mod_name) {
@@ -1811,6 +1814,8 @@ annual_analysis_targets <- list(
   )
   ,
   
+  #Create a mosaic plot of selected models with pseduo-R2>30% 
+  #(explained variance by fixed effects)
   tar_target(
     diagplots_mosaic,
     mosaic_mod_yr_diagplots(
@@ -1819,7 +1824,8 @@ annual_analysis_targets <- list(
   )
   ,
   
-  #Compute statistics for two horizons: 2041-2070 and 2071-2100
+  #Predict mean annual richess for two horizons: 2041-2070 and 2071-2100
+  #for the different scenarios and GCMs
   tar_target(
     ssn_proj_dt,
     lapply(names(ssn_mod_yr_fit_multiorganism), function(in_mod_fit) {
@@ -1836,6 +1842,8 @@ annual_analysis_targets <- list(
   )
   ,
   
+  #Compute changes in richness averaged over the historical and late-century periods
+  #for the different scenarios and GCMs
   tar_target(
     future_change_dt,
     lapply(names(ssn_mod_yr_fit_multiorganism), function(in_mod_fit) {
@@ -1850,6 +1858,7 @@ annual_analysis_targets <- list(
   )
   ,
   
+  #Plot predicted changes in richness and signal-to-noise ratio
   tar_target(
     ssn_proj_plots,
     plot_ssn_proj(in_future_sims_dt =future_change_dt %>%
@@ -1871,6 +1880,7 @@ annual_analysis_targets <- list(
 )
 
 
+#Concatenate all targets for running targets
 list(preformatting_targets
      , mapped_hydrotargets
      , combined_hydrotargets
