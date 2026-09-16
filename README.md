@@ -155,7 +155,7 @@ summary_results_list <- tar_read(summary_multiorganism_richness) #Load target in
 ### **Lexicon**
 
 | **Term** | **Definition** |
-|------------------------------------|------------------------------------|
+|----|----|
 | **DRN** | Drying River Network. A river network characterized by intermittent flow (periods of flowing, pooling, and drying). The study focuses on 6 DRNs across Europe. |
 | **miv, ept, och, dia, fun, bac** | Macroinvertebrates, EPT (Ephemeroptera, Plecoptera, Trichoptera), OCH (Odonata, Coleoptera, Hephemeroptera), diatoms, fungi, and bacteria |
 | **sedi and biof** | Sediment and biofilm sampling substrates. Samples collected from riverbed sediments. |

@@ -73,6 +73,39 @@ check_fr <- allvars_summarized$dt[!duplicated(site) & country == 'France',
                                      .(DurD_samp, stream_type)]
 allvars_summarized$dt[!duplicated(site), .N, 
                          by=.(stream_type, country)]
+
+```
+
+```{r hydrowindow_stats}
+tar_load(summary_multiorganism_richness)
+
+summary_multiorganism_richness$dt[, .SD[test_parabolic==T, .N]/.N, by=organism]
+
+
+tar_load(biof_vs_sedi_emtrends_rma_table)
+biof_vs_sedi_emtrends_rma_table$dt[, .SD[pval>0.05 | I2 > 0.25, .N]/.SD[,.N]]
+```
+
+
+
+```{r site_gamma}
+tar_load(allvars_summarized)
+richness_stats <- rbind(
+  allvars_summarized$dt[, list(mean_richness_avg = mean(mean_richness),
+                               mean_richness_sd = sd(mean_richness)), 
+                        by=.(country, organism)],
+  allvars_summarized$dt[, list(country='All',
+                               mean_richness_avg=mean(mean_richness),
+                               mean_richness_sd=sd(mean_richness)),
+                        by=organism]
+)
+
+ggplot(richness_stats, aes(x=country, y=mean_richness_avg, fill=country)) +
+  geom_bar(stat='identity') +
+  facet_wrap(~organism, scale='free')
+
+richness_stats
+
 ```
 
 ```{r maps}
@@ -91,6 +124,67 @@ map_durdsamp <- map_ssn_facets(in_ssn = in_ssn_summarized[[1]]$ssn,
 )
 ggsave(file.path(figdir, 'map_DurD_samp.pdf'),
        map_durdsamp, height = 12, width=8)
+```
+
+```{r export all mean annual richness model tables}
+ssn_mods_yr_table_list <- list(
+  miv_richness = tar_read(ssn_mods_miv_richness_yr)$model_selection_table,
+  miv_invsimpson = tar_read(ssn_mods_miv_invsimpson_yr)$model_selection_table,
+  ept_richness = tar_read(ssn_mods_ept_richness_yr)$model_selection_table,
+  och_richness = tar_read(ssn_mods_och_richness_yr)$model_selection_table,
+  dia_sedi_richness = tar_read(ssn_mods_dia_sedi_richness_yr)$model_selection_table,
+  dia_sedi_invsimpson = tar_read(ssn_mods_dia_sedi_invsimpson_yr)$model_selection_table,
+  dia_biof_richness = tar_read(ssn_mods_dia_biof_richness_yr)$model_selection_table,
+  dia_biof_invsimpson = tar_read(ssn_mods_dia_biof_invsimpson_yr)$model_selection_table,
+  fun_sedi_richness = tar_read(ssn_mods_fun_sedi_richness_yr)$model_selection_table,
+  fun_sedi_invsimpson = tar_read(ssn_mods_fun_sedi_invsimpson_yr)$model_selection_table,
+  fun_biof_richness = tar_read(ssn_mods_fun_biof_richness_yr)$model_selection_table,
+  fun_biof_invsimpson = tar_read(ssn_mods_fun_biof_invsimpson_yr)$model_selection_table,
+  bac_sedi_richness = tar_read(ssn_mods_bac_sedi_richness_yr)$model_selection_table,
+  bac_sedi_invsimpson = tar_read(ssn_mods_bac_sedi_invsimpson_yr)$model_selection_table,
+  bac_biof_richness = tar_read(ssn_mods_bac_biof_richness_yr)$model_selection_table,
+  bac_biof_invsimpson = tar_read(ssn_mods_bac_biof_invsimpson_yr)$model_selection_table
+) 
+
+organism_col <- as.data.table(lapply(ssn_mods_yr_table_list, nrow)) %>%
+  data.table::melt(variable.name='organism_var') %>%
+  .[, list(organism_var=rep(organism_var, value))]
+
+family_dt <- lapply(tar_read(ssn_mod_yr_fit_multiorganism), function(x) {
+  call <- x$call
+  if ('family'  %in% names(call)) {
+    call$family
+  } else {
+    'Gaussian'
+  }
+}) %>% as.matrix(family) %>%
+  as.data.table(keep.rownames=T) %>%
+  setnames(c('organism_var', 'family'))
+
+ssn_mods_yr_dt_merged <- lapply(ssn_mods_yr_table_list, 
+                             function(x) as.data.table(x, keep.rownames=T)) %>%
+  rbindlist(fill=T, use.names=T) %>%
+  cbind(organism_col, .) %>%
+  merge(family_dt, by='organism_var')
+
+fwrite(ssn_mods_yr_dt_merged,
+       file.path(figdir, 
+                 paste0('multiorganism_yr_model_selection_tables_',
+                        format(Sys.Date(), '%Y%m%d'), '.csv'))
+)
+
+
+
+```
+
+```{r count variables}
+setdiff(hydrowindow_varcomp_richness_miv_nopools$dt[, unique(hydro_var)],
+        'null')
+
+setdiff(allvars_summarized$cols$hydro_con_summarized,
+        c('qsim_avg_samp', 'DurD_yr', 'DurD_avg_samp'))
+
+
 ```
 
 ```{r summarized model table and plots}
@@ -152,7 +246,7 @@ ssn_proj_plots$all_absdiff_stats_dt[
   .SD[mean_change < -5,.N]/.N] 
 
 
-ssn_proj_plots$all_absdiff_stats_dt[variable==div_change_abs_late, 
+ssn_proj_plots$all_absdiff_stats_dt[variable=='div_change_abs_late', 
                  mean(mean_change),
                  ]
 
